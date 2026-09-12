@@ -1,0 +1,37 @@
+name = "claude"
+bin = "claude"
+verified = true
+source = "verified against claude 2.1.236, including the four-way permission test in offices/README.md"
+herdr_kind = "claude"
+
+# {dirs} and {settings} both come BEFORE the prompt, and {dirs} is variadic
+# (--add-dir takes a list), so the "--" separator below is what actually keeps
+# the positional prompt from being swallowed.
+launch = "{bin} {dirs} {settings} {model} {effort} {prompt}"
+prompt_mode = "argv"
+prompt_flag = ""
+argv_separator = true
+
+# Permissions live in a per-errand settings file, rendered from the office's own
+# offices/<office>.settings.json. That file is the single owner, so there is no
+# perm_flag here: two owners of one policy drift and then neither is true.
+#
+# Why a settings file rather than a flag, measured not assumed:
+#   --permission-mode acceptEdits    stalls on an unusual Bash command
+#   --permission-mode bypassPermissions   stalls on a consent dialog
+#   --dangerously-skip-permissions   stalls on the same consent dialog
+#   --settings <file> with an allow list   works, no dialog, no prompt
+# The full table and the reasoning are in offices/README.md.
+perm_flag = ""
+settings_flag = "--settings {settings}"
+
+# Grants tool access to the errand directory, where the brief, the status file
+# and the report live. Without it a hand refuses its own first read with
+# "that path is outside my working directory".
+dirs_flag = "--add-dir {dir}"
+
+model_flag = "--model {model}"
+effort_flag = ""
+env = ["CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false"]
+instruction_files = ["CLAUDE.md", "AGENTS.md"]
+detect_env = ["CLAUDECODE", "CLAUDE_CODE_SESSION_ID"]

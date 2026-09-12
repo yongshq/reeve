@@ -1,0 +1,5 @@
+.DS_Store
+
+# The operational home lives outside this repo, at $REEVE_HOME (default
+# ~/.reeve), and is its own private repository. Nothing runtime belongs here:
+# this repo is the code, that one is the household.

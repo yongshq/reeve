@@ -1,0 +1,23 @@
+name = "opencode"
+bin = "opencode"
+verified = false
+source = "published flags plus firstmate launch templates. Not installed here, never run."
+herdr_kind = "opencode"
+
+# opencode takes its prompt behind a flag rather than positionally, and carries
+# its permission posture in config content rather than a CLI flag.
+launch = "{bin} {model} {prompt}"
+prompt_mode = "flag"
+prompt_flag = "--prompt"
+perm_flag = ""
+model_flag = "--model {model}"
+effort_flag = ""
+env = ["OPENCODE_CONFIG_CONTENT={\"permission\":{\"*\":\"allow\"}}"]
+instruction_files = ["AGENTS.md"]
+detect_env = ["OPENCODE_CONFIG_CONTENT", "OPENCODE_BIN_PATH"]
+
+# UNVERIFIED. Does this CLI sandbox tool access to the working directory? If it
+# does, it needs the equivalent of claude's --add-dir pointed at {dir}, or every
+# hand will stall on its first read of the brief. Leave empty only after testing.
+dirs_flag = ""
+argv_separator = false

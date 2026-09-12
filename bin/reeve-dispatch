@@ -1,0 +1,193 @@
+#!/usr/bin/env bash
+# Send an errand out. Creates the worktree, opens a session endpoint, launches
+# the hand, records where it went.
+#
+# Usage:
+#   reeve-dispatch <id> [--backend NAME] [--harness NAME] [--model M] [--effort E]
+#                       [--allow-unverified] [--dry-run]
+#
+# --dry-run prints every command it would run and changes nothing. Use it when
+# you are unsure: this is the one script in the household that mutates a repo.
+
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/reeve-lib.sh"
+BIN=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+
+id=${1:-}; shift 2>/dev/null || :
+backend='' harness='' model='' effort='' allow_unverified=no dry=no
+while [ $# -gt 0 ]; do
+  case $1 in
+    --backend) backend=${2:-}; shift 2 ;;
+    --harness) harness=${2:-}; shift 2 ;;
+    --model)   model=${2:-}; shift 2 ;;
+    --effort)  effort=${2:-}; shift 2 ;;
+    --allow-unverified) allow_unverified=yes; shift ;;
+    --dry-run) dry=yes; shift ;;
+    -h|--help) sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) die "unknown option '$1'" ;;
+  esac
+done
+require_id "$id"
+
+run() { if [ "$dry" = yes ]; then printf '  would run: %s\n' "$*"; else "$@"; fi; }
+
+# --- the brief must be complete -------------------------------------------
+brief=$(brief_file "$id")
+[ -f "$brief" ] || die "no brief for '$id'. write one first: reeve-brief $id <holding> --office <office>"
+for seam in '{INTENT}' '{SPEC}'; do
+  if grep -qF -- "$seam" "$brief" 2>/dev/null; then
+    die "brief still has the $seam seam unfilled. a hand must never be sent a half written brief: $brief"
+  fi
+done
+
+office=$(meta_get "$id" office)
+holding=$(meta_get "$id" holding)
+repo=$(meta_get "$id" repo)
+worktree=$(meta_get "$id" worktree)
+branch=$(meta_get "$id" branch)
+base=$(meta_get "$id" base main)
+writes=$(meta_get "$id" writes yes)
+[ -n "$office" ] && [ -n "$repo" ] || die "errand '$id' has no usable metadata at $(meta_file "$id")"
+
+# already out?
+existing=$(meta_get "$id" target '')
+if [ -n "$existing" ]; then
+  st=$("$BIN/reeve-backend" call agent_state "$existing" --backend "$(meta_get "$id" backend herdr)" 2>/dev/null || echo unreadable)
+  case $st in
+    alive) die "errand '$id' is already running at $existing. steer it or tear it down; do not dispatch twice onto one worktree" ;;
+    unreadable) die "errand '$id' has an endpoint at $existing whose state cannot be read. investigate before dispatching again: a second hand on a live worktree is the one failure that loses work" ;;
+  esac
+  warn "errand '$id' had a previous endpoint ($existing, now $st), relaunching"
+fi
+
+# --- resolve the two axes, and refuse rather than substitute ---------------
+backend=$("$BIN/reeve-backend" resolve ${backend:+--backend "$backend"}) || exit 1
+harness=$("$BIN/reeve-harness" resolve ${harness:+--harness "$harness"} --office "$office") || exit 1
+
+if ! out=$("$BIN/reeve-backend" call available --backend "$backend" 2>&1); then
+  die "backend '$backend' is not usable: $out"
+fi
+if ! out=$("$BIN/reeve-harness" check "$harness" 2>&1); then
+  if [ "$allow_unverified" = yes ]; then
+    warn "dispatching on UNVERIFIED harness '$harness' because you asked. If it misbehaves, that is the reason."
+    warn "$(printf '%s' "$out" | head -2 | tr '\n' ' ')"
+  else
+    printf '%s\n' "$out" >&2
+    exit 1
+  fi
+fi
+
+# --- preflight: will this harness actually be able to start here -----------
+# claude keys folder trust to the git repository, so a worktree of an untrusted
+# repository raises a dialog no hand can answer. Refusing here costs a second;
+# discovering it later costs a hand that looks alive forever.
+if [ "$harness" = claude ] && [ "$writes" != home ]; then
+  if ! "$BIN/reeve-trust" --check "$repo" >/dev/null 2>&1; then
+    printf 'reeve: refusing to dispatch into %s\n' "$repo" >&2
+    "$BIN/reeve-trust" --check "$repo" 2>&1 >/dev/null | sed 's/^/  /' >&2
+    exit 1
+  fi
+fi
+
+# --- the worktree ----------------------------------------------------------
+# Created with git, not with the backend. `git worktree` behaves identically
+# everywhere, and herdr's own worktree command defaults to its own directory
+# with a random branch name, which is not the household's convention.
+
+if [ "$writes" = home ]; then
+  cwd=$REEVE_HOME_D          # the steward works in the home, it has no worktree
+else
+  [ -n "$worktree" ] || die "errand '$id' has no worktree path recorded"
+  [ -e "$worktree" ] && die "worktree path already exists: $worktree. pick another errand id or clean that up first"
+  git -C "$repo" rev-parse --verify --quiet "$base" >/dev/null \
+    || die "base ref '$base' does not exist in $repo"
+  if [ -n "$branch" ]; then
+    git -C "$repo" rev-parse --verify --quiet "refs/heads/$branch" >/dev/null \
+      && die "branch '$branch' already exists in $repo. git refuses the same branch in two worktrees, which is the collision guard; pick another errand id"
+  fi
+  run mkdir -p "$(dirname "$worktree")"
+  if [ -n "$branch" ]; then
+    run git -C "$repo" worktree add "$worktree" -b "$branch" "$base" || die "git worktree add failed"
+  else
+    # read-only offices get a detached checkout so an investigation never
+    # leaves a branch behind that nobody will ever merge
+    run git -C "$repo" worktree add --detach "$worktree" "$base" || die "git worktree add failed"
+  fi
+  cwd=$worktree
+
+  # Optional warm-up. A fresh worktree has no ignored files: no installed
+  # dependencies, no build output, no env file. On this machine that costs
+  # almost nothing, because pnpm hardlinks from a content addressed store and a
+  # full install in a cold worktree measured 184ms. Other holdings will not be
+  # so lucky, so a holding may declare `setup:` in manors.md and dispatch runs
+  # it here, before the hand ever sees the directory.
+  #
+  # This is deliberately not a pool of pre-warmed leased worktrees. A pool buys
+  # back only this step, and costs a cwd discovery race, residue leaking between
+  # errands, paths that ignore the household's convention, and another tool to
+  # keep working. Run the setup command instead.
+  setup=$(holding_field "$holding" setup '')
+  if [ -n "$setup" ]; then
+    info "warming the copy: $setup"
+    if [ "$dry" = yes ]; then
+      printf '  would run: (cd %s && %s)\n' "$worktree" "$setup"
+    elif ! ( cd "$worktree" && eval "$setup" ) >"$(errand_dir "$id")/setup.log" 2>&1; then
+      warn "the setup command failed. Its output is in $(errand_dir "$id")/setup.log"
+      warn "dispatching anyway: the hand is told to expect an unset copy, and a"
+      warn "setup failure is often the very thing worth investigating."
+    fi
+  fi
+fi
+
+# --- endpoint and launch ---------------------------------------------------
+label="reeve-$id"
+if [ "$dry" = yes ]; then
+  printf '  would run: reeve-backend call create_endpoint %s %s --backend %s\n' "$cwd" "$label" "$backend"
+  target='<target>'
+else
+  target=$("$BIN/reeve-backend" call create_endpoint "$cwd" "$label" --backend "$backend") \
+    || die "could not open a session endpoint on backend '$backend'"
+  [ -n "$target" ] || die "backend '$backend' returned an empty target"
+fi
+
+# Per-errand permissions, copied from the office's own declaration into the
+# errand directory. Copied rather than referenced so that changing an office
+# later cannot retroactively alter what an errand already in flight may do.
+office_settings="$REEVE_ROOT_D/offices/$office.settings.json"
+errand_settings="$(errand_dir "$id")/settings.json"
+if [ -f "$office_settings" ]; then
+  cp "$office_settings" "$errand_settings"
+else
+  warn "office '$office' declares no settings.json, the hand will run on harness defaults and may stall on a permission prompt"
+  errand_settings=''
+fi
+
+cmdline=$("$BIN/reeve-harness" render "$harness" "$brief" \
+            ${errand_settings:+--settings "$errand_settings"} \
+            ${model:+--model "$model"} ${effort:+--effort "$effort"}) \
+  || die "could not render a launch line for harness '$harness'"
+
+if [ "$dry" = yes ]; then
+  printf '  would run: reeve-backend call launch %s <cmdline> --backend %s\n' "$target" "$backend"
+  printf '\ncmdline:\n  %s\n' "$cmdline"
+  printf '\nnothing was changed.\n'
+  exit 0
+fi
+
+"$BIN/reeve-backend" call launch "$target" "$cmdline" --backend "$backend" \
+  || die "endpoint opened at $target but the launch line could not be submitted. investigate before retrying: the worktree exists and a second attempt could start two hands on it"
+
+meta_set "$id" backend "$backend"
+meta_set "$id" harness "$harness"
+meta_set "$id" target "$target"
+meta_set "$id" cwd "$cwd"
+[ -n "$model" ]  && meta_set "$id" model "$model"
+[ -n "$effort" ] && meta_set "$id" effort "$effort"
+meta_set "$id" dispatched "$(date +%Y-%m-%dT%H:%M:%S)"
+touch "$(status_file "$id")"
+
+info "dispatched $id"
+info "  office   $office on $harness via $backend"
+info "  copy     $cwd"
+[ -n "$branch" ] && info "  branch   $branch (from $base)" || info "  branch   none, detached at $base"
+info "  running  $target"
+info "  status   $(status_file "$id")"

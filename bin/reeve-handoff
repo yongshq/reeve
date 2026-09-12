@@ -1,0 +1,92 @@
+#!/usr/bin/env bash
+# Write and find reeve handoffs. Single owner of the handoff format.
+#
+# Usage:
+#   reeve-handoff new <manor>      scaffold one, print its path
+#   reeve-handoff newest [manor]   path of the most recent, if any
+#   reeve-handoff list [manor]
+#
+# A handoff exists because of a specific gap. Nearly everything the reeve knows
+# already survives a reset: errand records, briefs, reports, status logs and
+# memory are all on disk, and `reeve-status --all` rebuilds the fleet from them.
+# What does NOT survive is the conversation: the goal above the individual
+# errands, threads raised but not yet dispatched, and decisions made in chat
+# that never reached a brief. That is about one page, and this is where it goes.
+#
+# The factual sections are filled in from disk. The judgement sections are left
+# as seams for the reeve, the same way a brief leaves {INTENT} and {SPEC},
+# because a handoff written by a script is a status report and not a handoff.
+
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/reeve-lib.sh"
+BIN=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+
+handoffs_dir() { printf '%s/handoffs\n' "$REEVE_HOME_D"; }
+
+cmd=${1:-}; manor=${2:-}
+
+case $cmd in
+  list)
+    d=$(handoffs_dir); [ -d "$d" ] || { info "no handoffs yet"; exit 0; }
+    ls -t "$d"/${manor:+$manor-}*.md 2>/dev/null | while read -r f; do
+      printf '  %-44s %s\n' "$(basename "$f")" "$(grep -m1 '^- \*\*Status:\*\*' "$f" 2>/dev/null | sed 's/.*Status:\*\* //')"
+    done
+    ;;
+
+  newest)
+    d=$(handoffs_dir); [ -d "$d" ] || exit 1
+    f=$(ls -t "$d"/${manor:+$manor-}*.md 2>/dev/null | head -1)
+    [ -n "$f" ] || exit 1
+    printf '%s\n' "$f"
+    ;;
+
+  new)
+    [ -n "$manor" ] || die "which manor? reeve-handoff new <manor>"
+    d=$(handoffs_dir); mkdir -p "$d"
+    stamp=$(date +%Y-%m-%d-%H%M)
+    f="$d/$manor-$stamp.md"
+    [ -e "$f" ] && die "a handoff for this minute already exists: $f"
+
+    prev=$("$0" newest "$manor" 2>/dev/null || true)
+
+    {
+      printf '# Handoff: {TITLE}\n\n'
+      printf -- '- **Written:** %s · **Manor:** %s · **Reeve home:** `%s`\n' \
+        "$(date '+%Y-%m-%d %H:%M')" "$manor" "$REEVE_HOME_D"
+      printf -- '- **Status:** open\n'
+      printf -- '- **Supersedes:** %s\n' "$([ -n "$prev" ] && basename "$prev" || printf '_None._')"
+      printf -- '- **Resume with:** {RESUME}\n\n'
+
+      printf '## The goal\n\n'
+      printf '{GOAL}\n\n'
+
+      printf '## In flight\n\n'
+      printf 'Recorded from disk at the time of writing. `reeve-status --all` is the live truth;\n'
+      printf 'this is here so a reader knows what the session was holding.\n\n'
+      printf '```\n'
+      "$BIN/reeve-status" --all 2>/dev/null || printf 'none\n'
+      printf '```\n\n'
+
+      printf '## Open with the liege\n\n'
+      printf 'Raised in conversation, not yet an errand. This is the part that does not survive a\n'
+      printf 'reset on its own, so be specific: a vague line here is the same as no line.\n\n'
+      printf '{OPEN}\n\n'
+
+      printf '## Decided this session\n\n'
+      printf 'Choices made in chat that are not yet written into a brief, a memory entry or the\n'
+      printf 'repository. Anything durable enough to outlive the next few days belongs in memory\n'
+      printf 'instead, through `/inscribe`, and should be listed here only as a pointer.\n\n'
+      printf '{DECIDED}\n\n'
+
+      printf '## Next\n\n'
+      printf 'The specific next action, and whose move it is. Never leave this as "continue".\n\n'
+      printf '{NEXT}\n'
+    } > "$f"
+
+    info "handoff scaffolded: $f"
+    info "seams to fill: {TITLE} {RESUME} {GOAL} {OPEN} {DECIDED} {NEXT}"
+    [ -n "$prev" ] && info "supersedes: $(basename "$prev")"
+    ;;
+
+  ''|-h|--help) sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//' ;;
+  *) die "unknown command '$cmd'. try: new, newest, list" ;;
+esac

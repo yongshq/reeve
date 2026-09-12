@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+# How full is the reeve's own context window.
+#
+# Usage:
+#   reeve-context            one line, and an exit code that means something
+#   reeve-context --percent  just the number
+#
+# Exit: 0 comfortable, 1 getting full (past the threshold), 2 unknown.
+#
+# The model cannot see its own context usage. The statusline can, and writes the
+# figure to $REEVE_HOME/state/context on every render. So this reads a number
+# somebody else measured, which is the only honest way to get it.
+#
+# An unknown reading is reported as unknown and never guessed at. A reeve that
+# invented a context figure would hand off at the wrong moment, or worse, fail
+# to.
+
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/reeve-lib.sh"
+
+f="$REEVE_HOME_D/state/context"
+threshold=$(config_get context-threshold 50)
+
+if [ ! -f "$f" ]; then
+  [ "${1:-}" = "--percent" ] && { printf 'unknown\n'; exit 2; }
+  info "context usage unknown"
+  info "  the statusline writes this. If it is missing, either no statusline has"
+  info "  rendered since the home was created, or the gauge is not installed."
+  info "  see docs/context-and-handoff.md"
+  exit 2
+fi
+
+pct=$(tr -dc '0-9.' < "$f" | cut -d. -f1)
+[ -n "$pct" ] || { info "context gauge is present but unreadable"; exit 2; }
+
+if [ "${1:-}" = "--percent" ]; then printf '%s\n' "$pct"; exit 0; fi
+
+age=$(( $(date +%s) - $(stat -f %m "$f" 2>/dev/null || echo 0) ))
+stale=''
+[ "$age" -gt 600 ] && stale=" (last measured ${age}s ago, so possibly stale)"
+
+if [ "$pct" -ge "$threshold" ]; then
+  printf 'context %s%% of the window, past the %s%% mark%s\n' "$pct" "$threshold" "$stale"
+  printf 'Offer the liege a handoff. Do not act on this alone: a reset is their call,\n'
+  printf 'and mid-errand is the wrong moment for it.\n'
+  exit 1
+fi
+printf 'context %s%% of the window, comfortable%s\n' "$pct" "$stale"
+exit 0

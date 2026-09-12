@@ -1,0 +1,21 @@
+name = "gemini"
+bin = "gemini"
+verified = false
+source = "published flags. Not installed here, never run."
+herdr_kind = "gemini"
+
+launch = "{bin} {perm} {model} {prompt}"
+prompt_mode = "argv"
+prompt_flag = ""
+perm_flag = "-y"
+model_flag = "-m {model}"
+effort_flag = ""
+env = []
+instruction_files = ["GEMINI.md", "AGENTS.md"]
+detect_env = ["GEMINI_CLI", "GEMINI_API_KEY"]
+
+# UNVERIFIED. Does this CLI sandbox tool access to the working directory? If it
+# does, it needs the equivalent of claude's --add-dir pointed at {dir}, or every
+# hand will stall on its first read of the brief. Leave empty only after testing.
+dirs_flag = ""
+argv_separator = false

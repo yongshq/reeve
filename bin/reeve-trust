@@ -1,0 +1,92 @@
+#!/usr/bin/env bash
+# Folder trust for the claude harness. Harness specific on purpose: the file it
+# reads and the flag it sets belong to claude and to nothing else.
+#
+# Usage:
+#   reeve-trust --check <repo-path>     exit 0 if trusted, 1 if not, 2 if unknown
+#   reeve-trust --grant <repo-path>     record trust, after backing the file up
+#   reeve-trust --list
+#
+# Why this exists. A directory claude has not been trusted for raises a full
+# screen "Is this a project you created or one you trust?" dialog that no
+# permission setting suppresses. A hand cannot answer it, so it sits there
+# looking exactly like a hand that is thinking. Measured: trust resolves to the
+# git REPOSITORY, not the directory, so every worktree of a trusted repository
+# inherits it and every worktree of an untrusted one stalls.
+#
+# Granting is never automatic. This writes to the liege's own global claude
+# configuration, so it is a command they run knowingly, once per repository.
+
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/reeve-lib.sh"
+
+CFG="${CLAUDE_CONFIG:-$HOME/.claude.json}"
+
+mode=${1:-}; target=${2:-}
+case $mode in
+  --check|--grant)
+    [ -n "$target" ] || die "$mode needs a repository path"
+    [ -d "$target" ] || die "no such directory: $target"
+    # trust follows the repository, so resolve to its toplevel first
+    target=$(git -C "$target" rev-parse --show-toplevel 2>/dev/null || (cd "$target" && pwd))
+    ;;
+  --list) ;;
+  *) sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+esac
+
+[ -f "$CFG" ] || { [ "$mode" = --check ] && exit 2; die "no claude config at $CFG"; }
+
+case $mode in
+  --list)
+    python3 - "$CFG" <<'PY'
+import json,sys
+d=json.load(open(sys.argv[1]))
+for p,v in sorted(d.get('projects',{}).items()):
+    print(f"  {str(v.get('hasTrustDialogAccepted')):5}  {p}")
+PY
+    ;;
+
+  --check)
+    python3 - "$CFG" "$target" <<'PY'
+import json,sys
+cfg,repo=sys.argv[1],sys.argv[2]
+try: d=json.load(open(cfg))
+except Exception: sys.exit(2)
+v=d.get('projects',{}).get(repo)
+if v is None: sys.exit(1)
+sys.exit(0 if v.get('hasTrustDialogAccepted') is True else 1)
+PY
+    rc=$?
+    case $rc in
+      0) info "trusted: $target" ;;
+      1) printf 'NOT TRUSTED: %s\n' "$target" >&2
+         printf 'Every hand dispatched into a worktree of this repository will stall on a\n' >&2
+         printf 'folder trust dialog it cannot answer. Fix it once, either way:\n' >&2
+         printf '  reeve-trust --grant %s\n' "$target" >&2
+         printf '  or open the repository in claude yourself and accept the prompt\n' >&2 ;;
+    esac
+    exit $rc
+    ;;
+
+  --grant)
+    bak="$CFG.reeve-backup.$(date +%Y%m%d%H%M%S)"
+    cp "$CFG" "$bak" || die "could not back up $CFG"
+    # Written via a temp file and rename so an interrupted write cannot leave
+    # the liege with a truncated claude configuration.
+    python3 - "$CFG" "$target" "$bak" <<'PY'
+import json,sys,os
+cfg,repo,bak=sys.argv[1],sys.argv[2],sys.argv[3]
+with open(cfg) as f: d=json.load(f)
+projects=d.setdefault('projects',{})
+entry=projects.setdefault(repo,{})
+before=entry.get('hasTrustDialogAccepted')
+entry['hasTrustDialogAccepted']=True
+tmp=cfg+'.reeve.tmp'
+with open(tmp,'w') as f: json.dump(d,f,indent=2)
+os.replace(tmp,cfg)
+print(f"  {repo}")
+print(f"  hasTrustDialogAccepted: {before} -> True")
+print(f"  backup: {bak}")
+PY
+    info "granted. hands can now work in worktrees of this repository"
+    ;;
+esac

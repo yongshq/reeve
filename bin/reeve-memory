@@ -1,0 +1,254 @@
+#!/usr/bin/env bash
+# Read, write, age and budget the household's memory.
+#
+# Usage:
+#   reeve-memory list    [--scope SCOPE] [--stale] [--all]
+#   reeve-memory add     --scope SCOPE [--tier a|p|P] <fact>
+#   reeve-memory refresh --scope SCOPE <match>
+#   reeve-memory strike  --scope SCOPE <match>
+#   reeve-memory budget
+#   reeve-memory stale
+#
+# SCOPE is `liege` or `manor:<name>`.
+#
+# An entry is one line, one fact, with a trailing marker:
+#
+#   - the fact, in a sentence <!--a:2026-09-13-->
+#
+#   a  aging       goes stale after 30 days unreinforced
+#   p  perishable  goes stale after 7
+#   P  pinned      never decays
+#
+# The date is when evidence last reinforced the entry, not when it was written.
+# Stale never means deleted: `strike` moves an entry to archive.md, which is
+# append only and never loaded, so nothing is ever lost and nothing costs
+# context once retired.
+#
+# This script does mechanics only. Whether a fact is TRUE, whether there is
+# evidence for it, and which scope it belongs in are judgements, and they belong
+# to the steward and the `memory` skill, never here.
+
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/reeve-lib.sh"
+
+AGING_DAYS=30
+PERISH_DAYS=7
+
+cmd=${1:-}; shift 2>/dev/null || :
+scope='' tier=a stale_only=no show_all=no
+args=()
+while [ $# -gt 0 ]; do
+  case $1 in
+    --scope) scope=${2:-}; shift 2 ;;
+    --tier)  tier=${2:-a}; shift 2 ;;
+    --stale) stale_only=yes; shift ;;
+    --all)   show_all=yes; shift ;;
+    -h|--help) sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) args+=("$1"); shift ;;
+  esac
+done
+set -- ${args+"${args[@]}"}
+
+home_ensure >/dev/null
+
+scope_file() {
+  case ${1:-} in
+    liege)    printf '%s/liege.md\n' "$REEVE_HOME_D" ;;
+    manor:*)  printf '%s/manors/%s.md\n' "$REEVE_HOME_D" "${1#manor:}" ;;
+    archive)  printf '%s/archive.md\n' "$REEVE_HOME_D" ;;
+    '')       die "no --scope given. use 'liege' or 'manor:<name>'" ;;
+    *)        die "unknown scope '$1'. use 'liege' or 'manor:<name>'" ;;
+  esac
+}
+
+loaded_files() {
+  # exactly what session start reads, which is exactly what the budget counts
+  printf '%s/liege.md\n' "$REEVE_HOME_D"
+  ls "$REEVE_HOME_D/manors"/*.md 2>/dev/null || :
+}
+
+est_tokens() {
+  # chars/4, the usual rough estimate. Marker bytes are counted deliberately:
+  # they occupy context like everything else, which is why they are terse.
+  local c=0 f
+  for f in "$@"; do [ -f "$f" ] && c=$((c + $(wc -c < "$f" | tr -d ' '))); done
+  printf '%s\n' $((c / 4))
+}
+
+days_since() {
+  local d=$1 then now
+  then=$(date -j -f "%Y-%m-%d" "$d" +%s 2>/dev/null) || then=''
+  [ -n "$then" ] || { printf '%s\n' 99999; return; }
+  now=$(date +%s)
+  printf '%s\n' $(( (now - then) / 86400 ))
+}
+
+# The character after the letter is ':' for dated tiers and '-' for <!--P-->.
+# Matching only ':' made every pinned entry read as unmarked.
+entry_marker() { printf '%s' "$1" | sed -n 's/.*<!--\([apP]\)[:-].*/\1/p'; }
+entry_date()   { printf '%s' "$1" | sed -n 's/.*<!--[ap]:\([0-9-]\{10\}\).*/\1/p'; }
+
+is_stale() {
+  local line=$1 m d age
+  m=$(entry_marker "$line"); [ -n "$m" ] || return 1
+  [ "$m" = P ] && return 1
+  d=$(entry_date "$line"); [ -n "$d" ] || return 0
+  age=$(days_since "$d")
+  case $m in
+    a) [ "$age" -gt "$AGING_DAYS" ] ;;
+    p) [ "$age" -gt "$PERISH_DAYS" ] ;;
+    *) return 1 ;;
+  esac
+}
+
+ensure_file() {
+  local f=$1 title=$2
+  [ -f "$f" ] && return 0
+  mkdir -p "$(dirname "$f")"
+  printf '# %s\n\n' "$title" > "$f"
+}
+
+case $cmd in
+  list)
+    files=''
+    if [ -n "$scope" ]; then files=$(scope_file "$scope"); else files=$(loaded_files); fi
+    printf '%s\n' "$files" | while IFS= read -r f || [ -n "$f" ]; do
+      [ -f "$f" ] || continue
+      name=$(basename "$f" .md)
+      shown=0
+      while IFS= read -r line || [ -n "$line" ]; do
+        case $line in '- '*) ;; *) continue ;; esac
+        if [ "$stale_only" = yes ] && ! is_stale "$line"; then continue; fi
+        [ "$shown" -eq 0 ] && printf '\n%s\n' "$name"
+        shown=1
+        m=$(entry_marker "$line"); d=$(entry_date "$line")
+        case $m in a) label=aging ;; p) label=perishable ;; P) label=pinned ;; *) label=unmarked ;; esac
+        text=$(printf '%s' "$line" | sed -e 's/^- //' -e 's/[[:space:]]*<!--.*//')
+        age=''
+        [ -n "$d" ] && age=" ${d} ($(days_since "$d")d)"
+        printf '  [%-10s]%s %s\n' "$label" "$age" "$text"
+      done < "$f"
+    done
+    ;;
+
+  add)
+    fact=${1:-}; [ -n "$fact" ] || die "nothing to add"
+    case $tier in a|p|P) ;; *) die "tier must be a (aging), p (perishable) or P (pinned)" ;; esac
+    f=$(scope_file "$scope")
+    ensure_file "$f" "$(basename "$f" .md)"
+    # An exact repeat is mechanical, so refuse it outright. A near duplicate is
+    # a judgement about whether two sentences mean the same thing, which belongs
+    # to the steward and the memory skill, so warn and let them decide.
+    norm() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9 ' | tr -s ' '; }
+    newn=$(norm "$fact")
+    while IFS= read -r ex || [ -n "$ex" ]; do
+      case $ex in '- '*) ;; *) continue ;; esac
+      exn=$(norm "$(printf '%s' "$ex" | sed -e 's/^- //' -e 's/[[:space:]]*<!--.*//')")
+      if [ "$exn" = "$newn" ]; then
+        die "that exact fact is already in $(basename "$f"). refresh it instead of adding a second copy"
+      fi
+      # Real similarity, not a prefix match. A prefix heuristic missed obvious
+      # restatements that happened to differ in their first few words, which is
+      # worse than no check because it reads as a clean result.
+      # Shared significant words as a fraction of the shorter entry.
+      sim=$(printf '%s\n%s\n' "$exn" "$newn" | awk '
+        function sig(w) { return length(w) > 3 && w !~ /^(the|and|for|that|this|with|from|into|must|have|been|when|then|than|they|them|will|does|only|also|over|each|very|some|such|what|which|where|because)$/ }
+        NR==1 { n=split($0,a," "); for(i=1;i<=n;i++) if (sig(a[i])) { A[a[i]]=1; na++ } next }
+        NR==2 { n=split($0,b," "); for(i=1;i<=n;i++) if (sig(b[i])) { B[b[i]]=1; nb++ } }
+        END {
+          if (na==0 || nb==0) { print 0; exit }
+          for (w in A) if (w in B) shared++
+          smaller = (na < nb) ? na : nb
+          printf "%d\n", (shared * 100) / smaller
+        }')
+      if [ "${sim:-0}" -ge 60 ]; then
+        warn "possible restatement in $(basename "$f") (${sim}% of the shorter entry's words are shared):"
+        warn "  existing: $(printf '%s' "$exn" | cut -c1-80)"
+        warn "  adding:   $(printf '%s' "$newn" | cut -c1-80)"
+        warn "if these are one fact, strike one and keep the clearer wording"
+      fi
+    done < "$f"
+    if [ "$tier" = P ]; then printf -- '- %s <!--P-->\n' "$fact" >> "$f"
+    else printf -- '- %s <!--%s:%s-->\n' "$fact" "$tier" "$(today)" >> "$f"; fi
+    info "added to $(basename "$f") as $tier"
+    ;;
+
+  refresh)
+    match=${1:-}; [ -n "$match" ] || die "nothing to match"
+    f=$(scope_file "$scope"); [ -f "$f" ] || die "no such memory file: $f"
+    grep -qF -- "$match" "$f" || die "no entry matching '$match' in $(basename "$f")"
+    tmp="$f.$$"
+    while IFS= read -r line || [ -n "$line" ]; do
+      case $line in
+        *"$match"*)
+          case $line in
+            *'<!--P-->'*) printf '%s\n' "$line" ;;
+            *) printf '%s\n' "$(printf '%s' "$line" | sed "s|<!--\([ap]\):[0-9-]\{10\}-->|<!--\1:$(today)-->|")" ;;
+          esac ;;
+        *) printf '%s\n' "$line" ;;
+      esac
+    done < "$f" > "$tmp"
+    mv "$tmp" "$f"
+    info "refreshed in $(basename "$f") with today's date"
+    warn "a refresh claims evidence from this session. If you cannot name it, undo this."
+    ;;
+
+  strike)
+    match=${1:-}; [ -n "$match" ] || die "nothing to match"
+    f=$(scope_file "$scope"); [ -f "$f" ] || die "no such memory file: $f"
+    grep -qF -- "$match" "$f" || die "no entry matching '$match' in $(basename "$f")"
+    arc="$REEVE_HOME_D/archive.md"
+    ensure_file "$arc" "Archive"
+    tmp="$f.$$"; moved=0
+    while IFS= read -r line || [ -n "$line" ]; do
+      case $line in
+        '- '*"$match"*)
+          printf -- '%s <!--struck:%s from:%s-->\n' "$line" "$(today)" "$(basename "$f" .md)" >> "$arc"
+          moved=$((moved + 1)) ;;
+        *) printf '%s\n' "$line" ;;
+      esac
+    done < "$f" > "$tmp"
+    mv "$tmp" "$f"
+    info "moved $moved entr(ies) from $(basename "$f") to archive.md"
+    info "nothing was deleted. the archive is never loaded, so retired knowledge costs no context"
+    ;;
+
+  stale)
+    n=0
+    for f in $(loaded_files); do
+      [ -f "$f" ] || continue
+      while IFS= read -r line || [ -n "$line" ]; do
+        case $line in '- '*) ;; *) continue ;; esac
+        if is_stale "$line"; then
+          n=$((n + 1))
+          printf '%-14s %s\n' "$(basename "$f" .md)" "$(printf '%s' "$line" | sed 's/^- //' | cut -c1-90)"
+        fi
+      done < "$f"
+    done
+    [ "$n" -eq 0 ] && info "nothing stale" || info "$n stale entr(ies). Stale means archive, never delete."
+    ;;
+
+  budget)
+    limit=$(config_get memory-budget 6000)
+    total=$(est_tokens $(loaded_files))
+    printf 'always loaded:\n'
+    for f in $(loaded_files); do
+      [ -f "$f" ] || { printf '  %-22s ABSENT\n' "$(basename "$f")"; continue; }
+      printf '  %-22s %6s tokens  %3s entries\n' "$(basename "$f")" "$(est_tokens "$f")" \
+        "$(grep -c '^- ' "$f" 2>/dev/null || echo 0)"
+    done
+    printf '  %-22s %6s\n' 'archive.md' 'not counted, never loaded'
+    printf '\ntotal %s of %s budget' "$total" "$limit"
+    if [ "$total" -gt "$limit" ]; then
+      printf '  OVER by %s\n' "$((total - limit))"
+      printf '\nOver budget is a decision for the liege, not a silent eviction.\n'
+      printf 'Reduce in this order: archive what is stale, consolidate what overlaps,\n'
+      printf 'move repo specific facts into that repo, and only then propose cutting\n'
+      printf 'the oldest aging entries by name.\n'
+      exit 1
+    fi
+    printf '  ok\n'
+    ;;
+
+  ''|-h|--help) sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//' ;;
+  *) die "unknown command '$cmd'. try: list, add, refresh, strike, stale, budget" ;;
+esac

@@ -1,0 +1,267 @@
+#!/usr/bin/env bash
+# Write an errand brief. Single owner of the brief format.
+#
+# Usage:
+#   reeve-brief <id> <holding> --office <office> [--type feat] [--base main]
+#                              [--harness NAME] [--manor NAME]
+#
+# Writes $REEVE_HOME/errands/<id>/brief.md with two unfilled seams, {INTENT} and
+# {SPEC}, then stops. The reeve fills them in. reeve-dispatch refuses to launch
+# while either is still present, so a half written brief cannot reach a hand.
+#
+# Refuses to overwrite an existing brief: a relaunch must use the brief that is
+# already there, or the hand and the record disagree about the job.
+
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/reeve-lib.sh"
+
+id=${1:-}; holding=${2:-}
+shift 2 2>/dev/null || :
+office='' type='' base='' harness='' manor=''
+while [ $# -gt 0 ]; do
+  case $1 in
+    --office)  office=${2:-}; shift 2 ;;
+    --type)    type=${2:-}; shift 2 ;;
+    --base)    base=${2:-}; shift 2 ;;
+    --harness) harness=${2:-}; shift 2 ;;
+    --manor)   manor=${2:-}; shift 2 ;;
+    -h|--help) sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) die "unknown option '$1'" ;;
+  esac
+done
+
+require_id "$id"
+[ -n "$holding" ] || die "no holding given. a holding is a repo: a registered name, or a path"
+[ -n "$office" ]  || die "no --office given. one of: $(office_names | tr '\n' ' ')"
+
+office_file="$REEVE_ROOT_D/offices/$office.md"
+[ -f "$office_file" ] || die "no such office '$office'. offices are: $(office_names | tr '\n' ' ')"
+
+home_ensure >/dev/null
+brief=$(brief_file "$id")
+[ -e "$brief" ] && die "brief already exists at $brief. a relaunch reuses it; delete the errand deliberately if you really mean to start over"
+
+repo=$(resolve_holding_path "$holding") \
+  || die "cannot resolve holding '$holding' to a git repository. register it with reeve-survey, or give an absolute path"
+
+[ -n "$manor" ] || manor=$(holding_field "$holding" manor "$(basename "$repo")")
+[ -n "$base" ]  || base=$(holding_field "$holding" base 'main')
+instructions=$(holding_field "$holding" instructions '')
+setup_cmd=$(holding_field "$holding" setup '')
+test_cmd=$(holding_field "$holding" test '')
+
+# Branch policy by office. Offices that write code get a branch; offices that
+# only read get a detached worktree, so an investigation never litters the
+# branch list with something nobody will ever merge.
+case $office in
+  artificer) writes=yes; [ -n "$type" ] || type=feat ;;
+  scribe)    writes=yes; [ -n "$type" ] || type=docs ;;
+  steward)   writes=home; type='' ;;
+  scout|warden) writes=no; type='' ;;
+  *)         writes=yes; [ -n "$type" ] || type=chore ;;
+esac
+
+if [ "$writes" = yes ]; then
+  branch="$type/$id"
+  worktree="$(dirname "$repo")/$(basename "$repo").worktrees/$id"
+else
+  branch=''
+  worktree="$(dirname "$repo")/$(basename "$repo").worktrees/$id"
+fi
+
+status=$(status_file "$id")
+report=$(report_file "$id")
+mkdir -p "$(errand_dir "$id")"
+
+# ---- the brief ------------------------------------------------------------
+{
+cat <<HEAD
+# Errand $id
+
+You are one of the reeve's hands, sent out on a single errand. You work alone. No human is
+watching this session and no one will answer you, so never wait for input.
+
+| | |
+|---|---|
+| errand | \`$id\` |
+| office | \`$office\` |
+| manor | $manor |
+| holding | \`$repo\` |
+| your copy | \`$worktree\` |
+| branch | ${branch:-none, detached at \`$base\`} |
+| base | \`$base\` |
+| status file | \`$status\` |
+
+## Task
+
+### The liege's intent, in their words
+
+{INTENT}
+
+Treat this as the acceptance criteria. It is quoted, not paraphrased, so that a reviewer can
+check your work against what was actually asked rather than against your interpretation of it.
+
+### What to build
+
+{SPEC}
+
+HEAD
+
+cat <<'PREC'
+## One conflict to settle first
+
+You will almost certainly load a personal or global instruction file that tells you to stop at
+each milestone, summarise, and ask a human what to do next. That protocol is written for a session
+someone is watching. **This is not one.** Nobody is reading this pane, so a question asked in chat
+reaches no one and you would wait forever.
+
+For this errand only, that instruction is replaced by the reporting section below: you raise
+questions by appending a `needs-decision` line to your status file, and you keep working or stop,
+as that section describes. Everything else in that file still applies in full, especially the git
+conduct and the writing style.
+
+PREC
+
+cat <<'ISO'
+## Before you touch anything
+
+Confirm you are in your own copy, not the household's primary checkout:
+
+```sh
+pwd -P
+git rev-parse --show-toplevel
+```
+ISO
+
+cat <<ISO2
+
+Both must be \`$worktree\`. If either is \`$repo\`, stop immediately, append
+
+\`\`\`
+blocked: launched in the primary checkout, not an isolated copy
+\`\`\`
+
+to \`$status\`, and do nothing else. Editing the primary checkout would corrupt work the liege
+may have in progress.
+
+## Setup
+
+Your copy is a fresh git worktree. Ignored files do not come with it: dependencies are not
+installed, build output is absent, and any \`.env\` file is missing. A worktree that skipped setup
+looks broken but simply is not set up yet. Install dependencies with the repository's own package
+manager before concluding anything is wrong.
+ISO2
+
+if [ -n "$instructions" ]; then
+cat <<INSTR
+
+Read \`$repo/$instructions\` first. It is this repository's own instruction file and it outranks
+your instincts about style, structure and tooling. Note the filename: it is not always discovered
+automatically, so read it explicitly.
+INSTR
+else
+cat <<'INSTR'
+
+Look for this repository's own instruction file (`AGENTS.md`, `AGENT.md`, `CLAUDE.md`, `README`)
+and read it first. It outranks your instincts about style, structure and tooling.
+INSTR
+fi
+
+if [ -n "$setup_cmd" ] || [ -n "$test_cmd" ]; then
+cat <<'CMDS'
+
+This holding declares its own commands:
+
+CMDS
+[ -n "$setup_cmd" ] && printf -- '- setup: `%s`  (already run for you before launch)\n' "$setup_cmd"
+[ -n "$test_cmd" ]  && printf -- '- test: `%s`  (use this to validate your own work)\n' "$test_cmd"
+fi
+
+# Headings are demoted one level so the inlined office sits under the brief's
+# hierarchy instead of starting a second H1 halfway down the page.
+cat <<ROLE
+
+$(sed 's/^#/##/' "$office_file")
+
+## Reporting
+
+Append one line to \`$status\` at each real change of state, nothing more. Each append wakes the
+reeve, so report sparingly: constant chatter gets ignored, which defeats the point of reporting.
+
+\`\`\`
+working: <what you are doing now>
+needs-decision [key=<short-slug>]: <the question, answerable without reading your diff>
+blocked: <what is in the way, and what would unblock it>
+done: <what landed, and anything you deliberately left alone>
+failed: <why, and what you tried>
+\`\`\`
+
+Rules that matter:
+
+- **Start with one \`working:\` line** so the reeve knows you launched.
+- **A \`needs-decision\` is a real stop.** Ask it, then wait or work on something unrelated within
+  this errand. Never guess and carry on: a wrong guess costs more than a wait. Give it a short
+  \`key=\` slug, because that key is how the answer gets matched back to the question.
+- **Never write \`resolved\`.** Only the reeve closes a decision, after the liege answers.
+- **One \`done:\` at the end, and only if it is true.** Reporting done with a question still open
+  is recorded as a divergence and will be caught.
+- Append, never rewrite. The file is a log, not a status field.
+- **After your \`done:\` line, stop.** Do not start anything else, do not tidy up, do not look for
+  more work. The reeve cleans up after you.
+
+## Hard rules
+
+1. Everything you write goes inside \`$worktree\`. Never the primary checkout, never another
+   errand's copy, never anywhere else on disk.
+ROLE
+
+if [ "$writes" = yes ]; then
+cat <<COMMIT
+2. Commit on \`$branch\` and nothing else. **Never push. Never open a pull request. Never touch
+   \`$base\`. Never rebase or merge.** Dispatching this errand authorised commits on this branch
+   only; everything outward facing stays the liege's decision.
+3. Commit messages are subject and body only. Commitlint style subject. **No co-author trailer, no
+   attribution footer, no tool advertisement.** No em dashes or en dashes anywhere.
+COMMIT
+elif [ "$writes" = home ]; then
+cat <<'COMMIT'
+2. You write only under the reeve's home. No repository, no worktree, no commits at all.
+3. No em dashes or en dashes anywhere.
+COMMIT
+else
+cat <<COMMIT
+2. **Write nothing in the repository.** No edits, no commits, no branch, not even a formatting
+   fix. Your one output file is \`$report\`. You have a copy so you can read and run things
+   safely, not so you can change them.
+3. \`git status --porcelain\` in your copy must be empty when you finish. No em dashes or en
+   dashes anywhere.
+COMMIT
+fi
+
+cat <<TAIL
+4. Stay inside the intent above. If you find a second problem, a tempting refactor or a missing
+   test outside this errand, name it in your \`done:\` line and leave it alone. Other hands are
+   working in this repository right now, and uninvited changes become somebody else's merge
+   conflict.
+5. If you cannot finish, say so with \`blocked:\` or \`failed:\` and stop. A truthful stop is worth
+   more than a hopeful guess.
+
+Your definition of done is the one in your office section above. Meet it exactly, then append
+your \`done:\` line. Never describe work as finished that you have not verified.
+TAIL
+} > "$brief"
+
+meta_write "$id" \
+  "office=$office" \
+  "holding=$holding" \
+  "repo=$repo" \
+  "manor=$manor" \
+  "worktree=$worktree" \
+  "branch=$branch" \
+  "base=$base" \
+  "writes=$writes" \
+  "harness=$harness" \
+  "created=$(today)"
+
+info "brief written: $brief"
+info "seams to fill: {INTENT} and {SPEC}"
+info "then: reeve-dispatch $id"

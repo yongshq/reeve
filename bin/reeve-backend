@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+# Backend dispatcher. The only thing that sources backends/<name>.sh.
+#
+# Usage:
+#   reeve-backend resolve [--backend NAME]     print the backend that would be used
+#   reeve-backend list                         every backend, with availability
+#   reeve-backend call <fn> <args...>          run one contract function
+#   reeve-backend describe [--backend NAME]
+
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/reeve-lib.sh"
+
+BACKEND_FNS="available describe create_endpoint launch capture send_text_submit target_exists agent_state wait_change kill"
+
+backend_known() { ls "$REEVE_ROOT_D/backends"/*.sh 2>/dev/null | while read -r f; do basename "$f" .sh; done; }
+
+backend_resolve() {
+  local want=${1:-}
+  # Precedence: explicit flag, environment, config file, detection, then herdr.
+  [ -n "$want" ] || want=${REEVE_BACKEND:-}
+  [ -n "$want" ] || want=$(config_get backend '')
+  if [ -z "$want" ]; then
+    # Innermost first. tmux can nest inside herdr, so a tmux marker means tmux
+    # is the layer actually executing. Never guess when both are absent.
+    if   [ -n "${TMUX:-}" ];                  then want=tmux
+    elif [ "${HERDR_ENV:-}" = "1" ];          then want=herdr
+    else want=herdr
+    fi
+  fi
+  lines_has "$want" "$(backend_known)" \
+    || die "unknown backend '$want'. known: $(backend_known | tr '\n' ' ')"
+  printf '%s\n' "$want"
+}
+
+backend_source() {
+  local name=$1 f="$REEVE_ROOT_D/backends/$name.sh"
+  [ -f "$f" ] || die "backend '$name' has no adapter at $f"
+  # shellcheck disable=SC1090
+  . "$f"
+}
+
+backend_call() {
+  local name=$1 fn=$2; shift 2
+  words_has "$fn" "$BACKEND_FNS" \
+    || die "'$fn' is not in the backend contract. see backends/README.md"
+  backend_source "$name"
+  local sym="reeve_backend_${name}_${fn}"
+  command -v "$sym" >/dev/null 2>&1 \
+    || die "backend '$name' does not implement '$fn', which the contract requires"
+  "$sym" "$@"
+}
+
+cmd=${1:-}; shift 2>/dev/null || :
+sel=''
+# accept --backend anywhere in the remaining args
+args=()
+while [ $# -gt 0 ]; do
+  case $1 in
+    --backend) sel=${2:-}; shift 2 ;;
+    --backend=*) sel=${1#*=}; shift ;;
+    *) args+=("$1"); shift ;;
+  esac
+done
+set -- ${args+"${args[@]}"}
+
+case $cmd in
+  resolve)  backend_resolve "$sel" ;;
+  describe) b=$(backend_resolve "$sel"); backend_call "$b" describe ;;
+  list)
+    for b in $(backend_known); do
+      if out=$(backend_call "$b" available 2>&1); then
+        printf '%-8s available   %s\n' "$b" "$(backend_call "$b" describe 2>/dev/null)"
+      else
+        printf '%-8s unavailable %s\n' "$b" "$out"
+      fi
+    done ;;
+  call)
+    b=$(backend_resolve "$sel")
+    fn=${1:-}; [ -n "$fn" ] || die "reeve-backend call needs a function name"
+    shift
+    backend_call "$b" "$fn" "$@" ;;
+  ''|-h|--help)
+    sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//' ;;
+  *) die "unknown command '$cmd'. try: resolve, list, describe, call" ;;
+esac

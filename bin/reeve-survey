@@ -1,0 +1,152 @@
+#!/usr/bin/env bash
+# Meet an unfamiliar repository and gather evidence about which project it
+# belongs to. Gathers and proposes; it never decides and never writes.
+#
+# Usage:
+#   reeve-survey <path-or-holding-name>
+#   reeve-survey --register <holding> --manor M --path P [--instructions F]
+#                           [--base REF] [--setup CMD] [--test CMD] [--role R]
+#
+# The first form prints evidence for the reeve to interpret and put to the
+# liege. The second records an answer the liege already gave. The split is the
+# point: guessing which repos are one product and then editing the wrong one is
+# the expensive mistake here.
+
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/reeve-lib.sh"
+
+if [ "${1:-}" = "--register" ]; then
+  shift
+  holding=${1:-}; shift 2>/dev/null || :
+  manor='' path='' instructions='' base=main setup='' test_cmd='' role=''
+  while [ $# -gt 0 ]; do
+    case $1 in
+      --manor) manor=${2:-}; shift 2 ;;
+      --path)  path=${2:-}; shift 2 ;;
+      --instructions) instructions=${2:-}; shift 2 ;;
+      --base)  base=${2:-}; shift 2 ;;
+      --setup) setup=${2:-}; shift 2 ;;
+      --test)  test_cmd=${2:-}; shift 2 ;;
+      --role)  role=${2:-}; shift 2 ;;
+      *) die "unknown option '$1'" ;;
+    esac
+  done
+  [ -n "$holding" ] && [ -n "$manor" ] && [ -n "$path" ] || die "--register needs <holding> --manor M --path P"
+  [ -d "$path" ] || die "path does not exist: $path"
+  path=$(cd "$path" && pwd)
+  home_ensure >/dev/null
+  f=$(manors_file)
+  [ -f "$f" ] || printf '# Manors\n\nProjects the household knows. One block per manor, one line per repo.\nProposed by reeve-survey, confirmed by the liege.\n' > "$f"
+  if holding_line "$holding" >/dev/null 2>&1; then
+    die "holding '$holding' is already registered. edit $f by hand to change it"
+  fi
+  grep -q "^## $manor\$" "$f" || printf '\n## %s\n' "$manor" >> "$f"
+  line="- holding: $holding | manor: $manor | path: $path"
+  [ -n "$role" ]         && line="$line | role: $role"
+  [ -n "$instructions" ] && line="$line | instructions: $instructions"
+  line="$line | base: $base"
+  [ -n "$setup" ]        && line="$line | setup: $setup"
+  [ -n "$test_cmd" ]     && line="$line | test: $test_cmd"
+  # append inside the manor's block, not at the end of the file
+  tmp="$f.$$"
+  awk -v m="## $manor" -v l="$line" '
+    { print }
+    $0 == m { print l }
+  ' "$f" > "$tmp" && mv "$tmp" "$f"
+  info "registered $holding under manor $manor"
+  exit 0
+fi
+
+target=${1:-}
+[ -n "$target" ] || die "give a path or a registered holding name"
+repo=$(resolve_holding_path "$target" 2>/dev/null) || {
+  case $target in /*) repo=$target ;; *) repo=$(cd "$target" 2>/dev/null && pwd) || die "no such path: $target" ;; esac
+  git -C "$repo" rev-parse --show-toplevel >/dev/null 2>&1 || die "$repo is not a git repository. Initialise it first, or name a repo inside it"
+  repo=$(git -C "$repo" rev-parse --show-toplevel)
+}
+
+name=$(basename "$repo")
+printf 'repository   %s\n' "$repo"
+printf 'name         %s\n' "$name"
+
+if holding_line "$name" >/dev/null 2>&1; then
+  printf 'registered   yes, as manor %s\n' "$(holding_field "$name" manor '?')"
+else
+  printf 'registered   no\n'
+fi
+
+remote=$(git -C "$repo" remote get-url origin 2>/dev/null || echo '')
+printf 'remote       %s\n' "${remote:-none}"
+org=$(printf '%s' "$remote" | sed -n 's|.*[:/]\([^/]*\)/[^/]*$|\1|p')
+printf 'org          %s\n' "${org:-unknown}"
+printf 'branch       %s\n' "$(git -C "$repo" symbolic-ref --short HEAD 2>/dev/null || echo detached)"
+
+instr=''
+for c in AGENTS.md AGENT.md CLAUDE.md .cursorrules GEMINI.md; do
+  [ -f "$repo/$c" ] && { instr=$c; break; }
+done
+printf 'instructions %s\n' "${instr:-none found}"
+# A singular AGENT.md is worth calling out: no harness discovers it, so a brief
+# has to name the path explicitly or the hand never reads the house style.
+[ "$instr" = "AGENT.md" ] && printf '             note: singular AGENT.md, which nothing auto-loads. Briefs must name it\n'
+
+printf 'nameplate    %s\n' "$([ -f "$repo/.reeve.md" ] && echo present || echo absent)"
+
+pm=''
+[ -f "$repo/pnpm-lock.yaml" ] && pm=pnpm
+[ -z "$pm" ] && [ -f "$repo/yarn.lock" ] && pm=yarn
+[ -z "$pm" ] && [ -f "$repo/package-lock.json" ] && pm=npm
+[ -z "$pm" ] && [ -f "$repo/Cargo.toml" ] && pm=cargo
+[ -z "$pm" ] && [ -f "$repo/go.mod" ] && pm=go
+[ -z "$pm" ] && { [ -f "$repo/pyproject.toml" ] || [ -f "$repo/requirements.txt" ]; } && pm=python
+printf 'toolchain    %s\n' "${pm:-unknown}"
+if [ -f "$repo/package.json" ]; then
+  # Only keys inside the "scripts" object. A bare indent match also collects
+  # every dependency name, which reads as a script list and is not one.
+  printf 'scripts      %s\n' "$(awk '
+    /^[[:space:]]*"scripts"[[:space:]]*:[[:space:]]*\{/ { inb=1; next }
+    inb && /^[[:space:]]*\}/ { inb=0 }
+    inb && match($0, /"[^"]+"[[:space:]]*:/) {
+      k=substr($0, RSTART+1, RLENGTH-3); sub(/"[[:space:]]*$/, "", k); printf "%s ", k
+    }' "$repo/package.json")"
+fi
+
+printf '\nevidence for which manor this belongs to\n'
+parent=$(dirname "$repo")
+sibs=0
+for d in "$parent"/*; do
+  [ -d "$d" ] || continue
+  [ "$d" = "$repo" ] && continue
+  case $(basename "$d") in *.worktrees) continue ;; esac
+  if [ -d "$d/.git" ] || [ -f "$d/.git" ]; then
+    sorg=$(git -C "$d" remote get-url origin 2>/dev/null | sed -n 's|.*[:/]\([^/]*\)/[^/]*$|\1|p')
+    printf '  sibling repo   %-22s org=%s\n' "$(basename "$d")" "${sorg:-none}"
+    sibs=$((sibs + 1))
+  else
+    printf '  sibling dir    %-22s not a git repository\n' "$(basename "$d")"
+    sibs=$((sibs + 1))
+  fi
+done
+[ "$sibs" -eq 0 ] && printf '  no siblings under %s\n' "$parent"
+
+# Cross-repo wiring: a service URL or port in an env sample is the strongest
+# single hint that two repos are one product.
+found=0
+for e in .env .env.example .env.sample .env.local; do
+  [ -f "$repo/$e" ] || continue
+  hits=$(grep -iE '(api|backend|server|graphql|supabase|database)_?(url|base|host|endpoint)|localhost:[0-9]+' "$repo/$e" 2>/dev/null | head -5)
+  [ -n "$hits" ] && { printf '  %s\n' "$e"; printf '%s\n' "$hits" | sed 's/^/    /'; found=1; }
+done
+for f in "$repo/package.json" "$repo/vite.config.ts" "$repo/wrangler.jsonc"; do
+  [ -f "$f" ] || continue
+  hits=$(grep -oE 'localhost:[0-9]+|127\.0\.0\.1:[0-9]+' "$f" 2>/dev/null | sort -u | head -4)
+  [ -n "$hits" ] && { printf '  %s references %s\n' "$(basename "$f")" "$(printf '%s' "$hits" | tr '\n' ' ')"; found=1; }
+done
+gen=$(ls "$repo" 2>/dev/null | grep -iE 'openapi|swagger|\.proto$|generated-client' | head -3)
+[ -n "$gen" ] && { printf '  generated contract files: %s\n' "$(printf '%s' "$gen" | tr '\n' ' ')"; found=1; }
+[ "$found" -eq 0 ] && printf '  no cross-repo wiring found. This looks self contained.\n'
+
+printf '\nThis is evidence, not a conclusion. Put a single proposal to the liege, then record\n'
+printf 'their answer with:\n'
+printf '  reeve-survey --register %s --manor <manor> --path %s' "$name" "$repo"
+[ -n "$instr" ] && printf ' --instructions %s' "$instr"
+printf '\n'

@@ -1,0 +1,174 @@
+#!/usr/bin/env bash
+# Stand watch over the fleet. Wakes the reeve once per actionable change.
+#
+# Usage:
+#   reeve-sentry [--poll SECONDS] [--timeout SECONDS] [--once] [--no-reap]
+#
+# When an errand finishes it is cleaned up automatically: the session is freed
+# always, and the copy is removed only when nothing would be lost. --no-reap
+# leaves finished hands running, which you want only while debugging one.
+#
+# Prints exactly ONE reason line and exits when something needs the reeve. That
+# single line is the whole agent facing payload, so it has to be readable on its
+# own. Benign changes are absorbed and the watch continues.
+#
+# Exit codes:
+#   0  something actionable, reason printed on stdout
+#   3  nothing in flight, there is nothing to watch
+#   4  timed out with nothing actionable
+#
+# This is the thin sentry. It polls. Polling is the contract and a backend's
+# native event wait is only ever a latency optimisation on top, because a herdr
+# event subscription can be acknowledged and then silently stop delivering
+# (upstream #3124) and a herdr server can force-restart and take every pane with
+# it (#3527). Durable files on disk are the source of truth; panes are not.
+
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/reeve-lib.sh"
+BIN=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+
+poll=15 timeout=0 once=no reap=yes
+while [ $# -gt 0 ]; do
+  case $1 in
+    --poll)    poll=${2:-15}; shift 2 ;;
+    --timeout) timeout=${2:-0}; shift 2 ;;
+    --once)    once=yes; shift ;;
+    --no-reap) reap=no; shift ;;
+    -h|--help) sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) die "unknown option '$1'" ;;
+  esac
+done
+
+cursor_file() { printf '%s/state/.cursor-%s\n' "$REEVE_HOME_D" "$1"; }
+
+# Clean up a hand that has finished. An agent does not exit itself, so without
+# this every completed errand leaves a session idling at a prompt, holding a
+# pane, until a human closes it. That is exactly the babysitting this household
+# exists to remove.
+#
+# reeve-teardown owns the safety rules and is the single owner of them: it
+# always frees the session first, then removes the copy only when nothing would
+# be lost. So a scout is cleaned up completely, while an artificer keeps its
+# branch and copy and only loses its idle session. Output is suppressed because
+# the sentry's contract is exactly one line.
+reap_one() {
+  local i=$1 wt
+  [ "$reap" = yes ] || { printf '\n'; return; }
+  wt=$(meta_get "$i" worktree '')
+  "$BIN/reeve-teardown" "$i" >/dev/null 2>&1
+  if [ -n "$wt" ] && [ -d "$wt" ]; then
+    local br ahead
+    br=$(meta_get "$i" branch '')
+    if [ -n "$br" ]; then
+      ahead=$(git -C "$(meta_get "$i" repo '')" rev-list --count "$(meta_get "$i" base main)..$br" 2>/dev/null || echo '?')
+      printf ' [session freed, %s kept with %s commit(s)]\n' "$br" "$ahead"
+    else
+      printf ' [session freed, copy kept]\n'
+    fi
+  else
+    printf ' [session freed, copy removed]\n'
+  fi
+}
+
+live_errands() {
+  ls "$REEVE_HOME_D/state"/*.meta 2>/dev/null | while read -r f; do
+    i=$(basename "$f" .meta)
+    [ -n "$(meta_get "$i" target '')" ] || continue
+    [ -z "$(meta_get "$i" tornDown '')" ] || continue
+    printf '%s\n' "$i"
+  done
+}
+
+# Absorb or escalate. One errand, one verdict.
+check_one() {
+  local i=$1 f seen now new st open div bk tgt live
+  f=$(status_file "$i")
+  seen=$(cat "$(cursor_file "$i")" 2>/dev/null || echo 0)
+  now=0
+  [ -f "$f" ] && now=$(grep -c . "$f" 2>/dev/null || echo 0)
+  now=$(printf '%s' "$now" | tr -d '[:space:]'); now=${now:-0}
+  seen=$(printf '%s' "$seen" | tr -d '[:space:]'); seen=${seen:-0}
+
+  st=$(status_field "$i" state)
+  open=$(status_field "$i" open); open=${open:-0}
+  div=$(status_field "$i" divergence)
+
+  if [ "$now" -gt "$seen" ]; then
+    new=$(sed -n "$((seen + 1)),\$p" "$f" 2>/dev/null)
+    printf '%s\n' "$now" > "$(cursor_file "$i")"
+    # A `working:` line is progress, not news. Absorb it and keep watching:
+    # waking the reeve for progress is how a supervisor becomes noise.
+    case $st in
+      needs-decision) printf 'signal: %s needs a decision (%s open) - %s\n' "$i" "$open" "$(printf '%s' "$new" | tail -1)"; return 0 ;;
+      blocked)
+        # Blocked is not finished: leave the session alone so it can be steered.
+        printf 'signal: %s is blocked - %s\n' "$i" "$(printf '%s' "$new" | tail -1)"
+        return 0 ;;
+      failed)
+        printf 'signal: %s failed - %s' "$i" "$(printf '%s' "$new" | tail -1)"
+        reap_one "$i"
+        return 0 ;;
+      done)
+        if [ "$div" = yes ]; then
+          # Never reap a divergence. The errand is not finished whatever it says,
+          # and its session may still be the only place to find out why.
+          printf 'signal: %s reported done with %s question(s) never answered, treat as unfinished\n' "$i" "$open"
+        else
+          printf 'signal: %s is done - %s' "$i" "$(printf '%s' "$new" | tail -1)"
+          reap_one "$i"
+        fi
+        return 0 ;;
+    esac
+  fi
+
+  # A hand that vanished without a terminal line is the failure mode that would
+  # otherwise wait forever, so it is worth a wake on its own.
+  tgt=$(meta_get "$i" target ''); bk=$(meta_get "$i" backend herdr)
+  live=$("$BIN/reeve-backend" call agent_state "$tgt" --backend "$bk" 2>/dev/null || echo unreadable)
+  case "$live:$st" in
+    dead:done|dead:failed|missing:done|missing:failed) : ;;
+    dead:*|missing:*)
+      printf 'stale: %s left no result and its session is %s, last reported %s\n' "$i" "$live" "$st"
+      return 0 ;;
+  esac
+  return 1
+}
+
+start=$(date +%s)
+while :; do
+  ids=$(live_errands)
+  if [ -z "$ids" ]; then
+    printf 'nothing in flight\n'
+    exit 3
+  fi
+
+  hit=no
+  while IFS= read -r i || [ -n "$i" ]; do
+    [ -n "$i" ] || continue
+    if check_one "$i"; then hit=yes; break; fi
+  done <<EOS
+$ids
+EOS
+  [ "$hit" = yes ] && exit 0
+
+  [ "$once" = yes ] && { printf 'quiet: %s errand(s) working, nothing to report\n' "$(printf '%s\n' "$ids" | grep -c .)"; exit 4; }
+
+  if [ "$timeout" -gt 0 ]; then
+    [ $(( $(date +%s) - start )) -lt "$timeout" ] || { printf 'quiet: timed out after %ss with nothing actionable\n' "$timeout"; exit 4; }
+  fi
+
+  # Prefer the backend's bounded native wait over a blind sleep, but treat its
+  # answer as a hint only. Exit 2 means this backend cannot wait at all, which
+  # is a perfectly good answer: fall back to sleeping.
+  waited=no
+  while IFS= read -r i || [ -n "$i" ]; do
+    [ -n "$i" ] || continue
+    tgt=$(meta_get "$i" target ''); bk=$(meta_get "$i" backend herdr)
+    "$BIN/reeve-backend" call wait_change "$tgt" "$((poll * 1000))" --backend "$bk" >/dev/null 2>&1
+    rc=$?
+    [ "$rc" -eq 2 ] || waited=yes
+    break
+  done <<EOS
+$ids
+EOS
+  [ "$waited" = yes ] || sleep "$poll"
+done

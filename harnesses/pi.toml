@@ -1,0 +1,24 @@
+name = "pi"
+bin = "pi"
+verified = false
+source = "UNKNOWN. The launch line below is a placeholder, not documentation. Fill it in from pi --help before use."
+herdr_kind = "pi"
+
+# Honest placeholder. Nothing here has been checked against a real pi install,
+# so it is written to fail visibly rather than to look plausible. Correct it
+# from `pi --help`, run a scout errand, then set verified = true.
+launch = "{bin} {perm} {prompt}"
+prompt_mode = "argv"
+prompt_flag = ""
+perm_flag = ""
+model_flag = ""
+effort_flag = ""
+env = []
+instruction_files = ["AGENTS.md"]
+detect_env = ["PI_CODING_AGENT"]
+
+# UNVERIFIED. Does this CLI sandbox tool access to the working directory? If it
+# does, it needs the equivalent of claude's --add-dir pointed at {dir}, or every
+# hand will stall on its first read of the brief. Leave empty only after testing.
+dirs_flag = ""
+argv_separator = false

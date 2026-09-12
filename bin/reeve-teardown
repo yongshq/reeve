@@ -1,0 +1,162 @@
+#!/usr/bin/env bash
+# Clean up a finished errand. Single owner of the landed-work test.
+#
+# Usage:
+#   reeve-teardown <id> [--drop-branch] [--dismiss-only] [--dry-run]
+#
+# Two separate jobs with different safety conditions. DISMISSING a finished
+# hand's session loses nothing and happens as soon as it reports a terminal
+# state. REMOVING its copy can lose commits, so that waits until the work has
+# landed. --dismiss-only does the first and stops.
+#
+# Refuses while work could still be lost. A refusal is a stop-and-investigate
+# result, never an obstacle to route around. There is deliberately no --force:
+# if git or this script objects, something is there that you did not expect, and
+# past that objection the work is unrecoverable.
+
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/reeve-lib.sh"
+BIN=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+
+id=${1:-}; shift 2>/dev/null || :
+drop_branch=no dry=no dismiss_only=no
+while [ $# -gt 0 ]; do
+  case $1 in
+    --drop-branch) drop_branch=yes; shift ;;
+    --dismiss-only) dismiss_only=yes; shift ;;
+    --dry-run) dry=yes; shift ;;
+    -h|--help) sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) die "unknown option '$1'" ;;
+  esac
+done
+require_id "$id"
+[ -f "$(meta_file "$id")" ] || die "no errand '$id'"
+
+run() { if [ "$dry" = yes ]; then printf '  would run: %s\n' "$*"; else "$@"; fi; }
+dismiss=no; dismissed=no
+refuse() { printf 'reeve: REFUSED to tear down %s\n' "$id" >&2; printf '  %s\n' "$@" >&2; exit 1; }
+
+repo=$(meta_get "$id" repo '')
+wt=$(meta_get "$id" worktree '')
+br=$(meta_get "$id" branch '')
+base=$(meta_get "$id" base main)
+writes=$(meta_get "$id" writes yes)
+target=$(meta_get "$id" target '')
+backend=$(meta_get "$id" backend herdr)
+
+# 1. the hand must not still be WORKING.
+#
+# A hand that has reported a terminal state is finished even though its harness
+# is still sitting at a prompt: agents do not exit themselves. Refusing on a
+# live process alone would mean every completed errand needs a human to close a
+# pane before it can be cleaned up, which is exactly the babysitting this
+# household exists to remove. So the REPORTED state decides, and the process
+# state only decides when the report does not.
+reported=$(status_field "$id" state)
+open_q=$(status_field "$id" open); open_q=${open_q:-0}
+if [ -n "$target" ]; then
+  st=$("$BIN/reeve-backend" call agent_state "$target" --backend "$backend" 2>/dev/null || echo unreadable)
+  case $st in
+    alive)
+      case "$reported" in
+        done|failed)
+          if [ "$open_q" -gt 0 ]; then
+            refuse "the hand reported $reported but $open_q question(s) were never answered." "That is a divergence, not a finished errand. Run: reeve-status $id"
+          fi
+          # Decide only. The actual dismissal happens in the removal section
+          # below, AFTER every landed-work check has passed. Announcing it here
+          # printed "dismissing its session" and then refused on unlanded work,
+          # so the message described something that never happened.
+          dismiss=yes ;;
+        *)
+          refuse "a hand is still working at $target (last reported: ${reported:-nothing yet})." "Let it finish, or stop it deliberately, then tear down." ;;
+      esac ;;
+    unreadable)
+      refuse "the state of the endpoint at $target cannot be read." "Investigate before removing anything: this script cannot tell a working hand from a dead one right now." ;;
+  esac
+fi
+
+# 1b. Dismiss the finished hand's session NOW, before the removal checks.
+# A hand that has reported a terminal state with nothing open is done working;
+# its agent is just idling at a prompt holding a pane. Freeing it loses nothing,
+# because the status file and any report are already on disk. Doing this after
+# the landed-work checks meant an artificer with an unlanded branch kept its
+# session alive forever, which is the opposite of cleaning up.
+if [ "$dismiss" = yes ] && [ -n "$target" ]; then
+  info "dismissing the hand's session, it reported $reported"
+  run "$BIN/reeve-backend" call kill "$target" --backend "$backend" \
+    || warn "could not close the endpoint $target, continuing"
+  [ "$dry" = yes ] || meta_set "$id" target ''
+  dismissed=yes
+  target=''
+fi
+
+if [ "$dismiss_only" = yes ]; then
+  [ "$dismissed" = yes ] && info "session freed. The copy and branch are untouched." \
+                         || info "nothing to dismiss"
+  exit 0
+fi
+
+# 2. an open decision means nobody ever answered the question. This still has
+# work to do for an errand whose session is already gone.
+open=$open_q
+if [ "$open" -gt 0 ]; then
+  refuse "$open question(s) from this errand were never answered." "Run: reeve-status $id" "Tearing down now discards the work that question was blocking."
+fi
+
+# 3. nothing uncommitted in the copy
+if [ "$writes" != home ] && [ -n "$wt" ] && [ -d "$wt" ]; then
+  dirty=$(git -C "$wt" status --porcelain 2>/dev/null)
+  if [ -n "$dirty" ]; then
+    refuse "the copy at $wt has uncommitted changes:" "$(printf '%s' "$dirty" | head -5 | sed 's/^/    /')" "Commit them on $br, or discard them deliberately yourself. This script will not."
+  fi
+fi
+
+# 4. committed but unlanded work. "Landed" means the base already contains it.
+if [ -n "$br" ] && [ -n "$repo" ]; then
+  if git -C "$repo" rev-parse --verify --quiet "refs/heads/$br" >/dev/null 2>&1; then
+    ahead=$(git -C "$repo" rev-list --count "$base..$br" 2>/dev/null || echo 0)
+    if [ "${ahead:-0}" -gt 0 ]; then
+      refuse "$br has $ahead commit(s) that $base does not have." \
+             "$(git -C "$repo" log --oneline "$base..$br" 2>/dev/null | head -5 | sed 's/^/    /')" \
+             "Rebase or merge it first. Removing the copy now leaves the branch, but this is the" \
+             "point at which work gets forgotten, so it stops here."
+    fi
+  fi
+fi
+
+# 5. a detached read-only copy must have produced no commits at all
+if [ -z "$br" ] && [ "$writes" = no ] && [ -n "$wt" ] && [ -d "$wt" ]; then
+  head_now=$(git -C "$wt" rev-parse HEAD 2>/dev/null || echo '')
+  base_sha=$(git -C "$repo" rev-parse "$base" 2>/dev/null || echo '')
+  if [ -n "$head_now" ] && [ -n "$base_sha" ] && [ "$head_now" != "$base_sha" ]; then
+    refuse "this was a read-only errand but its copy has moved off $base ($head_now)." \
+           "Something committed in a copy that was forbidden to commit. Look before removing it."
+  fi
+fi
+
+info "landed-work checks passed for $id"
+
+# --- removal ---------------------------------------------------------------
+if [ -n "$target" ]; then
+  run "$BIN/reeve-backend" call kill "$target" --backend "$backend" || warn "could not close the endpoint $target, continuing"
+fi
+if [ "$writes" != home ] && [ -n "$wt" ] && [ -d "$wt" ]; then
+  # No --force, ever. A clean merged worktree removes without it, so needing it
+  # means git found something unexpected, and that refusal is the safety net.
+  run git -C "$repo" worktree remove "$wt" || refuse "git refused to remove the worktree at $wt." "That refusal is the safety net. Do not add --force; find out what git objected to."
+  run git -C "$repo" worktree prune
+  # rmdir, never rm -r: it removes the shared <repo>.worktrees parent only when
+  # this was the last errand in it, and refuses silently if a sibling remains
+  [ "$dry" = yes ] || rmdir "$(dirname "$wt")" 2>/dev/null || :
+fi
+if [ "$drop_branch" = yes ] && [ -n "$br" ]; then
+  # -d only, never -D. -d refuses an unmerged branch, which is the whole point.
+  run git -C "$repo" branch -d "$br" || warn "git refused to delete '$br' (it is not merged). Leaving it."
+fi
+
+if [ "$dry" = yes ]; then info "dry run, nothing changed"; exit 0; fi
+meta_set "$id" tornDown "$(date +%Y-%m-%dT%H:%M:%S)"
+meta_set "$id" target ''
+info "torn down $id"
+[ -f "$(report_file "$id")" ] && info "  report kept: $(report_file "$id")"
+info "  record kept: $(meta_file "$id")"

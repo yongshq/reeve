@@ -1,0 +1,103 @@
+#!/usr/bin/env bash
+# What is installed, what is verified, and what will refuse to run.
+#
+# Usage: reeve-doctor
+#
+# Exists so that "it refused and I do not know why" is never a state you can be
+# in. Installed, declared and verified are three different things and this
+# reports them separately.
+
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/reeve-lib.sh"
+BIN=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+WARN=0
+
+hdr() { printf '\n%s\n' "$1"; printf '%s\n' "$(printf '%s' "$1" | sed 's/./-/g')"; }
+
+hdr "paths"
+printf '  code root   %s\n' "$REEVE_ROOT_D"
+printf '  home        %s%s\n' "$REEVE_HOME_D" "$([ -d "$REEVE_HOME_D" ] || printf '   (does not exist yet, run install.sh)')"
+if [ -d "$REEVE_HOME_D/.git" ]; then
+  printf '  home git    yes (%s commits)\n' "$(git -C "$REEVE_HOME_D" rev-list --count HEAD 2>/dev/null || echo 0)"
+else
+  printf '  home git    no. Your learned memory has no history and no backup.\n'; WARN=$((WARN+1))
+fi
+
+hdr "tools"
+for t in git herdr tmux jq gh; do
+  if command -v "$t" >/dev/null 2>&1; then
+    case $t in
+      git)   v=$(git --version | awk '{print $3}') ;;
+      herdr) v=$(herdr --version 2>/dev/null | awk '{print $NF}') ;;
+      tmux)  v=$(tmux -V | awk '{print $2}') ;;
+      jq)    v=$(jq --version 2>/dev/null) ;;
+      *)     v=$("$t" --version 2>/dev/null | head -1 | awk '{print $NF}') ;;
+    esac
+    printf '  %-6s ok    %s\n' "$t" "$v"
+  else
+    printf '  %-6s MISSING\n' "$t"; WARN=$((WARN+1))
+  fi
+done
+
+hdr "backends (where a hand's session lives)"
+"$BIN/reeve-backend" list | sed 's/^/  /'
+printf '  default     %s\n' "$("$BIN/reeve-backend" resolve 2>/dev/null || echo 'none resolvable')"
+
+hdr "harnesses (which agent CLI runs in it)"
+"$BIN/reeve-harness" list | sed 's/^/  /'
+printf '  default     %s\n' "$("$BIN/reeve-harness" resolve 2>/dev/null || echo claude)"
+printf '  reeve is running under: %s\n' "$("$BIN/reeve-harness" detect)"
+
+printf '\n  usable right now (installed AND verified):\n'
+usable=0
+for h in $(ls "$REEVE_ROOT_D/harnesses"/*.toml 2>/dev/null | while read -r f; do basename "$f" .toml; done); do
+  if "$BIN/reeve-harness" check "$h" >/dev/null 2>&1; then printf '    %s\n' "$h"; usable=$((usable+1)); fi
+done
+[ "$usable" -eq 0 ] && { printf '    none. every dispatch will refuse.\n'; WARN=$((WARN+1)); }
+
+printf '\n  installed but NOT verified (dispatch refuses unless you pass --allow-unverified):\n'
+none=yes
+for h in $(ls "$REEVE_ROOT_D/harnesses"/*.toml 2>/dev/null | while read -r f; do basename "$f" .toml; done); do
+  b=$("$BIN/reeve-harness" get "$h" bin "$h")
+  if command -v "$b" >/dev/null 2>&1 && [ "$("$BIN/reeve-harness" get "$h" verified false)" != true ]; then
+    printf '    %-10s %s\n' "$h" "$("$BIN/reeve-harness" get "$h" source 'source unrecorded')"; none=no
+  fi
+done
+[ "$none" = yes ] && printf '    none\n'
+
+hdr "offices"
+printf '  '; office_names | tr '\n' ' '; printf '\n'
+
+hdr "manors"
+if [ -f "$(manors_file)" ]; then
+  n=$(holding_names | grep -c . 2>/dev/null || echo 0)
+  printf '  %s holding(s) registered\n' "$n"
+  holding_names | while read -r h; do
+    [ -n "$h" ] || continue
+    p=$(holding_field "$h" path '')
+    trust=''
+    if command -v claude >/dev/null 2>&1 && [ -d "$p" ]; then
+      "$BIN/reeve-trust" --check "$p" >/dev/null 2>&1 || { trust='   NOT TRUSTED by claude'; WARN=$((WARN+1)); }
+    fi
+    printf '    %-14s %-12s %s%s%s\n' "$h" "$(holding_field "$h" manor '?')" "$p" \
+      "$([ -d "$p" ] || printf '   MISSING ON DISK')" "$trust"
+  done
+else
+  printf '  no manors.md. Run reeve-survey against a repo to register one.\n'; WARN=$((WARN+1))
+fi
+
+if [ "$WARN" -gt 0 ] && command -v claude >/dev/null 2>&1; then
+  printf '\n  A holding marked NOT TRUSTED will stall every hand on a folder trust\n'
+  printf '  dialog it cannot answer. Fix each one once:\n'
+  printf '    reeve-trust --grant <repo path>\n'
+  printf '  or open that repository in claude yourself and accept the prompt.\n'
+fi
+
+hdr "errands"
+"$BIN/reeve-status" --all 2>/dev/null | sed 's/^/  /'
+
+hdr "verdict"
+if [ "$WARN" -eq 0 ]; then
+  printf '  ready\n'
+else
+  printf '  %s thing(s) above want attention\n' "$WARN"
+fi

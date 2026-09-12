@@ -1,0 +1,21 @@
+name = "cursor"
+bin = "cursor-agent"
+verified = false
+source = "published flags plus firstmate launch templates. Not installed here, never run."
+herdr_kind = "cursor"
+
+launch = "{bin} {perm} {model} {prompt}"
+prompt_mode = "argv"
+prompt_flag = ""
+perm_flag = "--trust --yolo"
+model_flag = "--model {model}"
+effort_flag = ""
+env = []
+instruction_files = ["AGENTS.md", ".cursorrules"]
+detect_env = ["CURSOR_AGENT", "CURSOR_TRACE_ID"]
+
+# UNVERIFIED. Does this CLI sandbox tool access to the working directory? If it
+# does, it needs the equivalent of claude's --add-dir pointed at {dir}, or every
+# hand will stall on its first read of the brief. Leave empty only after testing.
+dirs_flag = ""
+argv_separator = false

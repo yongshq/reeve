@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+# Answer a hand's open question. Records the answer durably, then delivers it.
+#
+# Usage:
+#   reeve-answer <id> <key> <the answer>
+#   reeve-answer <id> --list
+#
+# The durable record IS the delivery. The status file gets the `resolved` line
+# first and that is what closes the question; typing it into the hand's session
+# is a best effort convenience on top. If the keystroke never lands, the answer
+# still survives a relaunch, and that ordering is the whole point.
+
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/reeve-lib.sh"
+BIN=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+
+id=${1:-}; require_id "$id"; shift
+[ -f "$(meta_file "$id")" ] || die "no errand '$id'"
+
+if [ "${1:-}" = "--list" ]; then
+  n=0
+  status_reconcile "$id" | sed -n 's/^decision=//p' | while IFS="$(printf '\t')" read -r k q; do
+    printf '  [%s] %s\n' "$k" "$q"
+  done
+  n=$(status_field "$id" open)
+  [ "${n:-0}" -eq 0 ] && info "no open questions on $id"
+  exit 0
+fi
+
+key=${1:-}; shift 2>/dev/null || :
+answer="$*"
+[ -n "$key" ] || die "which question? run: reeve-answer $id --list"
+[ -n "$answer" ] || die "no answer given"
+
+open_keys=$(status_reconcile "$id" | sed -n 's/^decision=//p' | cut -f1)
+if ! lines_has "$key" "$open_keys"; then
+  if [ -z "$open_keys" ]; then
+    die "errand '$id' has no open questions. Nothing to answer."
+  fi
+  die "no open question with key '$key' on $id. Open: $(printf '%s' "$open_keys" | tr '\n' ' ')"
+fi
+
+# 1. durable first. This is the delivery.
+printf 'resolved [key=%s]: %s\n' "$key" "$answer" >> "$(status_file "$id")"
+info "recorded: resolved [key=$key]"
+
+# 2. then tell the hand, if one is still alive to tell
+target=$(meta_get "$id" target '')
+backend=$(meta_get "$id" backend herdr)
+if [ -z "$target" ]; then
+  info "no session to notify. The answer is in the status file and a relaunch will read it."
+  exit 0
+fi
+state=$("$BIN/reeve-backend" call agent_state "$target" --backend "$backend" 2>/dev/null || echo unreadable)
+case $state in
+  alive)
+    msg="The liege has answered your question [key=$key]: $answer  Continue the errand. Do not append a resolved line yourself; it is already recorded."
+    if "$BIN/reeve-backend" call send_text_submit "$target" "$msg" --backend "$backend" 2>/dev/null; then
+      info "delivered to the hand at $target"
+    else
+      warn "could not deliver to $target. The answer is recorded, so relaunch the errand to apply it."
+    fi ;;
+  *)
+    info "the hand is $state. The answer is recorded; relaunch with: reeve-dispatch $id" ;;
+esac

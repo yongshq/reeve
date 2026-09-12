@@ -1,0 +1,87 @@
+# Memory
+
+How the reeve decides what to remember, where to put it, and what to throw away. Load this before
+writing to any memory file. `reeve-memory` does the mechanics; everything below is the judgement,
+and the script deliberately refuses to make it for you.
+
+## Where a fact goes
+
+Scope, not topic. Ask who needs this fact, not what it is about.
+
+| The fact is about | Scope | Example |
+|---|---|---|
+| the liege: preferences, working style, standing decisions | `liege` | prefers rebase over merge commits |
+| a project, including which repos belong to it | `manor:<name>` | the web app and the api are one product |
+| one repo, useful to anyone working in it | that repo's `.reeve.md` | run tests with `pnpm test -- --run` |
+| one errand | that errand's record, nowhere else | the flaky test was unrelated to this change |
+| nothing anyone needs again | do not write it | the error message you already fixed |
+
+A fact that is about one repo does not belong in the reeve's home. It belongs in the repo, where a
+teammate and a future hand both find it. The reeve never writes that file by hand: dispatch a
+scribe errand.
+
+## The rule that keeps memory honest
+
+**Evidence or it does not get written.**
+
+Add or refresh an entry only when you can name the evidence from this session. In practice, say the
+evidence out loud before you write:
+
+- good: "the liege said 'never push without asking me' in this session, so this is a preference"
+- good: "the test command in AGENT.md is `pnpm test`, I ran it and it worked"
+- bad: "this seems like something worth remembering"
+- bad: "this is probably still true"
+- bad: "the entry already says this, so it must be right"
+
+That last one matters most. **An entry cannot be evidence for itself.** If the only reason you are
+refreshing an entry is that it exists, leave it alone and let it age out. That is the difference
+between memory and an ever growing pile of unchecked assertions.
+
+## Tiers
+
+| Tier | Marker | Goes stale | Use for |
+|---|---|---|---|
+| aging | `<!--a:DATE-->` | 30 days | most things. Facts about a codebase that could change |
+| perishable | `<!--p:DATE-->` | 7 days | the temporary: a branch in flight, a broken dependency, an in-progress migration |
+| pinned | `<!--P-->` | never | standing instructions from the liege that are not going to change |
+
+Pin sparingly. A pinned entry is a permanent claim on context, and every pinned line is one the
+liege will never be asked about again.
+
+The date means **last reinforced by evidence**, not written. Refreshing a date is a claim, so treat
+it with the same evidence rule as writing a new entry.
+
+## Stale never means deleted
+
+Stale means archived. `reeve-memory strike` moves an entry to `archive.md`, which is append only
+and never loaded into context. So retiring knowledge costs nothing and loses nothing, and there is
+never a reason to delete instead.
+
+## The budget
+
+`reeve-memory budget` estimates tokens across the always-loaded files. Run it before and after a
+sweep. Over budget is a decision for the liege, never a silent eviction. Reduce in this order:
+
+1. **Archive what is stale.** Free, and usually enough.
+2. **Consolidate what overlaps.** Two entries stating one fact become one clearer entry.
+3. **Move repo specific facts into the repo.** That is where they belonged anyway.
+4. **Only then**, propose cutting the oldest aging entries, by name, and ask.
+
+If archiving everything eligible still would not reach budget, stop. Do not evict. The real problem
+is the pinned floor, so say that instead of destroying knowledge that could not have closed the gap.
+
+## What not to remember
+
+- Anything `~/dotfiles/AGENTS.md` already says. That file is the single owner of the liege's
+  workflow rules, and a second copy drifts and then nobody knows which is true.
+- Anything the repository already records: its structure, its history, its own instruction file.
+- Anything that only mattered inside one conversation.
+
+If the liege asks you to remember one of those, ask what was non-obvious about it. The answer to
+that question is the thing worth keeping.
+
+## One honest limit
+
+A sweep can only preserve what the session still knows. It is not a reconciliation of records
+against reality. Never infer a fact you did not observe, and never go looking for facts the session
+did not produce, because an invented memory is worse than a missing one.
