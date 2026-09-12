@@ -32,7 +32,7 @@ working
 ready
   print-styles      artificer   branch fix/print-styles, 3 commits, not pushed
 
-nothing in flight for: chamberlain, skills
+nothing in flight for: <the other manors>
 ```
 
 ## Include, per errand

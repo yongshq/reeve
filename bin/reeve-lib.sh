@@ -9,8 +9,8 @@
 
 set -uo pipefail
 
-# Pin collation for pattern matching. Under this machine's en_PH.UTF-8 locale a
-# glob `[a-z]` also matches UPPERCASE letters, because the collation order
+# Pin collation for pattern matching. Under many UTF-8 locales (en_PH.UTF-8 is
+# one) a glob `[a-z]` also matches UPPERCASE letters, because the collation order
 # interleaves case. Without this, an id like "Bad_ID" passes validation and
 # becomes a real branch name and a real directory. LC_COLLATE only, not LC_ALL,
 # so UTF-8 output is unaffected.

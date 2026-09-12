@@ -77,6 +77,6 @@ evidence and stops, and you put exactly one proposal to the liege.
 - Do not register a guess. An unconfirmed grouping is worse than no grouping, because it looks
   authoritative afterwards.
 - Do not infer siblings from directory listing alone.
-- Do not register a directory that is not a git repository. `~/yongshq/myhoa` has the web, backend
-  and mobile shape of a multi-repo project but is not under version control at any level, so there
-  is nothing to dispatch into yet. Say that rather than registering it.
+- Do not register a directory that is not a git repository. A directory can have the web, backend
+  and mobile shape of a multi-repo project and still not be under version control at any level, in
+  which case there is nothing to dispatch into yet. Say that rather than registering it.

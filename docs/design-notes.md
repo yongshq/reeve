@@ -83,7 +83,7 @@ named after the harness rather than inside dispatch.
 
 ## Three bugs that shaped the shell code
 
-- **Locale collation.** Under `en_PH.UTF-8` the glob `[a-z]` also matches uppercase, so `Bad_ID`
+- **Locale collation.** Under many UTF-8 locales the glob `[a-z]` also matches uppercase, so `Bad_ID`
   passed id validation and would have become a branch name and a directory. `LC_COLLATE=C` is
   pinned in `reeve-lib.sh` and ids are validated with negated classes.
 - **pipefail plus `grep -q`.** `grep -q` exits on the first match and closes the pipe; the upstream
