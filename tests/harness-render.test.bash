@@ -23,10 +23,21 @@ ck "binary present"                 "claude"                          "$line"
 ck "env prefix rendered"            "env CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION="  "$line"
 ck "errand dir granted"             "--add-dir /abs/errands/demo"     "$line"
 ck "settings file passed"           "--settings $S"                   "$line"
+ck "configured mcp servers off"     "--strict-mcp-config"             "$line"
+ck "built-in chrome mcp off"        "--no-chrome"                     "$line"
+nk "no mcp config alongside it"     "--mcp-config"                    "$line"
 ck "argv separator present"         " -- "                            "$line"
 ck "prompt points at the brief"     "$B"                              "$line"
 nk "brief text is NOT inlined"      "Definition of done"              "$line"
 nk "no unexpanded placeholder"      "{"                               "$line"
+
+# model and effort are optional slots: absent unless asked for, and an effort
+# that renders away to nothing is worse than no flag, because dispatch accepts
+# --effort and the hand silently runs at the default.
+nk "no effort unless asked"  "--effort"       "$line"
+withe=$("$H" render claude "$B" --settings "$S" --model opus --effort high)
+ck "model reaches the line"  "--model opus"   "$withe"
+ck "effort reaches the line" "--effort high"  "$withe"
 
 # arrays: single item and multi item both parse fully
 ck "single item array"   "CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false" "$("$H" get claude env)"

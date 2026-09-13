@@ -22,10 +22,18 @@ the user's terminal:
 | `--permission-mode bypassPermissions` | **stalls.** Raises a full screen consent dialog defaulting to "No, exit" |
 | `--dangerously-skip-permissions` | **stalls.** Same consent dialog |
 | `--settings <file>` with an explicit `allow` list | **works.** No dialog, no prompt, Bash runs |
+| the same, on a machine with any MCP tool source | **stalls, silently.** An inherited MCP tool falls outside the allow list and raises a consent dialog. `--strict-mcp-config --no-chrome`, with no `--mcp-config`, starts the hand with no MCP tools at all and removes the class |
 
 The first row is the trap, because it *looks* like it works: common commands match the user's own
 `settings.local.json` allow list and run fine, so a hand gets minutes into real work before hitting
 one that does not. That is exactly how the first live errand failed here.
+
+The last row is worse than a stall, because it is a stall nobody is told about: the hand is
+suspended inside a tool call, so it cannot append `blocked:` and its last status line stays
+`working:`. Measured on a scribe errand that sat six minutes at a `claude-in-chrome` dialog. Two
+flags because there are two sources: `--strict-mcp-config` drops the servers in the machine's MCP
+configuration, and `--no-chrome` drops Claude in Chrome, which is a built-in integration that
+`claude mcp list` never mentions and the strict flag alone leaves fully loaded.
 
 ## Tool grants are coarse
 

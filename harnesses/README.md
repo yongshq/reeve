@@ -15,10 +15,11 @@ reeve needs neither python nor jq to start a hand.
 | `bin` | the executable to look for on PATH |
 | `verified` | `true` only after an errand has actually run through it end to end |
 | `source` | where the flags came from, so an unverified file is auditable |
-| `launch` | command template. Placeholders: `{bin} {perm} {model} {effort} {prompt}` |
+| `launch` | command template. Placeholders: `{bin} {perm} {mcp} {model} {effort} {prompt}` |
 | `prompt_mode` | `argv` (positional), `flag` (via `prompt_flag`), or `stdin` (piped in) |
 | `prompt_flag` | used only when `prompt_mode = "flag"` |
 | `perm_flag` | the autonomy flag. See the warning below |
+| `mcp_flag` | valueless flags that start the hand with no MCP tools, from any source, or empty if the harness has none. See the trap below |
 | `model_flag` | template containing `{model}`, or empty if the harness has none |
 | `effort_flag` | template containing `{effort}`, or empty |
 | `env` | environment assignments prefixed to the command |
@@ -51,7 +52,7 @@ If you want a tighter setting, change `perm_flag` in one file. For claude, `--pe
 acceptEdits` is the tighter option, at the cost of a hand that stalls the first time it needs to
 run a test.
 
-## Two traps that cost real time here
+## Three traps that cost real time here
 
 **A variadic option eats the positional prompt.** `claude --allowedTools A B C "the prompt"`
 consumes the prompt as another tool name, and the hand launches with an empty composer and no task,
@@ -61,6 +62,19 @@ looking perfectly healthy. Keep variadic options out of `launch`, or put the pro
 rather than allowing it, so a hand on that mode reports everything as blocked and looks like an
 environment problem. Never infer a permission mode's behaviour from its name: run the two-line
 probe in `docs/verifying-a-harness.md` and read the result.
+
+**An inherited MCP server suspends the hand where nothing can see it.** A hand picks up the user
+level MCP configuration of the machine it runs on, and an office allow list covers core tools only,
+so an inherited MCP tool raises a consent dialog. Unlike every other stall, this one is invisible:
+the hand is suspended inside a tool call, so it cannot append `blocked:`, its last status line stays
+`working:` and the sentry sees a healthy hand. That is what `mcp_flag` is for.
+
+Two things make it easy to get wrong. A harness may have more than one source of MCP tools, and
+shutting off the configured servers can leave a built-in integration untouched: claude needs
+`--strict-mcp-config` *and* `--no-chrome`, and its own `claude mcp list` reports the second one as
+nothing at all. And servers connect asynchronously, so a hand asked in its first seconds answers
+"no MCP tools" whether or not the flag works. Probe a minute in, and assume every harness inherits
+until you have measured otherwise.
 
 ## Verifying a harness
 

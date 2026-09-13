@@ -94,7 +94,7 @@ harness_render() {
   [ -n "$brief" ] || die "render needs an absolute brief path"
   case $brief in /*) ;; *) die "brief path must be absolute, got '$brief'" ;; esac
 
-  local bin launch mode pflag perm mflag eflag line prompt dirs sep settings
+  local bin launch mode pflag perm mflag eflag line prompt dirs sep settings mcp
   bin=$(h_get "$n" bin "$n")
   launch=$(h_get "$n" launch '')
   [ -n "$launch" ] || die "harness '$n' declares no launch template"
@@ -112,6 +112,14 @@ harness_render() {
     eflag=$(h_get "$n" effort_flag '')
     [ -n "$eflag" ] && eflag=$(printf '%s' "$eflag" | sed "s|{effort}|$effort|g")
   fi
+
+  # Shut off every MCP tool the machine would otherwise lend the hand, whether
+  # from an MCP configuration file or from a built-in integration. Unconditional,
+  # like perm_flag and unlike model_flag: there is no value to substitute and no
+  # errand that wants them, so a harness either declares the flags or has none.
+  # A hand suspended in an MCP consent dialog cannot append `blocked:`, so this
+  # is the one class of stall the status file could never surface.
+  mcp=$(h_get "$n" mcp_flag '')
 
   # Grant tool access to the errand directory. A hand's working copy is its cwd,
   # but the brief, the status file and the report all live in the errand
@@ -151,6 +159,7 @@ harness_render() {
 
   line=$launch
   line=${line//\{bin\}/$bin}
+  line=${line//\{mcp\}/$mcp}
   line=${line//\{dirs\}/$dirs}
   line=${line//\{settings\}/$settings}
   line=${line//\{perm\}/$perm}

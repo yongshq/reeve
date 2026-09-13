@@ -1,13 +1,13 @@
 name = "claude"
 bin = "claude"
 verified = true
-source = "verified against claude 2.1.236, including the four-way permission test in offices/README.md"
+source = "verified against claude 2.1.236: the permission table in offices/README.md, plus --strict-mcp-config, --no-chrome and --effort read from its --help and each measured on a live detached launch"
 herdr_kind = "claude"
 
 # {dirs} and {settings} both come BEFORE the prompt, and {dirs} is variadic
 # (--add-dir takes a list), so the "--" separator below is what actually keeps
 # the positional prompt from being swallowed.
-launch = "{bin} {dirs} {settings} {model} {effort} {prompt}"
+launch = "{bin} {mcp} {dirs} {settings} {model} {effort} {prompt}"
 prompt_mode = "argv"
 prompt_flag = ""
 argv_separator = true
@@ -25,13 +25,35 @@ argv_separator = true
 perm_flag = ""
 settings_flag = "--settings {settings}"
 
+# A hand inherits the machine's own user level MCP servers, and the allow list
+# above covers core tools only, so any inherited MCP tool falls outside it and
+# raises an interactive consent dialog. That is the one stall a hand cannot
+# report: it is suspended inside a tool call, so it never appends `blocked:`,
+# its last line stays `working:` and the sentry sees a healthy hand. Measured:
+# an errand sat six minutes at a claude-in-chrome dialog nobody had granted.
+#
+# Two flags because there are two sources, measured separately:
+#   --strict-mcp-config   restricts the session to servers from --mcp-config,
+#                         and with no --mcp-config alongside it that set is
+#                         empty. Keep it companionless: adding --mcp-config
+#                         here would put the servers back.
+#   --no-chrome           Claude in Chrome is a built-in integration, not a
+#                         configured server. It does not appear in
+#                         `claude mcp list` and --strict-mcp-config alone
+#                         leaves its whole mcp__ tool set loaded.
+# Measured on 2.1.236 in a detached tmux session: strict alone still listed
+# mcp__claude-in-chrome__*, strict plus --no-chrome listed none. Probe late,
+# not at startup: these servers connect asynchronously, so a hand asked in its
+# first seconds answers "none" whether or not the flag is doing anything.
+mcp_flag = "--strict-mcp-config --no-chrome"
+
 # Grants tool access to the errand directory, where the brief, the status file
 # and the report live. Without it a hand refuses its own first read with
 # "that path is outside my working directory".
 dirs_flag = "--add-dir {dir}"
 
 model_flag = "--model {model}"
-effort_flag = ""
+effort_flag = "--effort {effort}"
 env = ["CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false"]
 instruction_files = ["CLAUDE.md", "AGENTS.md"]
 detect_env = ["CLAUDECODE", "CLAUDE_CODE_SESSION_ID"]
