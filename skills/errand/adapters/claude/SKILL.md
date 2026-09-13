@@ -48,6 +48,53 @@ the label, so `auth-refresh` is right and `fix-the-thing` is not.
   execute rather than for the liege to read: fragments, lists, paths, no courtesy and no narration.
   The liege never reads it, so every sentence you round out is tokens spent on nobody.
 
+## The tier: model and effort
+
+Flags on the dispatch, not seams in the brief:
+
+```sh
+bin/reeve-dispatch <id> --model <model> --effort <effort>
+```
+
+Spend where being wrong is expensive. Save where the work is mechanical and the test is objective.
+
+| Errand shape | Tier |
+|---|---|
+| scribe pass over files you already named | cheap |
+| artificer edit across known files: rename, formatting sweep, mechanical fix | cheap |
+| artificer migration a script performs and a test proves | cheap |
+| steward pass over entries you already identified | cheap |
+| artificer building something new, or fixing a bug it must find first | default |
+| scout root-causing from symptoms, or mapping an unfamiliar holding | default |
+| warden reviewing finished work | default, never cheap |
+| anything where the wrong answer reaches the liege as fact | default or richer |
+
+Both ways this goes wrong are silent, and only the first is obvious:
+
+- **Too rich** wastes money. Nothing reports it, ever.
+- **Too cheap** is worse. A hand that guesses instead of reading writes something plausible and
+  reports `done:`. The household's only guard is a warden, which costs more than the saving did.
+
+A cheap tier does not make a hand read less or take fewer turns. Scope does that, in the `{SPEC}`
+seam. The tier sets the price per token, not the count.
+
+### What actually reaches the hand
+
+Rendering is per harness: `model_flag` and `effort_flag` in `harnesses/<harness>.toml`. Several
+declare one or both empty, and an empty flag is dropped silently, so the setting is recorded in
+`$REEVE_HOME/state/<id>.meta` and never appears on the command line. `bin/reeve-status` does not
+print it either. Confirm before relying on it:
+
+```sh
+bin/reeve-dispatch <id> --dry-run --model <model> --effort <effort>   # prints the launch line
+```
+
+Read that line. If the flag is not in it, the harness has no flag to render it into, and the errand
+goes out on that harness's default whatever you passed.
+
+Both flags belong to the dispatch and not to the brief, so a relaunch (below) that omits them
+relaunches on defaults.
+
 ## After dispatching
 
 Tell the liege in one line what went out. Not the brief, not the path, not the command. "A scout is
