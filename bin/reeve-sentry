@@ -243,7 +243,13 @@ EOS
   # below asks, and the latency optimisation survives where it is real, on a
   # pane genuinely working, where the wait blocks for its whole timeout. The
   # threshold is two seconds rather than one because `date +%s` has one second
-  # granularity, and an instant wait that straddles a tick reads as one.
+  # granularity, and an instant wait that straddles a tick reads as one. That
+  # also means a wait that genuinely ran for about a second and a half reads as
+  # instant and still buys a full sleep. Left as a chosen edge, not an
+  # oversight: the price is a second or two of extra latency before a wake,
+  # never a missed one, and closing it means sub-second arithmetic in a shell
+  # or a new dependency, spent on latency nobody can perceive against a signal
+  # whose own dwell is ninety seconds.
   waited=no
   t0=$(date +%s)
   while IFS= read -r i || [ -n "$i" ]; do
