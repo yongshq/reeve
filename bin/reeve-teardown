@@ -127,10 +127,10 @@ if [ "$writes" != home ] && [ -n "$wt" ] && [ -d "$wt" ]; then
   fi
 fi
 
-# Both landed-work checks below compare against the recorded base, and they are
-# only as trustworthy as that comparison. Every one of them therefore refuses
-# when it cannot be made: a verification that cannot run is a refusal, never a
-# pass. This is not hypothetical tidiness. `rev-list --count` used to fall back
+# The landed-work invariant below compares against the recorded base, and it is
+# only as trustworthy as that comparison. It therefore refuses when the
+# comparison cannot be made: a verification that cannot run is a refusal, never
+# a pass. This is not hypothetical tidiness. `rev-list --count` used to fall back
 # to 0 on failure, and 0 reads as "nothing unlanded", so a base that no longer
 # resolved was indistinguishable from a fully landed branch and the copy was
 # removed with its commits still on it.
@@ -140,8 +140,8 @@ fi
 base_sha=''
 require_base() {
   [ -n "$base_sha" ] && return 0
-  # Deliberate fail-closed guard, not dead code: both checks below call this
-  # before they touch git, so an errand with no repository recorded is told why
+  # Deliberate fail-closed guard, not dead code: the invariant below calls this
+  # before it touches git, so an errand with no repository recorded is told why
   # the test stopped instead of being shown a raw fatal: from git afterwards.
   [ -n "$repo" ] || refuse "no repository is recorded for this errand." \
     "The landed-work test has nothing to compare against, so it stops. Check the repo= line in" \
@@ -157,62 +157,93 @@ require_base() {
     "then tear down again."
 }
 
-# 4. committed but unlanded work. "Landed" means the base already contains it.
+# 4. the landed-work invariant, asked of every copy in the same way.
 #
-# The repository is no longer tested in this condition. Doing so short circuited
-# the whole check before require_base could apply its own guard, so a bad repo=
-# printed "landed-work checks passed" and then a raw fatal: from git further
-# down. The helper owns that message; let it speak.
-if [ -n "$br" ]; then
+# One question: is everything this errand holds already landed on the base. In
+# practice two facts, and BOTH are checked whenever they apply, never one or the
+# other. That is the whole fix. The old shape asked about the recorded branch OR
+# about the copy's HEAD, chosen by whether branch= was empty, so the RECORD
+# decided which check ran and every copy whose record and whose actual shape
+# disagreed fell through the gap between them. Three commits closed three holes
+# that way, each keying the test on a proxy for danger rather than on danger:
+# whether a count came back, then the writes label, then whether branch= was
+# empty. A proxy is a lossy summary of the thing it stands for, so each fix
+# missed the sibling case its new proxy also could not express.
+#
+# "Landed" is the strict reading, deliberately: reachable from the RECORDED
+# BASE, not from any ref that happens to survive the removal. That is the test
+# this script's header claims to own. Conflating it with the looser "the commits
+# stay reachable somehow" is where the holes came from, so the loose reading is
+# not implemented and is not argued for anywhere below. A copy whose record and
+# reality disagree therefore refuses, even when some other branch would have
+# kept its commits: the disagreement is the thing worth hearing about.
+#
+# Reachability, not equality. A copy that committed nothing is an ancestor of
+# its base, and stays one when unrelated work lands there afterwards, so asking
+# whether HEAD equals the base refused the cleanup of every scout and warden the
+# moment anything landed on main.
+copy_at_risk=no
+[ "$writes" != home ] && [ -n "$wt" ] && [ -d "$wt" ] && copy_at_risk=yes
+
+if [ -n "$br" ] || [ "$copy_at_risk" = yes ]; then
+  # The repository is not tested in this condition. Doing so short circuited the
+  # whole check before require_base could apply its own guard, so a bad repo=
+  # printed "landed-work checks passed" and then a raw fatal: from git further
+  # down. The helper owns that message; let it speak.
   require_base
-  # A recorded branch that does not resolve is a check that cannot run, not a
-  # branch with nothing on it. Skipping it silently reported a pass, and on a
-  # detached copy that is check 5's fail-open again by another door.
-  git -C "$repo" rev-parse --verify --quiet "refs/heads/$br" >/dev/null 2>&1 \
-    || refuse "the recorded branch '$br' does not exist in $repo." \
+
+  # 4a. the recorded branch, if there is one, must exist and be landed. Asked
+  # first because it is the fact that can name the commits it refuses over,
+  # which is the more useful refusal when both facts would fail.
+  if [ -n "$br" ]; then
+    # A recorded branch that does not resolve is a check that cannot run, not a
+    # branch with nothing on it. Skipping it silently reported a pass.
+    br_sha=$(git -C "$repo" rev-parse --verify --quiet "refs/heads/$br^{commit}" 2>/dev/null) \
+      || br_sha=''
+    [ -n "$br_sha" ] || refuse "the recorded branch '$br' does not exist in $repo." \
       "The landed-work test has nothing to compare against, so it stops rather than assume the" \
       "work is safe. Correct the branch= line in $(meta_file "$id"), or find out whether that" \
       "branch was deleted before its commits landed."
-  ahead=$(git -C "$repo" rev-list --count "$base_sha..$br" 2>/dev/null) || ahead=''
-  # A count that did not come back is not a count of zero. The base and the
-  # branch both resolve by this point, so anything still failing here is
-  # something nobody anticipated, which is precisely when to stop. Deliberate
-  # fail-closed defence in depth: unreachable today, kept on purpose.
-  [ -n "$ahead" ] || refuse "could not count the commits on $br that $base does not have." \
-    "The base and the branch both resolve, so this failure is unexplained and the script will" \
-    "not guess that the answer was zero. Investigate before removing anything."
-  if [ "$ahead" -gt 0 ]; then
-    unlanded=$(git -C "$repo" log --oneline "$base_sha..$br" 2>/dev/null \
-               | head -5 | sed 's/^/    /')
-    refuse "$br has $ahead commit(s) that $base does not have." \
-           "$unlanded" \
-           "Rebase or merge it first. Removing the copy now leaves the branch, but this is the" \
-           "point at which work gets forgotten, so it stops here."
+    if ! git -C "$repo" merge-base --is-ancestor "$br_sha" "$base_sha" 2>/dev/null; then
+      # Counted for the message only, never to decide. --is-ancestor has already
+      # decided, and it is non-zero on an error exactly as on unlanded work, so
+      # a count that does not come back can no longer read as "nothing unlanded"
+      # the way the old fallback to 0 did.
+      ahead=$(git -C "$repo" rev-list --count "$base_sha..$br_sha" 2>/dev/null) || ahead=''
+      unlanded=$(git -C "$repo" log --oneline "$base_sha..$br_sha" 2>/dev/null \
+                 | head -5 | sed 's/^/    /')
+      refuse "$br has ${ahead:-unlanded} commit(s) that $base does not have." \
+             "$unlanded" \
+             "Rebase or merge it first. Removing the copy now leaves the branch, but this is the" \
+             "point at which work gets forgotten, so it stops here."
+    fi
   fi
-fi
 
-# 5. a detached copy must still be sitting on its base.
-#
-# Gated on the SHAPE of the copy, not on the permission it was given. Removing a
-# worktree destroys commits only when its HEAD is detached, because a branch
-# keeps them reachable, so this is the only guard on that case and every
-# detached copy has to pass it whatever it was allowed to write. Gating it on
-# writes=no meant a detached copy recorded as anything else satisfied neither
-# this check nor check 4: nothing was compared, and the script printed
-# "landed-work checks passed" on its way to removing the commits. A steward is
-# excluded by writes=home, which works in the reeve's home and has no copy.
-if [ -z "$br" ] && [ "$writes" != home ] && [ -n "$wt" ] && [ -d "$wt" ]; then
-  require_base
-  head_now=$(git -C "$wt" rev-parse HEAD 2>/dev/null) || head_now=''
-  # Deliberate fail-closed defence in depth: unreachable through an ordinary
-  # dispatch, kept because the alternative to reading HEAD is assuming it.
-  [ -n "$head_now" ] || refuse "the copy at $wt has no readable HEAD." \
-    "This check cannot tell whether that copy committed anything, so it stops rather than assume" \
-    "it did not. Look at the copy before removing it."
-  if [ "$head_now" != "$base_sha" ]; then
-    refuse "the copy at $wt has moved off $base ($head_now)." \
-           "Its HEAD is detached and this errand has no branch, so nothing would keep those" \
-           "commits reachable once the copy is removed. Look before removing it."
+  # 4b. the copy's own HEAD, whatever it is or is not sitting on. A branch in
+  # the meta file is a claim ABOUT the copy, not an observation OF it, so it is
+  # never a substitute for asking the copy itself. Removing a worktree destroys
+  # commits when nothing else holds them, and only the copy knows what it holds.
+  # A steward is excluded by writes=home: it works in the reeve's home, and that
+  # same label keeps the removal section below off any path it records anyway.
+  if [ "$copy_at_risk" = yes ]; then
+    head_now=$(git -C "$wt" rev-parse HEAD 2>/dev/null) || head_now=''
+    # Fail-closed, and reachable: a worktree= naming a plain directory, or a
+    # copy whose worktree admin data was already pruned, both arrive here.
+    [ -n "$head_now" ] || refuse "the copy at $wt has no readable HEAD." \
+      "This check cannot tell whether that copy committed anything, so it stops rather than" \
+      "assume it did not. Look at the copy before removing it."
+    if ! git -C "$repo" merge-base --is-ancestor "$head_now" "$base_sha" 2>/dev/null; then
+      if [ -n "$br" ]; then
+        refuse "the copy at $wt has moved off $base ($head_now)." \
+               "$br is landed, but the copy is not on it: the record and the copy disagree, so" \
+               "that branch says nothing about what this copy holds. Find out where that work" \
+               "belongs, or correct the branch= line in $(meta_file "$id"), then tear down again."
+      else
+        refuse "the copy at $wt has moved off $base ($head_now)." \
+               "It holds work that has not landed on $base, and this errand records no branch," \
+               "so the test has nothing else to ask. Look at the copy before removing it."
+      fi
+    fi
   fi
 fi
 

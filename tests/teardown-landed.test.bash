@@ -114,6 +114,19 @@ on_a_ref() { # on_a_ref <repo> <sha> -> yes|no
   then printf 'yes\n'; else printf 'no\n'; fi
 }
 
+# The same question asked of the whole repository rather than one commit, and
+# the one assertion every case can make: after a correct run, nothing at all is
+# orphaned. A copy's HEAD is a root while the copy exists, so a refusal shows
+# clean here; the moment a copy is removed over work that was only its own, the
+# commit it held appears. Reflogs are excluded deliberately: they would keep an
+# orphan alive for ninety days and hide exactly the loss this suite is for.
+unreachable() { # unreachable <repo> -> none|<sha ...>
+  local out
+  out=$(git -C "$1" fsck --unreachable --no-reflogs 2>/dev/null \
+        | sed -n 's/^unreachable commit //p')
+  if [ -n "$out" ]; then printf '%s\n' "$out" | tr '\n' ' '; else printf 'none\n'; fi
+}
+
 # 1. a branch ahead of a base that does exist: refuses, as it always has.
 scene ahead-real-base main ahead
 run_teardown ahead-real-base
@@ -275,6 +288,189 @@ scene clean-writes-yes main clean yes
 run_teardown clean-writes-yes
 ck_eq  "12b a clean copy with writes=yes tears down" "$RC" 0
 ck_eq  "12b its copy is removed"                     "$(gone "$wt")" removed
+
+# --- the state matrix -------------------------------------------------------
+# What the record CLAIMS and what the copy actually IS are two independent
+# facts, and the guard has to ask both. Every hole this file exists to close
+# lived in the cell where they disagree: the record chose which check ran, so a
+# copy examined through the half that looked safe was removed with its commits
+# on it. This builder varies them separately, which the scene builder above
+# cannot do.
+#
+# branch state: empty    no branch recorded, as a scout or warden is dispatched
+#               landed   a real branch the base already contains
+#               unlanded a real branch holding a commit the base does not
+#               missing  a branch= naming a ref that was never created
+# head state:   at-base  the detached copy is where its base left it
+#               off-ref  the copy committed, so its HEAD is on no ref at all
+cell() { # cell <id> <branch-state> <head-state> <writes> [recorded-base]
+  local id=$1 bstate=$2 hstate=$3 writes=$4 recorded=${5:-main} branch=''
+  repo="$SCRATCH/$id"; wt="$SCRATCH/$id.worktrees/w"
+  mkdir -p "$repo"
+  git -C "$repo" init -q -b main
+  git -C "$repo" config user.email tester@example.invalid
+  git -C "$repo" config user.name reeve-test
+  printf 'one\n' > "$repo/a.txt"
+  git -C "$repo" add -A >/dev/null; git -C "$repo" commit -qm 'init'
+  case $bstate in
+    landed)   branch="fix/$id"; git -C "$repo" branch "$branch" main ;;
+    unlanded) branch="fix/$id"
+              git -C "$repo" checkout -q -b "$branch"
+              printf 'branch work\n' > "$repo/c.txt"
+              git -C "$repo" add -A >/dev/null
+              git -C "$repo" commit -qm 'work that never landed'
+              git -C "$repo" checkout -q main ;;
+    missing)  branch="fix/$id-never-created" ;;
+  esac
+  git -C "$repo" worktree add -q --detach "$wt" main
+  if [ "$hstate" = off-ref ]; then
+    printf 'two\n' > "$wt/b.txt"
+    git -C "$wt" add -A >/dev/null; git -C "$wt" commit -qm 'work nobody wants to lose'
+  fi
+  sha=$(git -C "$wt" rev-parse HEAD)
+  mkdir -p "$REEVE_HOME/errands/$id"
+  {
+    printf 'repo=%s\n'     "$repo"
+    printf 'worktree=%s\n' "$wt"
+    printf 'branch=%s\n'   "$branch"
+    printf 'base=%s\n'     "$recorded"
+    printf 'writes=%s\n'   "$writes"
+  } > "$REEVE_HOME/state/$id.meta"
+  printf 'done: finished\n' > "$REEVE_HOME/errands/$id/status"
+}
+
+# 13. All twenty four cells, executed. The expected column is the invariant
+#     restated as a table: remove only when everything the copy holds is already
+#     on the base, refuse otherwise, and never orphan a commit either way. One
+#     cell changed meaning deliberately: landed/off-ref used to remove and lose
+#     the commit, and now refuses, because the record and the copy disagree.
+n=0
+while read -r bstate hstate w rc_want copy_want <&3; do
+  case $bstate in ''|'#'*) continue ;; esac
+  n=$((n+1))
+  id="m$n-$bstate-$hstate-$w"
+  cell "$id" "$bstate" "$hstate" "$w"
+  c_repo=$repo c_wt=$wt c_sha=$sha
+  run_teardown "$id"
+  ck_eq "13 $bstate/$hstate/$w rc"           "$RC" "$rc_want"
+  ck_eq "13 $bstate/$hstate/$w copy"         "$(gone "$c_wt")" "$copy_want"
+  ck_eq "13 $bstate/$hstate/$w orphans none" "$(unreachable "$c_repo")" none
+  ck_eq "13 $bstate/$hstate/$w commit kept"  "$(survives "$c_repo" "$c_sha")" survived
+done 3<<'CELLS'
+# branch    head     writes  rc  copy
+empty       at-base  yes     0   removed
+empty       at-base  no      0   removed
+empty       at-base  home    0   present
+empty       off-ref  yes     1   present
+empty       off-ref  no      1   present
+empty       off-ref  home    0   present
+landed      at-base  yes     0   removed
+landed      at-base  no      0   removed
+landed      at-base  home    0   present
+landed      off-ref  yes     1   present
+landed      off-ref  no      1   present
+landed      off-ref  home    0   present
+unlanded    at-base  yes     1   present
+unlanded    at-base  no      1   present
+unlanded    at-base  home    1   present
+unlanded    off-ref  yes     1   present
+unlanded    off-ref  no      1   present
+unlanded    off-ref  home    1   present
+missing     at-base  yes     1   present
+missing     at-base  no      1   present
+missing     at-base  home    1   present
+missing     off-ref  yes     1   present
+missing     off-ref  no      1   present
+missing     off-ref  home    1   present
+CELLS
+
+# 13b. THE THIRD HOLE, named, because a table of twenty four rows is easy to
+#      read past. A record naming a branch that really did land, and a copy left
+#      detached on a commit that is on nothing. Check 4 passed on the branch,
+#      check 5 never ran because branch= was not empty, and the copy went with
+#      its commit on it. Both facts are asked of every copy now, so the branch
+#      passing no longer excuses the copy.
+cell third-hole landed off-ref yes
+run_teardown third-hole
+ck_eq  "13b a landed branch does not excuse the copy" "$RC" 1
+ck_eq  "13b its copy survives"                        "$(gone "$wt")" present
+ck_has "13b the refusal names the copy's path"        "$OUT" "$wt"
+ck_has "13b it says record and copy disagree"         "$OUT" "the record and the copy disagree"
+ck_eq  "13b nothing is orphaned"                      "$(unreachable "$repo")" none
+ck_eq  "13b the commit is not lost"                   "$(survives "$repo" "$sha")" survived
+
+# 13c. the base still has to resolve for either fact. A copy that committed
+#      nothing looks safe, and is, but only against a base the script can
+#      actually compare with: a check that cannot run refuses.
+cell cell-missing-base landed at-base yes vanished-base
+run_teardown cell-missing-base
+ck_eq  "13c a clean copy with an unresolvable base refuses" "$RC" 1
+ck_eq  "13c its copy survives"                              "$(gone "$wt")" present
+ck_has "13c it refuses on the base"                         "$OUT" "vanished-base"
+
+# 13d. the same, with nothing recorded but the copy. The branch fact is the one
+#      that used to consult the base first, so this proves the copy fact does
+#      not quietly skip a base it cannot resolve.
+cell cell-missing-base-detached empty at-base no vanished-base
+run_teardown cell-missing-base-detached
+ck_eq  "13d a detached clean copy with no base refuses"     "$RC" 1
+ck_eq  "13d its copy survives"                              "$(gone "$wt")" present
+ck_has "13d it refuses on the base"                         "$OUT" "does not name a commit"
+
+# 14. THE OVER-REFUSAL. A scout's copy that committed nothing, and unrelated
+#     work lands on the base afterwards, which it always does. Asking whether
+#     HEAD EQUALS the base refused this the moment anything landed on main, from
+#     a sentry run whose output is discarded, and the contract promises that a
+#     scout disappears completely. The question is whether the copy's HEAD is
+#     REACHABLE FROM the base, and it is: nothing it holds is its own.
+cell over-refusal empty at-base no
+printf 'unrelated\n' > "$repo/c.txt"
+git -C "$repo" add -A >/dev/null; git -C "$repo" commit -qm 'unrelated work lands on main'
+run_teardown over-refusal
+ck_eq  "14 a clean copy behind an advanced base tears down" "$RC" 0
+ck_eq  "14 its copy is removed"                             "$(gone "$wt")" removed
+ck_eq  "14 nothing is orphaned"                             "$(unreachable "$repo")" none
+ck_eq  "14 the base commit is untouched"                    "$(survives "$repo" "$sha")" survived
+
+# 14b. the same shape with a landed branch recorded, which is what an artificer
+#      leaves behind once its work is in. The base moving on afterwards must not
+#      turn that into a refusal either.
+cell over-refusal-branch landed at-base yes
+printf 'unrelated\n' > "$repo/c.txt"
+git -C "$repo" add -A >/dev/null; git -C "$repo" commit -qm 'unrelated work lands on main'
+run_teardown over-refusal-branch
+ck_eq  "14b a landed errand behind an advanced base tears down" "$RC" 0
+ck_eq  "14b its copy is removed"                                "$(gone "$wt")" removed
+ck_eq  "14b nothing is orphaned"                                "$(unreachable "$repo")" none
+
+# 15. a copy sitting ON a branch rather than detached, which the matrix cannot
+#     express. When the record and the copy agree and the branch has landed,
+#     nothing has changed: it tears down.
+scene on-its-branch main landed
+git -C "$wt" checkout -q "fix/on-its-branch"
+run_teardown on-its-branch
+ck_eq  "15 a copy on its own landed branch tears down" "$RC" 0
+ck_eq  "15 its copy is removed"                        "$(gone "$wt")" removed
+ck_eq  "15 nothing is orphaned"                        "$(unreachable "$repo")" none
+
+# 15b. the strict reading, chosen deliberately. The recorded branch landed, but
+#      the copy is on a DIFFERENT branch holding work that did not. Nothing is
+#      lost by removing it, because that other branch keeps the commit, so the
+#      loose reading would wave it through. This script is the landed-work test,
+#      not a loss-prevention test: a copy whose record and reality disagree is
+#      something the liege wants to hear about, not something to tidy away.
+scene other-branch main landed
+git -C "$wt" checkout -q -b fix/other-branch-actual
+printf 'three\n' > "$wt/c.txt"
+git -C "$wt" add -A >/dev/null; git -C "$wt" commit -qm 'unlanded work on another branch'
+other_sha=$(git -C "$wt" rev-parse HEAD)
+other_meta=$REEVE_HOME/state/other-branch.meta
+run_teardown other-branch
+ck_eq  "15b a copy on another branch refuses"       "$RC" 1
+ck_eq  "15b its copy survives"                      "$(gone "$wt")" present
+ck_has "15b the refusal says they disagree"         "$OUT" "the record and the copy disagree"
+ck_has "15b it names the line to correct"           "$OUT" "branch= line in $other_meta"
+ck_eq  "15b the other branch's commit is kept"      "$(survives "$repo" "$other_sha")" survived
 
 echo
 echo "passed=$PASS failed=$FAIL"
