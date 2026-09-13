@@ -16,6 +16,76 @@
 # result, never an obstacle to route around. There is deliberately no --force:
 # if git or this script objects, something is there that you did not expect, and
 # past that objection the work is unrecoverable.
+#
+# What it guarantees, mechanically. A copy is removed only when the work it
+# holds has landed on the recorded base: its own HEAD, and its recorded branch
+# if it has one, are each reachable from that base. Both are asked whenever
+# they apply, never one or the other. Nothing else is asked, and the rest of
+# this block is what that leaves open.
+#
+# What it deliberately does not guarantee. These are chosen edges, not
+# oversights, and the reason is the load-bearing half of each: a limit reported
+# as a bug, or closed without reading why it was left, costs more than the
+# limit does.
+#
+# - The HEAD reflog and ORIG_HEAD. Removing a copy destroys every root private
+#   to it, and HEAD is only the cheapest to name. A commit held solely by the
+#   copy's own reflog, after a commit and then a `reset --hard`, is lost. Left
+#   open because the false-refusal rate is close to total: one `commit
+#   --amend`, one `rebase -i`, one `reset --hard` leaves a non-ancestor in the
+#   reflog, and every artificer does at least one. Requiring every reflog entry
+#   to be landed would refuse nearly every copy forever, over work the hand
+#   deliberately threw away, and a guard that noisy gets worked around. This
+#   script has no --force, so that workaround would be worse than the hole.
+#
+# - In-progress rebase, merge, cherry-pick and revert state, and the
+#   per-worktree ref namespaces refs/worktree, refs/bisect and refs/rewritten.
+#   OPEN AND RECOMMENDED, not an accepted limit. A warden judged these worth
+#   closing where the reflog is not, because they hold work in flight rather
+#   than discarded work, and measured their false-refusal rate at zero over
+#   every clean case in its state space. Nothing catches them today: a stopped
+#   rebase leaves the tree clean, so check 3 does not see it and `git worktree
+#   remove` does not object either. The liege has not decided them. Whatever
+#   closes them wants its own refusal text, because "this copy has a rebase in
+#   progress" is actionable where "moved off main" is not.
+#
+# - A copy git knows by a different path than the record does. Where the copy's
+#   directory is absent the gate below asks git rather than reading that
+#   absence as nothing at risk, but it asks about a path taken from the record,
+#   so anything that makes the two differ (a `git worktree move`, a renamed
+#   parent, a case-only difference) puts it back to skipping the check and
+#   reporting a pass, leaving git's entry at the real path as the last root
+#   holding those commits. Left open rather than fixed because nothing in the
+#   household moves or renames a copy. Closing it means identifying a copy by
+#   something the record cannot get wrong, or enumerating every worktree entry
+#   in the repository and refusing over the ones no live errand claims.
+#
+# - The stack case. A base= naming a branch that has itself landed and still
+#   sits behind main refuses work that has in fact landed, because the copy's
+#   commits are not reachable from that branch. The liege parked it
+#   deliberately: it fails closed, so it costs attention rather than work, and
+#   the correction is the base= line in the errand's meta file rather than
+#   anything here. Expect it rather than reading it as a malfunction. The reeve
+#   corrected that line by hand eight times on the day this guard was built.
+#
+# - Ignored files. A copy's ignored files are deleted with it, silently:
+#   `git status --porcelain` does not list them and `git worktree remove` does
+#   not object. Right for build output, wrong for a hand's local env file. An
+#   open product decision with the liege, not a settled limit.
+#
+# Every hole found in this file so far has been the same mistake in a new
+# costume: the guard identifies a copy by the record's DESCRIPTION of it rather
+# than by the copy's identity, so each hole is one more way for the description
+# and the thing to diverge. A reader holding that sentence will recognise the
+# seventh before it costs anything.
+#
+# `git worktree prune` was removed deliberately and must not be put back
+# casually. `git worktree remove` clears its own entry, so the prune only ever
+# reached OTHER errands' stale entries, and such an entry is the last root
+# holding that copy's commits. The one cost was measured and is small: a stale
+# entry blocks a later dispatch that wants the same path, and git names the fix
+# itself, with "missing but already registered worktree; use 'add -f' to
+# override, or 'prune' or 'remove' to clear".
 
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/reeve-lib.sh"
 BIN=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
