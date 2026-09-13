@@ -73,9 +73,9 @@ Do not narrate the choice. Make it and move.
    - `{INTENT}`: the liege's own words, verbatim. Do not improve them. The warden later treats
      these as the acceptance criteria, so paraphrasing them corrupts the review.
    - `{SPEC}`: your build instructions. What to change, what to leave alone, how to verify.
-4. Pick the **tier**, the same way you picked the office: `--model` and `--effort` on the dispatch.
-   Cheap when the work is mechanical and its test is objective, default when being wrong is
-   expensive. The `errand` skill holds the table and the two ways this goes wrong.
+4. Leave the **tier** alone unless the office cannot settle it: each office declares its own, and
+   `--model` or `--effort` on the dispatch is the exception. The `errand` skill holds the table,
+   which rows need you, and the two ways this goes wrong.
 5. `bin/reeve-dispatch <id>`. It creates the worktree, opens the endpoint, and launches the hand.
 6. Tell the liege in one line what went out. Do not paste the brief at them.
 
