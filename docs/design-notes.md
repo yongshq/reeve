@@ -47,7 +47,11 @@ Three upstream herdr behaviours forced this and are worth knowing:
   event wait is only an optimisation.
 - `agent_status` reports `idle` and `done` mid-turn
   ([#3530](https://github.com/herdrdev/herdr/issues/3530)), so a native idle is never evidence a
-  hand stopped. Only `working` is accepted, as evidence of activity.
+  hand stopped. Only `working` is accepted, as evidence of activity. **Not reproduced on herdr 0.9.0,
+  one harness, one machine**: sampling `agent_status` every 0.2s through a multi-tool turn and then
+  through a real hand's whole seventeen minute turn showed no blip either time. The caution stands,
+  because one sample of one harness is not a refutation and 0.9.0 may simply have fixed it. What it
+  buys is a short dwell where a dwell is needed, nothing more.
 - a file descriptor leak can force-restart the server and kill every pane in the session
   ([#3527](https://github.com/herdrdev/herdr/issues/3527)). Durable files survive that; panes do not.
 

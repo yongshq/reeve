@@ -9,7 +9,7 @@
 
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/reeve-lib.sh"
 
-BACKEND_FNS="available describe create_endpoint launch capture send_text_submit target_exists agent_state wait_change kill"
+BACKEND_FNS="available describe create_endpoint launch capture send_text_submit target_exists agent_state attention_state wait_change kill"
 
 backend_known() { ls "$REEVE_ROOT_D/backends"/*.sh 2>/dev/null | while read -r f; do basename "$f" .sh; done; }
 

@@ -23,6 +23,7 @@ Each is `reeve_backend_<name>_<fn>`, sourced only through `bin/reeve-backend`.
 | `send_text_submit` | `<target> <text>` | nothing | 0 only if submission was **confirmed**, not merely typed |
 | `target_exists` | `<target>` | nothing | 0 if the endpoint is still there |
 | `agent_state` | `<target>` | one word: `alive`, `dead`, `missing` or `unreadable` | 0 |
+| `attention_state` | `<target>` | one word: `working`, `waiting`, `settled` or `unknown` | 0 |
 | `wait_change` | `<target> <timeout_ms>` | nothing | 0 a change was observed, 1 timed out with no signal, 2 this backend cannot wait and the caller must poll |
 | `kill` | `<target>` | nothing | 0 |
 
@@ -37,12 +38,35 @@ Each is `reeve_backend_<name>_<fn>`, sourced only through `bin/reeve-backend`.
    license a duplicate.
 3. **Never trust a native idle or done status as proof a hand stopped.** Accept a native "working"
    as evidence of activity and nothing more. The status file is the contract.
-4. **Labels are never authority.** herdr does not enforce label uniqueness, so never place or
+4. **`agent_state` and `attention_state` answer different questions, and neither substitutes for the
+   other.** `agent_state` asks whether there is still a process, and is recovery grade. `attention_state`
+   asks whether the session is getting on with it, and exists because a hand suspended at a permission
+   dialog is `alive` by every process measure while nothing at all is happening. Keep them apart:
+   folding one into the other puts a false `dead` back within reach. `attention_state` is also allowed
+   to be wrong in the safe direction, which is `unknown`, because nothing destructive hangs off it.
+5. **Labels are never authority.** herdr does not enforce label uniqueness, so never place or
    destroy anything because a label matched. Resolve identity from ids the backend itself returned.
-5. **A refusal is terminal.** If `available` fails, say why and stop. Never silently fall back to
+6. **A refusal is terminal.** If `available` fails, say why and stop. Never silently fall back to
    another backend.
-6. **`wait_change` is an optimisation, never a source of truth.** Exit 2 is a perfectly good
-   answer, and the polling caller is the contract.
+7. **`wait_change` is an optimisation, never a source of truth.** Exit 2 is a perfectly good
+   answer, and the polling caller is the contract. Its states may also be **latched**, so it can
+   return "a change was observed" instantly and forever; a caller that reads that as time having
+   passed busy-spins.
+
+## The two backends are not symmetric about attention
+
+herdr composes its answer from a detection manifest it updates remotely, so `attention_state` there is
+one call against the live screen and the regexes are never this repository's problem.
+
+Under tmux there is nothing to ask but the pane's text. Measured: `pane_current_command` is the
+harness binary in every condition, working or suspended, and `#{pane_title}` carries the harness's OSC
+title but never the working glyph, because that glyph is herdr's own composition of an OSC progress
+region tmux has no format variable for. So the highest priority rule in the herdr scheme has no tmux
+equivalent and `working` cannot be recognised positively at all. The tmux adapter therefore borrows
+herdr's classifier on captured text where herdr happens to be installed, and falls back to two
+conditions of its own where it is not, answering `unknown` rather than guessing.
+
+That gap is a property of tmux, not an unfinished adapter.
 
 ## Adding one
 

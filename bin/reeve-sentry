@@ -39,6 +39,14 @@ while [ $# -gt 0 ]; do
 done
 
 cursor_file() { printf '%s/state/.cursor-%s\n' "$REEVE_HOME_D" "$1"; }
+# Alongside the cursor, and for the same reason: what this errand looked like
+# last time, so a condition that is only interesting once is only reported once.
+attn_file() { printf '%s/state/.attn-%s\n' "$REEVE_HOME_D" "$1"; }
+
+# How long a session must sit waiting before it is worth a wake. A hand between
+# tool calls can read as not-working for an instant, and a wake for that would be
+# noise. Overridable only so the test suite can drive it.
+attn_dwell=${REEVE_ATTN_DWELL:-90}
 
 # Clean up a hand that has finished. An agent does not exit itself, so without
 # this every completed errand leaves a session idling at a prompt, holding a
@@ -81,6 +89,7 @@ live_errands() {
 # Absorb or escalate. One errand, one verdict.
 check_one() {
   local i=$1 f seen now new st open div bk tgt live
+  local attn af since woke nowsec last
   f=$(status_file "$i")
   seen=$(cat "$(cursor_file "$i")" 2>/dev/null || echo 0)
   now=0
@@ -120,9 +129,51 @@ check_one() {
     esac
   fi
 
+  tgt=$(meta_get "$i" target ''); bk=$(meta_get "$i" backend herdr)
+
+  # A hand suspended at a permission dialog cannot tell anyone: it is stopped
+  # inside a tool call, so no line ever reaches its status file, the session
+  # looks healthy from outside, and the household reads that silence as
+  # progress. It happened, and it cost the liege ten minutes of answering
+  # dialogs by hand before a screenshot showed why.
+  #
+  # So police the invariant rather than detect a dialog: an errand whose
+  # reported state is `working` must have a session that is working. That holds
+  # for a dialog nobody has seen yet as well as for the two known kinds, which
+  # is the whole reason it is not a list of prompts to keep up to date.
+  #
+  # Reported state has to be exactly `working`. Every other state is either
+  # already escalated or already the liege's, and re-reporting it would turn one
+  # stall into a wake per poll.
+  attn=''
+  af=$(attn_file "$i")
+  [ "$st" = working ] && attn=$("$BIN/reeve-backend" call attention_state "$tgt" --backend "$bk" 2>/dev/null || echo unknown)
+  if [ "$attn" = waiting ]; then
+    since=''; woke=no
+    [ -f "$af" ] && read -r since woke < "$af"
+    nowsec=$(date +%s)
+    case ${since:-} in ''|*[!0-9]*) since=$nowsec; woke=no; printf '%s %s\n' "$since" no > "$af" ;; esac
+    # Two guards, and they are different guards. The dwell is against a reading
+    # taken in the instant between two tool calls. The latch is against saying
+    # the same thing every poll for as long as the dialog stands: one stall is
+    # one wake. Both live in this one file, and any value other than `waiting`
+    # deletes it, so a hand that gets answered and stalls again is reported
+    # again.
+    if [ "${woke:-no}" != yes ] && [ $(( nowsec - since )) -ge "$attn_dwell" ]; then
+      printf '%s yes\n' "$since" > "$af"
+      last=$(status_field "$i" last)
+      # Never reaped, for the reason `blocked:` is never reaped: it can still be
+      # steered, and the session is the only place the question exists.
+      printf 'signal: %s is waiting for an answer in its session and cannot report it, last said %s\n' \
+        "$i" "${last:-nothing}"
+      return 0
+    fi
+  else
+    rm -f "$af"
+  fi
+
   # A hand that vanished without a terminal line is the failure mode that would
   # otherwise wait forever, so it is worth a wake on its own.
-  tgt=$(meta_get "$i" target ''); bk=$(meta_get "$i" backend herdr)
   live=$("$BIN/reeve-backend" call agent_state "$tgt" --backend "$bk" 2>/dev/null || echo unreadable)
   case "$live:$st" in
     dead:done|dead:failed|missing:done|missing:failed) : ;;
@@ -159,7 +210,20 @@ EOS
   # Prefer the backend's bounded native wait over a blind sleep, but treat its
   # answer as a hint only. Exit 2 means this backend cannot wait at all, which
   # is a perfectly good answer: fall back to sleeping.
+  #
+  # A wait that returns instantly is not a wait. herdr waits on `blocked` and
+  # `done` and both are LATCHED, so the moment one hand sits at a prompt the
+  # wait returns 0 immediately and goes on doing so; skipping the sleep on that
+  # answer spun this loop at a full core for as long as the hand sat there:
+  # measured over one 12 second window against a real suspended pane, 12.73s of
+  # CPU for 11.86s of wall clock before this guard and 0.28s after it. So the
+  # sleep is owed unless the wait actually spent time, which is what the clock
+  # below asks, and the latency optimisation survives where it is real, on a
+  # pane genuinely working, where the wait blocks for its whole timeout. The
+  # threshold is two seconds rather than one because `date +%s` has one second
+  # granularity, and an instant wait that straddles a tick reads as one.
   waited=no
+  t0=$(date +%s)
   while IFS= read -r i || [ -n "$i" ]; do
     [ -n "$i" ] || continue
     tgt=$(meta_get "$i" target ''); bk=$(meta_get "$i" backend herdr)
@@ -170,5 +234,6 @@ EOS
   done <<EOS
 $ids
 EOS
-  [ "$waited" = yes ] || sleep "$poll"
+  spent=$(( $(date +%s) - t0 ))
+  if [ "$waited" = no ] || [ "$spent" -lt 2 ]; then sleep "$poll"; fi
 done

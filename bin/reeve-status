@@ -28,11 +28,22 @@ errand_ids() {
 }
 
 live_state() {
-  local i=$1 tgt bk
+  local i=$1 tgt bk st attn
   tgt=$(meta_get "$i" target '')
   [ -n "$tgt" ] || { printf 'never-dispatched\n'; return; }
   bk=$(meta_get "$i" backend herdr)
-  "$BIN/reeve-backend" call agent_state "$tgt" --backend "$bk" 2>/dev/null || printf 'unreadable\n'
+  st=$("$BIN/reeve-backend" call agent_state "$tgt" --backend "$bk" 2>/dev/null) || st=unreadable
+  # Two facts, because they are two questions. `alive` alone once covered a hand
+  # suspended at a permission dialog with nothing at all happening in it, so the
+  # second word is what separates a session getting on with it from one waiting
+  # for an answer nobody knows it wants. Only asked of a live session: for a dead
+  # or unreadable one there is nothing to be waiting.
+  if [ "$st" = alive ]; then
+    attn=$("$BIN/reeve-backend" call attention_state "$tgt" --backend "$bk" 2>/dev/null) || attn=unknown
+    printf '%s/%s\n' "$st" "${attn:-unknown}"
+  else
+    printf '%s\n' "$st"
+  fi
 }
 
 one() {

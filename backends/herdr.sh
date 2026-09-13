@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-# herdr backend. Primary. Verified against herdr 0.7.5.
+# herdr backend. Primary. Verified against herdr 0.9.0, which is what is
+# installed; the notes below about 0.7.5 behaviour are kept where they still
+# describe why a constraint exists. `agent explain`, which attention_state rests
+# on, did not exist in 0.7.5 at all.
 #
 # Every constraint in here is deliberate and load bearing. See the notes at each
 # one before simplifying it away.
@@ -182,6 +185,44 @@ reeve_backend_herdr_agent_state() {
   echo dead
 }
 
+_h_attn_from_explain() {
+  # One `agent explain` document in, one word out. Separate from the call that
+  # fetches it so the mapping can be tested against a captured document.
+  local e=$1 st box
+  [ -n "$e" ] || { echo unknown; return 0; }
+  st=$(printf '%s' "$e"  | jq -r '.state // empty' 2>/dev/null)
+  box=$(printf '%s' "$e" | jq -r '[.evaluated_rules[]? | select(.id == "live_prompt_box") | .matched] | first // false' 2>/dev/null)
+
+  # There is no single native field that separates the three conditions, because
+  # a dialog claude paints as a full screen overlay leaves the agent looking
+  # exactly like one that finished its turn: state idle, and no blocked rule
+  # matched at all. The pair does separate them. live_prompt_box matching means
+  # the composer is on screen with nothing over it, so an idle agent there is
+  # simply finished; idle with no composer means something is covering it,
+  # whatever that something is. Mapping both a visible blocker and a covered
+  # composer to one word is deliberate: the household polices the invariant that
+  # a hand reporting `working` has a session that is working, and does not need
+  # to know which dialog it was to say so.
+  case $st in
+    working)   echo working ;;
+    blocked)   echo waiting ;;
+    idle|done) if [ "$box" = true ]; then echo settled; else echo waiting; fi ;;
+    *)         echo unknown ;;
+  esac
+}
+
+reeve_backend_herdr_attention_state() {
+  local target=$1 pane e
+  pane=$(_h_pane "$target")
+
+  # Read `agent explain`, never `agent get`. agent_status is a LATCH: it was
+  # measured reading `done` while the pane was visibly suspended at a consent
+  # dialog, because nothing had transitioned since the last turn ended. explain
+  # recomputes from the live screen, and costs one call.
+  e=$(_h agent explain "$pane" --json) || { echo unknown; return 0; }
+  _h_attn_from_explain "$e"
+}
+
 reeve_backend_herdr_wait_change() {
   local target=$1 timeout=${2:-15000} pane
   pane=$(_h_pane "$target")
@@ -189,6 +230,11 @@ reeve_backend_herdr_wait_change() {
   # mid-turn (#3530), so idle is not evidence a hand stopped. Only blocked and
   # done are worth a wake, and even those are cross-checked by the caller
   # against the status file, which is the actual contract.
+  #
+  # Both of those states are LATCHED, so once a pane is in one this returns 0
+  # instantly and goes on doing so. That is correct here and a trap for the
+  # caller: a caller that treats every 0 as "time has passed" spins. The sentry
+  # owns that, by sleeping whenever the wait did not actually spend time.
   if _h agent wait "$pane" --until blocked --until done --timeout "$timeout" >/dev/null 2>&1; then
     return 0
   fi

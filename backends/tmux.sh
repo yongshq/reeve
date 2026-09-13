@@ -73,6 +73,72 @@ reeve_backend_tmux_agent_state() {
   esac
 }
 
+_t_attn_from_text() {
+  # Captured pane text in, one word out, with no herdr and no server. Two
+  # conditions, deliberately, and no more: the cancel footer every dialog
+  # carries, AND the absence of an empty composer prompt on a line of its own.
+  #
+  # The AND is load bearing. A hand writing ABOUT permission prompts puts that
+  # footer in its own scrollback, and its composer is still there underneath, so
+  # either half alone reports a working hand as stuck.
+  #
+  # It cannot tell `working` from `settled`, because without the OSC title
+  # nothing in the text says which, so it answers `unknown` rather than
+  # guessing. That is enough for what the sentry polices, which only ever acts
+  # on `waiting`.
+  #
+  # Here-strings, not pipes into grep: `... | grep -q` closes the pipe on the
+  # first match, the writer takes EPIPE, and pipefail then reports the whole
+  # pipeline failed, so a pattern that DID match reads as no match.
+  local text=$1
+  if grep -qEi 'esc to cancel|\(esc\)' <<<"$text" \
+     && ! grep -qE '^[[:space:]]*(>|❯)[[:space:]]*$' <<<"$text"; then
+    echo waiting
+  else
+    echo unknown
+  fi
+}
+
+reeve_backend_tmux_attention_state() {
+  local tgt=$1 target text st box e
+  target=$(_t_target "$tgt")
+  reeve_backend_tmux_target_exists "$tgt" || { echo unknown; return 0; }
+  text=$(tmux capture-pane -p -J -t "$target" -S -200 2>/dev/null)
+  [ -n "$text" ] || { echo unknown; return 0; }
+
+  # The asymmetry with herdr is real and not an oversight, so it is written down
+  # rather than left to be discovered. Under tmux there is nothing to ask but
+  # the pane's text. Measured: pane_current_command is the harness binary in
+  # every condition, working or suspended, and #{pane_title} carries claude's OSC
+  # title but never the working glyph, because that glyph is herdr's own
+  # composition of an OSC progress region tmux has no format variable for. So the
+  # highest priority rule in the herdr scheme has no tmux equivalent, and
+  # `working` cannot be recognised positively here at all.
+  #
+  # Preferred path: hand the captured text to herdr's own classifier, which reads
+  # a file and needs no server, so the regexes stay in the manifest herdr updates
+  # rather than in this repository. An optimisation, never a requirement: the
+  # point of this backend is to work where herdr is not.
+  #
+  # A target says nothing about which harness is in it, so both paths are asked
+  # in claude's terms. On another harness they answer `unknown` rather than
+  # guessing, which is the safe direction.
+  if command -v herdr >/dev/null 2>&1 && command -v jq >/dev/null 2>&1; then
+    e=$(herdr agent explain --file /dev/stdin --agent claude --json 2>/dev/null <<<"$text")
+    if [ -n "$e" ]; then
+      st=$(printf '%s' "$e"  | jq -r '.state // empty' 2>/dev/null)
+      box=$(printf '%s' "$e" | jq -r '[.evaluated_rules[]? | select(.id == "live_prompt_box") | .matched] | first // false' 2>/dev/null)
+      case $st in
+        working)   echo working; return 0 ;;
+        blocked)   echo waiting; return 0 ;;
+        idle|done) if [ "$box" = true ]; then echo settled; else echo waiting; fi; return 0 ;;
+      esac
+    fi
+  fi
+
+  _t_attn_from_text "$text"
+}
+
 reeve_backend_tmux_wait_change() {
   # tmux has no push event source. Exit 2 is the honest answer: it tells the
   # sentry to fall back to polling rather than pretending to have waited.

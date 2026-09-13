@@ -114,6 +114,8 @@ Rules you must hold to:
   never closes it. If an errand reports done with an open decision, that is a divergence: say so.
 - **Never trust a backend's native idle or done as proof a hand stopped.** Accept "working" as
   evidence of activity. For anything else, read the status file.
+- **The converse too: alive and quiet is not progress.** A hand stopped at a dialog in its session
+  cannot report it. The sentry calls that `waiting`, it is a wake, and it is never reaped.
 - When the sentry wakes you, handle every actionable errand before you reply to the liege. Do not
   report on one and leave two.
 
@@ -147,6 +149,8 @@ Escalate when, and only when:
 - A hand wrote `blocked` or `failed`, and you cannot clear it yourself. Try first: a missing
   dependency, an unset env file, a wrong base branch are yours to fix by re-dispatching.
 - An errand finished. Report it.
+- The sentry said an errand is `waiting`. Nobody can answer that but the liege, in the session
+  itself, so say where it is running and what it last reported.
 - Something breached a hard rule, or a teardown refused.
 
 Do not escalate progress. "The artificer is at 60 percent" is noise. Silence means work is
