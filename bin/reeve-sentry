@@ -191,6 +191,21 @@ check_one() {
   return 1
 }
 
+# The blind sleep between polls, as a seam, for the same reason attn_now is one.
+# What the guard at the bottom of the loop decides is whether to sleep at all,
+# but a test that has to sit through a real sleep can only observe that decision
+# as elapsed time, and elapsed time is what a loaded machine takes away: the
+# timeout and this sleep are two exits from the same loop, and a pass slow enough
+# to reach the deadline leaves before it ever sleeps, so the reading comes out at
+# nothing and the case fails with the guard perfectly intact. Recording the sleep
+# instead of taking it puts the decision itself on disk, with no clock in the
+# way. Overridable only so the test suite can drive it: unset, which is every run
+# outside that suite, this is exactly `sleep`.
+poll_sleep() {
+  [ -n "${REEVE_SENTRY_SLEEPS:-}" ] && { printf '%s\n' "$1" >> "$REEVE_SENTRY_SLEEPS"; return 0; }
+  sleep "$1"
+}
+
 start=$(date +%s)
 while :; do
   ids=$(live_errands)
@@ -242,5 +257,5 @@ EOS
 $ids
 EOS
   spent=$(( $(date +%s) - t0 ))
-  if [ "$waited" = no ] || [ "$spent" -lt 2 ]; then sleep "$poll"; fi
+  if [ "$waited" = no ] || [ "$spent" -lt 2 ]; then poll_sleep "$poll"; fi
 done

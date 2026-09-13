@@ -219,19 +219,61 @@ ck_has "3g with the same line"                     "$OUT" "waiting for an answer
 # watcher 12.74s of CPU per 11.68s of wall clock. This asserts the guard that
 # replaced it: the sleep is owed unless the wait actually spent time. A stub that
 # returns 0 instantly is exactly the pathological case.
+#
+# What is asserted is what the loop decided, not how long it took. Timing it was
+# the older shape and it flaked about one run in ten, and every run under load:
+# with a timeout shorter than one poll, the deadline and the sleep are two exits
+# from the same loop, and a first pass that outlives the deadline leaves before
+# it ever sleeps, so the elapsed time comes out at nothing while the guard is
+# perfectly intact. The sentry records its sleeps here instead of taking them,
+# and the stub retires the errand after the third wait, so the watch ends on the
+# loop's own arithmetic with no clock anywhere in the case.
+STUB_WAITS=$SCRATCH/waits
+STUB_SLEEPS=$SCRATCH/sleeps
+STUB_META=$REEVE_HOME/state/stalled.meta
+export STUB_WAITS STUB_META
+: > "$STUB_WAITS"
+count() { [ -f "$1" ] && awk 'END{print NR}' "$1" || echo 0; }
+
 cat >> "$REEVE_ROOT/backends/stub.sh" <<'STUB'
-reeve_backend_stub_wait_change() { return 0; }
+reeve_backend_stub_wait_change() {
+  printf 'instant\n' >> "$STUB_WAITS"
+  [ "$(awk 'END{print NR}' "$STUB_WAITS")" -lt 3 ] || printf 'tornDown=yes\n' >> "$STUB_META"
+  return 0
+}
 STUB
 printf 'settled\n' > "$ATTN"
-t0=$(date +%s)
-"$ROOT/bin/reeve-sentry" --poll 3 --timeout 1 --no-reap >/dev/null 2>&1
-elapsed=$(( $(date +%s) - t0 ))
-if [ "$elapsed" -ge 3 ]; then
+OUT=$(REEVE_SENTRY_SLEEPS="$STUB_SLEEPS" "$ROOT/bin/reeve-sentry" --poll 3 --no-reap 2>&1); RC=$?
+ck_eq "4 the watch ran until the errand retired"  "$RC" 3
+ck_eq "4 the stub answered three waits instantly" "$(count "$STUB_WAITS")" 3
+if [ "$(count "$STUB_SLEEPS")" = 3 ]; then
   ok "4 an instant native wait is still followed by a sleep"
 else
   bad "4 an instant native wait is still followed by a sleep" \
-      "the loop went round in ${elapsed}s with a poll of 3s, which is the spin"
+      "3 instant waits bought $(count "$STUB_SLEEPS") sleep(s), and the shortfall is the spin"
 fi
+ck_eq "4 and the sleep is the whole poll, not a token" "$(sort -u "$STUB_SLEEPS" 2>/dev/null)" 3
+
+# 4b. the other half of the same guard, and the reason it is not just an
+#     unconditional sleep: a wait that really blocked has already spent the poll,
+#     so sleeping it again would double the latency the native wait exists to
+#     remove. One real two second wait, because `spent` is measured on a one
+#     second clock and the threshold is two. Load can only lengthen that wait, so
+#     this direction cannot flake the way the timing above did.
+printf 'target=s|s:p1\nbackend=stub\noffice=artificer\nrepo=\nworktree=\nbranch=\nbase=main\nwrites=yes\n' \
+  > "$STUB_META"
+: > "$STUB_WAITS"; rm -f "$STUB_SLEEPS"
+cat >> "$REEVE_ROOT/backends/stub.sh" <<'STUB'
+reeve_backend_stub_wait_change() {
+  printf 'blocked\n' >> "$STUB_WAITS"
+  printf 'tornDown=yes\n' >> "$STUB_META"
+  sleep 2
+  return 0
+}
+STUB
+REEVE_SENTRY_SLEEPS="$STUB_SLEEPS" "$ROOT/bin/reeve-sentry" --poll 3 --no-reap >/dev/null 2>&1
+ck_eq "4b a wait that spent the time is not slept off" "$(count "$STUB_SLEEPS")" 0
+ck_eq "4b and it was one real wait that did it"        "$(count "$STUB_WAITS")" 1
 
 echo
 echo "passed=$PASS failed=$FAIL skipped=$SKIP"
