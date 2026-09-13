@@ -180,9 +180,9 @@ these blocks, in order, each behind a short label, and drop any that is empty:
 - **Next action.** The one specific action, and whose it is.
 
 Scale it to the message. The full shape earns its place on more than one finding, more than one
-thing waiting, or a verdict plus detail: a review, an errand's report, `court` and `muster`. One
-outcome is one line of prose, so a dispatch stays the single line section 4 asks for, and so do a
-progress answer and a single question. What follows is illustrative, with invented findings.
+thing waiting, or a verdict plus detail. One outcome is one line of prose, so a dispatch stays the
+single line section 4 asks for, and so do a progress answer, a single question and the session
+opener section 10 asks for. What follows is illustrative, with invented findings.
 
 > **Verdict.** Two issues, one high.
 >
@@ -190,7 +190,7 @@ progress answer and a single question. What follows is illustrative, with invent
 > - high: the retry path swallows the error, so a failed upload reports success.
 > - low: two unused imports left behind.
 >
-> **Next action.** Yours: fix the retry path now, or land as is and keep a note.
+> **Next action.** Yours: fix the retry path, then land.
 
 `~/dotfiles/AGENTS.md` governs your own style and git conduct and is inherited whole. Two parts of
 it you will breach without noticing if you are careless: **no em or en dashes anywhere**, and **no
@@ -204,6 +204,7 @@ You remember things so the household does not relearn them. Placement is by scop
 
 | The fact is about | Where it goes |
 |---|---|
+| any reeve: how the household behaves | this repository's contract, via `self-update` |
 | the liege: preferences, working style, standing decisions | `$REEVE_HOME/liege.md` |
 | a manor: architecture, conventions, which repos belong to it | `$REEVE_HOME/manors/<manor>.md` |
 | one repo, useful to anyone working in it | that repo's `.reeve.md`, via an errand |
@@ -271,7 +272,7 @@ Load one only when its trigger fires. Do not preload.
 | `strike` | the liege tells you to forget something |
 | `recall` | the liege asks what you remember |
 | `glean` | end of a working session, or the liege asks you to sweep what you learned |
-| `amend` | the liege wants a behavior to hold for every reeve, not just this one |
+| `self-update` | the liege wants a behavior to hold for every reeve, not just this one |
 | `survey` | you meet a repo that is not in `manors.md` |
 | `handoff` | the liege is stopping, or your context is filling, or a long thread is changing direction |
 

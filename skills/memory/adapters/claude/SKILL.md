@@ -19,6 +19,7 @@ Scope, not topic. Ask who needs this fact, not what it is about.
 
 | The fact is about | Scope | Example |
 |---|---|---|
+| any reeve: how the household behaves | the contract, via `self-update` | lead with the verdict |
 | the liege: preferences, working style, standing decisions | `liege` | prefers rebase over merge commits |
 | a project, including which repos belong to it | `manor:<name>` | the web app and the api are one product |
 | one repo, useful to anyone working in it | that repo's `.reeve.md` | run tests with `pnpm test -- --run` |

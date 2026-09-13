@@ -24,7 +24,9 @@ Load the `memory` skill first. It owns the judgement; this skill is the procedur
    strongest evidence there is. Say so.
 
 3. **Pick the scope.** Use the table in the `memory` skill. If it is genuinely about one repo, say
-   so and offer a scribe errand instead of writing it into the home.
+   so and offer a scribe errand instead of writing it into the home. If it describes how the reeve
+   behaves rather than who the liege is, stop here and load `self-update` instead: that belongs in
+   the contract, where it holds on every clone.
 
 4. **Pick the tier.** A standing instruction from the liege is `P`. A fact about a codebase is `a`.
    Something true only for now is `p`.

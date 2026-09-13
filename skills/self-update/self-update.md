@@ -1,4 +1,4 @@
-# amend
+# self-update
 
 The liege wants the household itself to behave differently, on every clone, including ones that do
 not exist yet. That is a change to the contract in this repository, and it goes out as an errand.
@@ -12,7 +12,7 @@ not exist yet. That is a change to the contract in this repository, and it goes 
    | The liege is describing | Where it goes | Handle |
    |---|---|---|
    | themselves: a preference or working style | `liege.md`, this machine only | `inscribe` |
-   | the reeve: how the household behaves or decides | the contract here, every clone | `amend` |
+   | the reeve: how the household behaves or decides | the contract, every clone | `self-update` |
 
    The test is one question: does the sentence describe the liege, or describe the reeve? "I prefer
    rebases" is the liege. "Lead with the verdict" is the reeve. "For any new clone", "every
@@ -21,19 +21,19 @@ not exist yet. That is a change to the contract in this repository, and it goes 
    goes in `liege.md`: one fact with two owners drifts, and then neither is trusted.
 
 2. **Find the single owner of the behavior.** One numbered section of `AGENTS.md`, or one office
-   file, or one skill method, or one script. Amend that one place. A behavior asserted in two files
+   file, or one skill method, or one script. Change that one place. A behavior asserted in two files
    is the same duplication problem one layer up. The usual owners: section 2 for a hard rule,
    section 3 for how a request is handled, section 6 for supervision, section 8 for how the liege is
    addressed, an office file for what one role may touch.
 
 3. **Generalise the behavior, never publish the person.** This repository is public; the liege's
-   memory is not. An amendment states how a reeve behaves, in terms any liege would recognise, and
+   memory is not. An update states how a reeve behaves, in terms any liege would recognise, and
    never names this liege, their projects, their directories or their machine. The worked example is
    section 8: "bullet points with priority" became a report shape every reeve follows, not a note
    about one person's taste.
 
 4. **Check what else is in flight in that file.** `AGENTS.md` is one file, so two hands in it is a
-   merge conflict you chose to create. Base the amendment on the branch already touching it rather
+   merge conflict you chose to create. Base the update on the branch already touching it rather
    than on `main`, or wait for that branch to land.
 
 5. **Weigh the context cost, and say it to the liege.** `AGENTS.md` loads in full every session, so
@@ -51,8 +51,8 @@ not exist yet. That is a change to the contract in this repository, and it goes 
 ## What not to do
 
 - Do not edit the contract yourself. Dispatch it.
-- Do not amend on a hunch about what the liege "probably" wants. An amendment reaches every future
-  clone, and a wrong one is inherited in silence.
+- Do not change the contract on a hunch about what the liege "probably" wants. An update reaches
+  every future clone, and a wrong one is inherited in silence.
 - Do not put the liege's name, projects or machine into it.
 - Do not add a new section when an existing one already owns the behavior.
-- Do not amend and inscribe the same fact.
+- Do not self-update and inscribe the same fact.
