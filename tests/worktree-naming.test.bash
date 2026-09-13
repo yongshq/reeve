@@ -1,13 +1,17 @@
 #!/usr/bin/env bash
-# The worktree path is composed once, in reeve-brief, and then trusted: dispatch
-# creates that directory and teardown removes it, both reading the recorded
-# value back rather than recomposing it. So the name a brief records is the only
-# place this can go wrong, and it is worth pinning.
+# A hand gets two names, and both say which office it is. The local copy is
+# composed once, in reeve-brief, and then trusted: dispatch creates that
+# directory and teardown removes it, both reading the recorded value back rather
+# than recomposing it. The session label is composed once, in reeve-dispatch, and
+# handed to a backend, which is the list the liege actually reads to see who is
+# working on what. So each name has exactly one place it can go wrong, and both
+# are worth pinning.
 #
-# Two properties matter beyond the name itself. The path stays FLAT, because an
-# <office>/<id> segment would quietly create a directory per role. And the
-# steward keeps having no copy at all, because dispatch runs it in the reeve's
-# home and a recorded path it never creates is a lie in the record.
+# Two properties matter beyond the names themselves. Both stay FLAT, because an
+# <office>/<id> segment would quietly create a directory per role and is not a
+# session name a backend accepts. And the steward keeps having no copy at all,
+# because dispatch runs it in the reeve's home and a recorded path it never
+# creates is a lie in the record.
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 PASS=0; FAIL=0
 eq() { # eq <name> <want> <got>
@@ -103,6 +107,58 @@ done
 eq "steward records no worktree path" "" "$(recorded e-steward)"
 nk "steward's brief mentions no .worktrees directory" ".worktrees" \
    "$(cat "$REEVE_HOME/errands/e-steward/brief.md")"
+
+# --- the session label names the office too -----------------------------------
+# `reeve-dispatch --dry-run` prints every command it would run and changes
+# nothing, so the line it would hand to create_endpoint carries the label
+# verbatim and no session is ever opened here.
+#
+# Backend and harness are stubbed through a scratch REEVE_ROOT rather than taken
+# from the machine running the suite. claude is the one verified harness and a
+# claude dispatch preflights folder trust, so a real pair would pass or refuse
+# depending on whose box this is. Only backends/ and harnesses/ are stubbed:
+# offices/ is the real directory, because dispatch copies an office's settings
+# out of it.
+STUB="$SCRATCH/root"
+mkdir -p "$STUB/backends" "$STUB/harnesses"
+ln -s "$ROOT/offices" "$STUB/offices"
+cat > "$STUB/backends/stub.sh" <<'ADAPTER'
+reeve_backend_stub_available()       { return 0; }
+reeve_backend_stub_describe()        { printf 'stub backend\n'; }
+reeve_backend_stub_create_endpoint() { printf 'stub:1\n'; }
+ADAPTER
+cat > "$STUB/harnesses/stub.toml" <<'HARNESS'
+bin = "true"
+verified = true
+launch = "{bin} {prompt}"
+prompt_mode = "argv"
+HARNESS
+
+# Dispatch refuses a brief still holding a seam, rightly, so fill both first.
+fill_seams() { # fill_seams <id>
+  local b="$REEVE_HOME/errands/$1/brief.md"
+  sed -e 's/{INTENT}/the liege said so/' -e 's/{SPEC}/build the thing/' "$b" > "$b.filled" \
+    && mv "$b.filled" "$b"
+}
+
+dry_label() { # dry_label <id>
+  fill_seams "$1"
+  REEVE_ROOT="$STUB" "$ROOT/bin/reeve-dispatch" "$1" \
+      --backend stub --harness stub --dry-run 2>/dev/null \
+    | sed -n 's/^ *would run: reeve-backend call create_endpoint [^ ]* \([^ ]*\) --backend .*/\1/p'
+}
+
+# The steward is included on purpose: it has no copy, so its label is the only
+# name it ever shows up under.
+for office in artificer warden steward; do
+  label=$(dry_label "e-$office")
+  eq "$office opens a session named $office-<id>" "$office-e-$office" "$label"
+  case $label in
+    */*) FAIL=$((FAIL+1)); printf 'FAIL  %s label is not a flat token: %s\n' "$office" "$label" ;;
+    '')  FAIL=$((FAIL+1)); printf 'FAIL  %s dry run printed no label at all\n' "$office" ;;
+    *)   PASS=$((PASS+1)); printf 'ok    %s label is a flat token (%s)\n' "$office" "$label" ;;
+  esac
+done
 
 echo "passed=$PASS failed=$FAIL"
 [ "$FAIL" -eq 0 ]

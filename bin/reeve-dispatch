@@ -139,7 +139,17 @@ else
 fi
 
 # --- endpoint and launch ---------------------------------------------------
-label="reeve-$id"
+# The label names the office, because it is what the liege reads in a backend's
+# session list. `reeve-<id>` said only that a reeve was involved, which every
+# session in the household shares, so the role was the one thing the list could
+# not tell them. This is the same name the local copy already carries, so a
+# glance lines the two up.
+#
+# Flat <office>-<id>, never <office>/<id>: a backend takes this as a session
+# name, and nothing recomputes it later. An errand's meta records the target the
+# backend returned, not the label, so sessions already running under the old
+# name keep working untouched.
+label="$office-$id"
 if [ "$dry" = yes ]; then
   printf '  would run: reeve-backend call create_endpoint %s %s --backend %s\n' "$cwd" "$label" "$backend"
   target='<target>'
