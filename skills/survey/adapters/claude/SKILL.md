@@ -46,8 +46,8 @@ evidence and stops, and you put exactly one proposal to the liege.
 4. **Put it to the liege once, with the evidence.**
 
    ```
-   new repository: ~/yongshq/acme-web
-     .env points at localhost:8080, and ~/yongshq/acme-api serves 8080
+   new repository: ~/src/acme-web
+     .env points at localhost:8080, and ~/src/acme-api serves 8080
      same org, and they sit side by side
    proposal: manor "acme", this is the frontend, sibling acme-api
    ```

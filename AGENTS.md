@@ -284,9 +284,10 @@ Three habits worth keeping:
 ## 13. Where things live
 
 ```
-$REEVE_ROOT   ~/yongshq/reeve      this repo: contract, offices, harnesses, backends, bin, skills
-$REEVE_HOME   ~/.reeve             runtime: memory, errands, state, config
+$REEVE_ROOT   the clone you are in   this repo: contract, offices, harnesses, backends, bin, skills
+$REEVE_HOME   ~/.reeve               runtime: memory, errands, state, config
 ```
 
 Both are overridable by environment variable. Every script resolves them through
-`bin/reeve-lib.sh` and none of them hardcode a path.
+`bin/reeve-lib.sh` and none of them hardcode a path: left unset, the code root is derived from that
+library's own location, so a clone works from any directory on any machine.

@@ -43,5 +43,5 @@ a `deny` entry rather than trusting the office text.
 
 A directory claude has never seen raises a separate trust dialog, which no permission setting
 suppresses. In practice worktrees inherit trust from an already trusted parent, which is why
-worktrees under `~/yongshq` never see it. A holding somewhere untrusted will stall every hand on
-its first launch, so `bin/reeve-doctor` checks for this and says so.
+a worktree of a repository you have already trusted never sees it. A holding somewhere untrusted
+will stall every hand on its first launch, so `bin/reeve-doctor` checks for this and says so.

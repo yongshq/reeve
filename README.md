@@ -24,19 +24,19 @@ than one that never starts. `bin/reeve-doctor` reports installed, declared and v
 ## Install
 
 ```sh
-git clone <this repo> ~/yongshq/reeve
-cd ~/yongshq/reeve && ./install.sh
+git clone <this repo> reeve
+cd reeve && ./install.sh
 bin/reeve-doctor
 ```
 
 A clone is the whole install. There is no shell config to edit, nothing to put on `PATH` and
-nothing written outside the clone and the operational home at `~/.reeve`. Every tool is run by
-path from the repository root, which is also where a session starts.
+nothing written outside the clone and the operational home at `~/.reeve`. The clone can sit
+wherever you like, since every path is resolved from where it actually ended up. Every tool is run
+by path from the repository root, which is also where a session starts.
 
-Then introduce a project and start a session:
+Then, from the repository root, introduce a project and start a session:
 
 ```sh
-cd ~/yongshq/reeve
 bin/reeve-survey ~/path/to/repo      # gathers evidence
 bin/reeve-survey --register <name> --manor <manor> --path <abs> --instructions AGENT.md
 claude

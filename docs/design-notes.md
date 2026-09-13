@@ -67,9 +67,9 @@ A directory claude has not been trusted for raises a "Is this a project you crea
 trust?" dialog that no permission setting suppresses. A hand cannot answer it and sits there
 looking exactly like a hand that is thinking.
 
-Measured: a worktree of `~/yongshq/portfolio` launched with no dialog, while a worktree of
-`~/yongshq/skills` stalled on one. `~/.claude.json` explains it: `portfolio` carries
-`hasTrustDialogAccepted: true` and `skills` carries `false`. Neither worktree path had a record of
+Measured: a worktree of an already trusted repository launched with no dialog, while a worktree of
+an untrusted one stalled on one. `~/.claude.json` explains it: the trusted repository carries
+`hasTrustDialogAccepted: true` and the other carries `false`. Neither worktree path had a record of
 its own, so **trust resolves through the git repository**, and every worktree inherits its parent
 repository's answer.
 
