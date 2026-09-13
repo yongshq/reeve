@@ -22,9 +22,9 @@ report briefly, then walk the open decisions one at a time.
 
    For anything with open decisions, `bin/reeve-status <id>` for the questions themselves.
 
-2. **Read the newest handoff for this manor**, if there is one, from `~/.claude/handoffs/`. The
-   liege already has a handoff convention and a format they read fluently. Use it rather than
-   inventing a second recap format.
+2. **Read the newest handoff for this manor**, if there is one: `bin/reeve-handoff newest <manor>`
+   prints its path. The household writes its own handoffs, and that command finds the newest for
+   the manor in hand.
 
 3. **Open with one paragraph, not a table.** What landed, what is in flight, what is stuck. Tables
    are for `/muster`; court is a conversation.
