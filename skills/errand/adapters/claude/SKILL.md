@@ -41,10 +41,12 @@ the label, so `auth-refresh` is right and `fix-the-thing` is not.
 
 - **`{INTENT}`**: the liege's own words, quoted, unimproved. A warden later checks the work against
   this, so paraphrasing it corrupts the review. If the liege was vague, quote the vagueness; do not
-  invent precision they did not give you.
+  invent precision they did not give you. This seam alone stays prose, because it is a quotation.
 - **`{SPEC}`**: your instructions. What to change, what to leave alone, how to verify. Name files
   you already know are involved. Say explicitly what is out of scope, because scope creep in a
-  parallel fleet becomes someone else's merge conflict.
+  parallel fleet becomes someone else's merge conflict. Write it telegraphically, for a hand to
+  execute rather than for the liege to read: fragments, lists, paths, no courtesy and no narration.
+  The liege never reads it, so every sentence you round out is tokens spent on nobody.
 
 ## After dispatching
 
