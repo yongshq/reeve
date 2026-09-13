@@ -17,10 +17,10 @@ report briefly, then walk the open decisions one at a time.
 1. **Gather.**
 
    ```sh
-   reeve-status --all
+   bin/reeve-status --all
    ```
 
-   For anything with open decisions, `reeve-status <id>` for the questions themselves.
+   For anything with open decisions, `bin/reeve-status <id>` for the questions themselves.
 
 2. **Read the newest handoff for this manor**, if there is one, from `~/.claude/handoffs/`. The
    liege already has a handoff convention and a format they read fluently. Use it rather than

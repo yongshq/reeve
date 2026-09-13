@@ -19,23 +19,27 @@ It is not a model, a harness, a CLI or an MCP server. It is a directory you inst
 
 **Verified** means an errand has actually run through it end to end on this machine. Anything else
 is refused rather than attempted, because a harness that fails halfway through an errand is worse
-than one that never starts. `reeve-doctor` reports installed, declared and verified separately.
+than one that never starts. `bin/reeve-doctor` reports installed, declared and verified separately.
 
 ## Install
 
 ```sh
 git clone <this repo> ~/yongshq/reeve
 cd ~/yongshq/reeve && ./install.sh
-export PATH="$HOME/yongshq/reeve/bin:$PATH"
-reeve-doctor
+bin/reeve-doctor
 ```
+
+A clone is the whole install. There is no shell config to edit, nothing to put on `PATH` and
+nothing written outside the clone and the operational home at `~/.reeve`. Every tool is run by
+path from the repository root, which is also where a session starts.
 
 Then introduce a project and start a session:
 
 ```sh
-reeve-survey ~/path/to/repo          # gathers evidence
-reeve-survey --register <name> --manor <manor> --path <abs> --instructions AGENT.md
-cd ~/yongshq/reeve && claude
+cd ~/yongshq/reeve
+bin/reeve-survey ~/path/to/repo      # gathers evidence
+bin/reeve-survey --register <name> --manor <manor> --path <abs> --instructions AGENT.md
+claude
 ```
 
 ## The vocabulary

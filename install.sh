@@ -104,14 +104,7 @@ if [ "$skills" = yes ]; then
   done
 fi
 
-# --- PATH ------------------------------------------------------------------
-case ":$PATH:" in
-  *":$ROOT/bin:"*) printf '  bin is on PATH\n' ;;
-  *) printf '\n  add this to your shell config so the reeve can reach its own tools:\n'
-     printf '    export PATH="%s/bin:$PATH"\n' "$ROOT" ;;
-esac
-
 printf '\nnext\n'
 printf '  1. %s/bin/reeve-doctor\n' "$ROOT"
-printf '  2. reeve-survey <a repo> to introduce a project, then --register the answer\n'
+printf '  2. %s/bin/reeve-survey <a repo> to introduce a project, then --register the answer\n' "$ROOT"
 printf '  3. start a reeve session:  cd %s && claude\n' "$ROOT"

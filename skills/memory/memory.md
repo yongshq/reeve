@@ -1,8 +1,8 @@
 # Memory
 
 How the reeve decides what to remember, where to put it, and what to throw away. Load this before
-writing to any memory file. `reeve-memory` does the mechanics; everything below is the judgement,
-and the script deliberately refuses to make it for you.
+writing to any memory file. `bin/reeve-memory` does the mechanics; everything below is the
+judgement, and the script deliberately refuses to make it for you.
 
 ## Where a fact goes
 
@@ -53,13 +53,13 @@ it with the same evidence rule as writing a new entry.
 
 ## Stale never means deleted
 
-Stale means archived. `reeve-memory strike` moves an entry to `archive.md`, which is append only
+Stale means archived. `bin/reeve-memory strike` moves an entry to `archive.md`, which is append only
 and never loaded into context. So retiring knowledge costs nothing and loses nothing, and there is
 never a reason to delete instead.
 
 ## The budget
 
-`reeve-memory budget` estimates tokens across the always-loaded files. Run it before and after a
+`bin/reeve-memory budget` estimates tokens across the always-loaded files. Run it before and after a
 sweep. Over budget is a decision for the liege, never a silent eviction. Reduce in this order:
 
 1. **Archive what is stale.** Free, and usually enough.

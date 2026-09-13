@@ -23,7 +23,7 @@ evidence and stops, and you put exactly one proposal to the liege.
 1. **Gather.**
 
    ```sh
-   reeve-survey <path>
+   bin/reeve-survey <path>
    ```
 
 2. **Read the evidence, weighted.** Not all of it is equally good:
@@ -57,7 +57,7 @@ evidence and stops, and you put exactly one proposal to the liege.
 5. **Record it.**
 
    ```sh
-   reeve-survey --register <holding> --manor <manor> --path <abs> \
+   bin/reeve-survey --register <holding> --manor <manor> --path <abs> \
      [--role frontend] [--instructions AGENT.md] [--base main] \
      [--setup "<install command>"] [--test "<test command>"]
    ```

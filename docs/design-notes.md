@@ -59,7 +59,7 @@ cross-checks the pane's foreground process table and never believes a registrati
 An errand that reports `done` while a `needs-decision` is still open is recorded as a **divergence**
 and reported as unfinished. A hand finishing is not the liege answering, and without this rule a
 hand that guessed at a question it should have waited on looks identical to one that got it right.
-`reeve-teardown` refuses while a decision is open, for the same reason.
+`bin/reeve-teardown` refuses while a decision is open, for the same reason.
 
 ## Folder trust is keyed to the repository, not the directory
 
@@ -73,10 +73,11 @@ Measured: a worktree of `~/yongshq/portfolio` launched with no dialog, while a w
 its own, so **trust resolves through the git repository**, and every worktree inherits its parent
 repository's answer.
 
-So `reeve-dispatch` refuses before creating anything when the holding's repository is untrusted,
-and `reeve-doctor` marks it. Granting is a separate deliberate command, `reeve-trust --grant`,
-because it writes to the liege's own global claude configuration. It backs the file up first and
-writes through a temporary file, so an interrupted write cannot leave a truncated config.
+So `bin/reeve-dispatch` refuses before creating anything when the holding's repository is untrusted,
+and `bin/reeve-doctor` marks it. Granting is a separate deliberate command,
+`bin/reeve-trust --grant`, because it writes to the liege's own global claude configuration. It
+backs the file up first and writes through a temporary file, so an interrupted write cannot leave a
+truncated config.
 
 This is the one genuinely harness specific thing in the system, which is why it lives in a file
 named after the harness rather than inside dispatch.
@@ -85,7 +86,7 @@ named after the harness rather than inside dispatch.
 
 - **Locale collation.** Under many UTF-8 locales the glob `[a-z]` also matches uppercase, so `Bad_ID`
   passed id validation and would have become a branch name and a directory. `LC_COLLATE=C` is
-  pinned in `reeve-lib.sh` and ids are validated with negated classes.
+  pinned in `bin/reeve-lib.sh` and ids are validated with negated classes.
 - **pipefail plus `grep -q`.** `grep -q` exits on the first match and closes the pipe; the upstream
   writer gets EPIPE and pipefail reports the whole pipeline as failed. The symptom is that matching
   the *first* item of a list fails while the last succeeds. `lines_has` and `words_has` exist so no

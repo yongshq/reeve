@@ -20,9 +20,9 @@ Send work out. Load this before dispatching anything, every time.
 ## Dispatching
 
 ```sh
-reeve-brief <id> <holding> --office <office> [--type feat|fix|docs|chore] [--base main]
+bin/reeve-brief <id> <holding> --office <office> [--type feat|fix|docs|chore] [--base main]
 # fill {INTENT} and {SPEC} in the brief
-reeve-dispatch <id>                 # add --dry-run first if anything feels uncertain
+bin/reeve-dispatch <id>                 # add --dry-run first if anything feels uncertain
 ```
 
 Choosing the id: kebab case, descriptive, short. It becomes the branch name, the directory name and
@@ -46,7 +46,7 @@ Then let the sentry do its job. Do not poll, and do not narrate progress.
 
 ## Relaunching a dead errand
 
-`reeve-dispatch <id>` again. It reuses the existing brief deliberately, so a relaunch cannot
+`bin/reeve-dispatch <id>` again. It reuses the existing brief deliberately, so a relaunch cannot
 silently change the job. If the brief itself was wrong, that is a new errand with a new id, and say
 so to the liege rather than quietly editing history.
 

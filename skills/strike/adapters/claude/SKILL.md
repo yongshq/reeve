@@ -15,7 +15,7 @@ Load the `memory` skill first.
 
 ## Steps
 
-1. **Find what they mean.** `reeve-memory list` and match against their words. If two entries
+1. **Find what they mean.** `bin/reeve-memory list` and match against their words. If two entries
    could be it, show both and ask which. Striking the wrong fact is worse than asking.
 
 2. **Check whether it is wrong, or just done.** These are different and the liege may not have
@@ -29,7 +29,7 @@ Load the `memory` skill first.
 3. **Strike it.**
 
    ```sh
-   reeve-memory strike --scope <scope> "<distinctive phrase>"
+   bin/reeve-memory strike --scope <scope> "<distinctive phrase>"
    ```
 
 4. **Say where it went.** The entry moved to `archive.md`, which is append only and never loaded.

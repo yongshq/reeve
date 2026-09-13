@@ -34,7 +34,7 @@ supposed to produce. Three things narrow it, and none of them is the tool list:
 
 1. the hand's working directory is its own git worktree
 2. exactly one extra directory is granted, its errand directory
-3. `reeve-teardown` refuses when a read-only errand's copy is dirty or its HEAD has moved
+3. `bin/reeve-teardown` refuses when a read-only errand's copy is dirty or its HEAD has moved
 
 So a scout that writes where it should not is caught, not prevented. If you need it prevented, add
 a `deny` entry rather than trusting the office text.
@@ -44,4 +44,4 @@ a `deny` entry rather than trusting the office text.
 A directory claude has never seen raises a separate trust dialog, which no permission setting
 suppresses. In practice worktrees inherit trust from an already trusted parent, which is why
 worktrees under `~/yongshq` never see it. A holding somewhere untrusted will stall every hand on
-its first launch, so `reeve-doctor` checks for this and says so.
+its first launch, so `bin/reeve-doctor` checks for this and says so.

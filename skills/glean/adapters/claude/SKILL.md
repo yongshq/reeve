@@ -19,7 +19,7 @@ end of a long session almost everything feels worth keeping and almost none of i
 1. **Report the budget before you start.**
 
    ```sh
-   reeve-memory budget
+   bin/reeve-memory budget
    ```
 
 2. **List candidates, with their evidence, before writing anything.** Go back through the session
@@ -29,15 +29,15 @@ end of a long session almost everything feels worth keeping and almost none of i
 3. **Route each survivor by scope** using the `memory` skill's table. Facts about one repo are not
    yours to write: collect them and offer a single scribe errand at the end.
 
-4. **Check each against what is already there.** `reeve-memory list --scope <scope>`. A restatement
-   is a refresh or a rewording, never a second entry.
+4. **Check each against what is already there.** `bin/reeve-memory list --scope <scope>`. A
+   restatement is a refresh or a rewording, never a second entry.
 
-5. **Write them.** `reeve-memory add` per survivor, correct tier.
+5. **Write them.** `bin/reeve-memory add` per survivor, correct tier.
 
 6. **Handle what has gone stale.**
 
    ```sh
-   reeve-memory stale
+   bin/reeve-memory stale
    ```
 
    For each stale entry, one of three things, and you must pick deliberately:

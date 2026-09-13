@@ -20,14 +20,14 @@ Load the `memory` skill first. It owns the judgement; this skill is the procedur
 4. **Pick the tier.** A standing instruction from the liege is `P`. A fact about a codebase is `a`.
    Something true only for now is `p`.
 
-5. **Check for an existing entry.** `reeve-memory list --scope <scope>`. If this restates one,
+5. **Check for an existing entry.** `bin/reeve-memory list --scope <scope>`. If this restates one,
    refresh or reword the existing entry rather than adding a second.
 
 6. **Confirm, then write.** Show the liege the exact line and where it is going, in one short
    block. Then:
 
    ```sh
-   reeve-memory add --scope <scope> --tier <a|p|P> "<the fact>"
+   bin/reeve-memory add --scope <scope> --tier <a|p|P> "<the fact>"
    ```
 
 7. **Report the budget** if the file grew past it.

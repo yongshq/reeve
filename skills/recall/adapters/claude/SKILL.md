@@ -20,10 +20,10 @@ The liege asked what you remember. Read it back, scoped, with dates and tiers.
 2. **Read it.**
 
    ```sh
-   reeve-memory list                       # everything always loaded
-   reeve-memory list --scope liege
-   reeve-memory list --scope manor:<name>
-   reeve-memory list --stale               # only what has gone stale
+   bin/reeve-memory list                       # everything always loaded
+   bin/reeve-memory list --scope liege
+   bin/reeve-memory list --scope manor:<name>
+   bin/reeve-memory list --stale               # only what has gone stale
    ```
 
 3. **Answer the question, do not print the file.** The liege asked a question. If they asked how

@@ -16,8 +16,8 @@ they reported, what is open and what it has learned, and every one of those is a
 | What | Where | Rebuilt by |
 |---|---|---|
 | every errand, its instructions, its result | `$REEVE_HOME/errands/<id>/` | reading the directory |
-| what each one reported, in order | `errands/<id>/status` | `reeve-status <id>`, which reconciles the whole log |
-| where each ran, on what branch | `state/<id>.meta` | `reeve-status --all` |
+| what each one reported, in order | `errands/<id>/status` | `bin/reeve-status <id>`, which reconciles the whole log |
+| where each ran, on what branch | `state/<id>.meta` | `bin/reeve-status --all` |
 | what the household knows | `liege.md`, `manors/*.md` | session start |
 | retired knowledge | `archive.md` | never loaded, on purpose |
 
@@ -58,8 +58,8 @@ The model cannot see its own context usage. The statusline can, so it writes the
 reeve reads it:
 
 ```sh
-reeve-context            # one line, plus an exit code
-reeve-context --percent  # just the number
+bin/reeve-context            # one line, plus an exit code
+bin/reeve-context --percent  # just the number
 ```
 
 Exit `0` comfortable, `1` past the threshold, `2` unknown. The threshold defaults to 50 and lives
@@ -89,13 +89,13 @@ cannot see that from a percentage.
 
 ## Resuming
 
-Session start reads `reeve-handoff newest <manor>` before anything else. If it resumed from one it
-says so and names the next action, because you may not remember writing it.
+Session start reads `bin/reeve-handoff newest <manor>` before anything else. If it resumed from
+one it says so and names the next action, because you may not remember writing it.
 
 ```sh
-reeve-handoff new <manor>      # scaffold, factual sections pre-filled from disk
-reeve-handoff newest [manor]   # path of the most recent
-reeve-handoff list [manor]
+bin/reeve-handoff new <manor>      # scaffold, factual sections pre-filled from disk
+bin/reeve-handoff newest [manor]   # path of the most recent
+bin/reeve-handoff list [manor]
 ```
 
 Handoffs live in `$REEVE_HOME/handoffs/`, deliberately separate from `~/.claude/handoffs/` so

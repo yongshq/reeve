@@ -5,7 +5,7 @@
 ## 1. Is it installed
 
 ```sh
-reeve-doctor
+bin/reeve-doctor
 ```
 
 It must appear under "installed but NOT verified". If it does not, the `bin` key in the harness
@@ -46,10 +46,10 @@ Print mode is not proof. A harness can behave in `-p` and still raise a full scr
 TUI, which is exactly what `bypassPermissions` does. Launch it for real in a pane and look:
 
 ```sh
-reeve-brief probe-<harness> <holding> --office scout
+bin/reeve-brief probe-<harness> <holding> --office scout
 # fill the two seams with a trivial question
-reeve-dispatch probe-<harness> --harness <harness> --allow-unverified
-reeve-backend call capture "$(reeve-status probe-<harness> --raw | grep target)" 400
+bin/reeve-dispatch probe-<harness> --harness <harness> --allow-unverified
+bin/reeve-backend call capture "$(bin/reeve-status probe-<harness> --raw | grep target)" 400
 ```
 
 You are checking three things: no dialog is waiting, the task prompt actually arrived, and the

@@ -4,8 +4,8 @@ A full accounting of the fleet, on demand. Where `court` is a conversation, must
 
 ## Steps
 
-1. `reeve-status --all`
-2. For each errand not simply working, `reeve-status <id>` for the detail.
+1. `bin/reeve-status --all`
+2. For each errand not simply working, `bin/reeve-status <id>` for the detail.
 3. Present it in one table, **blocked and waiting first**, working last. The liege is scanning for
    what needs them, so anything needing them goes at the top.
 
@@ -34,7 +34,7 @@ Never the worktree path unless the liege asks: they cannot act on it and it is n
 ## Flag these explicitly, they are easy to miss
 
 - **A divergence.** An errand reporting done with a question never answered is not finished, whatever
-  it says. `reeve-status` marks it; carry that mark through to the table.
+  it says. `bin/reeve-status` marks it; carry that mark through to the table.
 - **A silent death.** An errand whose session is gone with no terminal line. Say the hand vanished
   and say what it last reported.
 - **Unlanded work.** A branch with commits that the base does not have. That is the state where

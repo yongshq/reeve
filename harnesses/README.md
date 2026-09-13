@@ -28,7 +28,7 @@ reeve needs neither python nor jq to start a hand.
 
 ## Why the prompt is always a pointer
 
-`reeve-harness render` never puts the brief text into the command line. It passes a short sentence
+`bin/reeve-harness render` never puts the brief text into the command line. It passes a short sentence
 telling the hand to read an absolute path. This matters for three reasons: a multi-kilobyte
 positional argument is fragile on every harness and fatal on some, a brief that changes on disk
 should not need a relaunch to take effect, and the pointer wording is then identical everywhere,
@@ -66,7 +66,7 @@ probe in `docs/verifying-a-harness.md` and read the result.
 
 `verified = false` means reeve **refuses to dispatch on it** until you say otherwise. To verify one:
 
-1. Install the CLI and confirm `reeve-doctor` reports it installed.
+1. Install the CLI and confirm `bin/reeve-doctor` reports it installed.
 2. Run a scout errand with `--harness <name>`, accepting the unverified warning.
 3. Confirm the hand read its brief, appended status lines, and wrote a report.
 4. Only then set `verified = true`, and note in `source` that you tested it.

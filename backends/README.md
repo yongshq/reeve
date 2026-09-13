@@ -5,7 +5,7 @@ offices, briefs, memory or errands. It never decides anything. If a backend func
 adjudicate meaning, the abstraction is in the wrong place.
 
 Worktrees are deliberately **not** part of this contract. `git worktree` is identical everywhere,
-so `reeve-dispatch` creates worktrees itself and hands a backend a plain directory. A backend may
+so `bin/reeve-dispatch` creates worktrees itself and hands a backend a plain directory. A backend may
 optionally *adopt* that directory for presentation (herdr groups it in the sidebar), but must work
 correctly if it does not.
 
@@ -46,5 +46,5 @@ Each is `reeve_backend_<name>_<fn>`, sourced only through `bin/reeve-backend`.
 
 ## Adding one
 
-Copy `tmux.sh`, which is the minimal honest implementation, then `reeve-doctor` will pick it up.
+Copy `tmux.sh`, which is the minimal honest implementation, then `bin/reeve-doctor` will pick it up.
 A backend is not usable until an errand has actually run through it end to end.

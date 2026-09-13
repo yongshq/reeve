@@ -16,14 +16,14 @@ instead of restarting.
 
 - The liege asks for one.
 - You are stopping for the day, or the liege is.
-- `reeve-context` says you are past the threshold. **Offer, do not act.** A reset is the liege's
+- `bin/reeve-context` says you are past the threshold. **Offer, do not act.** A reset is the liege's
   call and mid-errand is the wrong moment for one.
 - A long thread is about to change direction, and the reasoning behind the old direction is worth
   keeping.
 
 ## What is already safe without you
 
-Do not write these down. They are on disk and `reeve-status --all` rebuilds them:
+Do not write these down. They are on disk and `bin/reeve-status --all` rebuilds them:
 
 - every errand, its brief, its status log, its report
 - which branch each one is on and how far ahead
@@ -47,7 +47,7 @@ Copying them into a handoff makes a long document that hides the four things tha
 ## Steps
 
 ```sh
-reeve-handoff new <manor>
+bin/reeve-handoff new <manor>
 ```
 
 It fills the factual sections from disk and leaves seams: `{TITLE}`, `{RESUME}`, `{GOAL}`,
