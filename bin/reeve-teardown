@@ -90,6 +90,7 @@
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/reeve-lib.sh"
 BIN=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
+case ${1:-} in -h|--help) print_help "$0"; exit 0 ;; esac
 id=${1:-}; shift 2>/dev/null || :
 drop_branch=no dry=no dismiss_only=no
 while [ $# -gt 0 ]; do
@@ -97,7 +98,7 @@ while [ $# -gt 0 ]; do
     --drop-branch) drop_branch=yes; shift ;;
     --dismiss-only) dismiss_only=yes; shift ;;
     --dry-run) dry=yes; shift ;;
-    -h|--help) sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) print_help "$0"; exit 0 ;;
     *) die "unknown option '$1'" ;;
   esac
 done

@@ -231,6 +231,6 @@ case $cmd in
       harness_verified  "$n" && v=yes
       printf '%-10s %-10s %-9s %s\n' "$n" "$i" "$v" "$(h_get "$n" bin "$n")"
     done ;;
-  ''|-h|--help) sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//' ;;
+  ''|-h|--help) print_help "$0" ;;
   *) die "unknown command '$cmd'. try: resolve, list, check, render, detect" ;;
 esac

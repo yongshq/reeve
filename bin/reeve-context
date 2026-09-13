@@ -17,6 +17,8 @@
 
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/reeve-lib.sh"
 
+case ${1:-} in -h|--help) print_help "$0"; exit 0 ;; esac
+
 f="$REEVE_HOME_D/state/context"
 threshold=$(config_get context-threshold 50)
 

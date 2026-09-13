@@ -13,6 +13,7 @@
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/reeve-lib.sh"
 BIN=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
+case ${1:-} in -h|--help) print_help "$0"; exit 0 ;; esac
 id=${1:-}; require_id "$id"; shift
 [ -f "$(meta_file "$id")" ] || die "no errand '$id'"
 

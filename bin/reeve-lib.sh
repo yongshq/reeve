@@ -58,6 +58,16 @@ die()  { printf 'reeve: %s\n' "$*" >&2; exit 1; }
 warn() { printf 'reeve: %s\n' "$*" >&2; }
 info() { printf '%s\n' "$*"; }
 
+# print_help <script-path>   the script's own header comment, whole.
+#
+# A tool's usage IS its header comment, so this reads to wherever that comment
+# actually ends rather than a fixed line range someone has to remember to
+# update. The block is the shebang, then every line starting with '#' right
+# after it; the first line that is not one ends the block.
+print_help() {
+  awk 'NR == 1 && /^#!/ { next } /^#/ { sub(/^# ?/, ""); print; next } { exit }' "$1"
+}
+
 # --- list matching ---------------------------------------------------------
 # Never use `... | grep -q` under `set -o pipefail`. grep -q exits on the first
 # match and closes the pipe, the upstream writer gets EPIPE, and pipefail then

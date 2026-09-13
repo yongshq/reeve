@@ -79,6 +79,6 @@ case $cmd in
     shift
     backend_call "$b" "$fn" "$@" ;;
   ''|-h|--help)
-    sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//' ;;
+    print_help "$0" ;;
   *) die "unknown command '$cmd'. try: resolve, list, describe, call" ;;
 esac
