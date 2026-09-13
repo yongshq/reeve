@@ -77,7 +77,7 @@ you  ──▶  reeve
             │  reeve-brief: writes a brief with two seams, {INTENT} and {SPEC}
             │  reeve-dispatch: git worktree ─▶ session endpoint ─▶ launch
             ▼
-          hand  in <repo>.worktrees/<id>, on <type>/<id>
+          hand  in <repo>.worktrees/<office>-<id>, on <type>/<id>
             │  appends: working: / needs-decision: / blocked: / done:
             ▼
          sentry  absorbs progress, wakes the reeve once per actionable change

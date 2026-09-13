@@ -60,12 +60,25 @@ case $office in
   *)         writes=yes; [ -n "$type" ] || type=chore ;;
 esac
 
-if [ "$writes" = yes ]; then
-  branch="$type/$id"
-  worktree="$(dirname "$repo")/$(basename "$repo").worktrees/$id"
+branch=''
+[ "$writes" = yes ] && branch="$type/$id"
+
+# One local copy per errand, named after the office that occupies it, so a
+# listing of <repo>.worktrees says who is working where. Flat: <office>-<id>,
+# never <office>/<id>, because a slash would make a directory per role and the
+# household's convention is a single flat folder name.
+#
+# The steward is the one office with no copy at all: reeve-dispatch runs it in
+# the reeve's home, so it records no worktree path rather than one that is never
+# created.
+if [ "$writes" = home ]; then
+  worktree=''
+  copy=$REEVE_HOME_D
+  copy_cell="none, you work in \`$copy\`"
 else
-  branch=''
-  worktree="$(dirname "$repo")/$(basename "$repo").worktrees/$id"
+  worktree="$(dirname "$repo")/$(basename "$repo").worktrees/$office-$id"
+  copy=$worktree
+  copy_cell="\`$worktree\`"
 fi
 
 status=$(status_file "$id")
@@ -86,7 +99,7 @@ watching this session and no one will answer you, so never wait for input.
 | office | \`$office\` |
 | manor | $manor |
 | holding | \`$repo\` |
-| your copy | \`$worktree\` |
+| your copy | $copy_cell |
 | branch | ${branch:-none, detached at \`$base\`} |
 | base | \`$base\` |
 | status file | \`$status\` |
@@ -121,6 +134,26 @@ conduct and the writing style.
 
 PREC
 
+if [ "$writes" = home ]; then
+cat <<HOME_ISO
+## Before you touch anything
+
+You have no local copy of any repository. You work in the reeve's home at \`$copy\`, and nothing
+you write goes anywhere else. Confirm it is there:
+
+\`\`\`sh
+ls $copy
+\`\`\`
+
+If it is not, stop immediately, append
+
+\`\`\`
+blocked: the reeve's home is not where the brief says it is
+\`\`\`
+
+to \`$status\`, and do nothing else.
+HOME_ISO
+else
 cat <<'ISO'
 ## Before you touch anything
 
@@ -150,6 +183,7 @@ installed, build output is absent, and any \`.env\` file is missing. A worktree 
 looks broken but simply is not set up yet. Install dependencies with the repository's own package
 manager before concluding anything is wrong.
 ISO2
+fi
 
 if [ -n "$instructions" ]; then
 cat <<INSTR
@@ -210,7 +244,7 @@ Rules that matter:
 
 ## Hard rules
 
-1. Everything you write goes inside \`$worktree\`. Never the primary checkout, never another
+1. Everything you write goes inside \`$copy\`. Never the primary checkout, never another
    errand's copy, never anywhere else on disk.
 ROLE
 
