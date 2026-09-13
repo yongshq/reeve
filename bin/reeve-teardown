@@ -103,6 +103,22 @@ if [ "$open" -gt 0 ]; then
   refuse "$open question(s) from this errand were never answered." "Run: reeve-status $id" "Tearing down now discards the work that question was blocking."
 fi
 
+# 2b. the recorded permission must be one this script knows.
+#
+# `writes` decides which landed-work check applies, so a label this script does
+# not recognise is a copy it cannot reason about: it cannot tell whether the
+# thing was allowed to commit, and therefore cannot tell which proof of safety
+# to demand. That is the same position as a base that does not resolve, and it
+# gets the same answer. Checked here rather than before the --dismiss-only exit
+# because freeing a pane loses nothing whatever the label says.
+case $writes in
+  yes|no|home) ;;
+  *) refuse "the recorded permission 'writes=$writes' is not one of yes, no or home." \
+       "That label decides which landed-work check this copy has to pass, so an unknown one" \
+       "leaves the script unable to say what would be safe. Correct the writes= line in" \
+       "$(meta_file "$id")." ;;
+esac
+
 # 3. nothing uncommitted in the copy
 if [ "$writes" != home ] && [ -n "$wt" ] && [ -d "$wt" ]; then
   dirty=$(git -C "$wt" status --porcelain 2>/dev/null)
@@ -124,6 +140,9 @@ fi
 base_sha=''
 require_base() {
   [ -n "$base_sha" ] && return 0
+  # Deliberate fail-closed guard, not dead code: both checks below call this
+  # before they touch git, so an errand with no repository recorded is told why
+  # the test stopped instead of being shown a raw fatal: from git afterwards.
   [ -n "$repo" ] || refuse "no repository is recorded for this errand." \
     "The landed-work test has nothing to compare against, so it stops. Check the repo= line in" \
     "$(meta_file "$id")."
@@ -139,37 +158,61 @@ require_base() {
 }
 
 # 4. committed but unlanded work. "Landed" means the base already contains it.
-if [ -n "$br" ] && [ -n "$repo" ]; then
-  if git -C "$repo" rev-parse --verify --quiet "refs/heads/$br" >/dev/null 2>&1; then
-    require_base
-    ahead=$(git -C "$repo" rev-list --count "$base_sha..$br" 2>/dev/null) || ahead=''
-    # A count that did not come back is not a count of zero. The base and the
-    # branch both resolve by this point, so anything still failing here is
-    # something nobody anticipated, which is precisely when to stop.
-    [ -n "$ahead" ] || refuse "could not count the commits on $br that $base does not have." \
-      "The base and the branch both resolve, so this failure is unexplained and the script will" \
-      "not guess that the answer was zero. Investigate before removing anything."
-    if [ "$ahead" -gt 0 ]; then
-      unlanded=$(git -C "$repo" log --oneline "$base_sha..$br" 2>/dev/null \
-                 | head -5 | sed 's/^/    /')
-      refuse "$br has $ahead commit(s) that $base does not have." \
-             "$unlanded" \
-             "Rebase or merge it first. Removing the copy now leaves the branch, but this is the" \
-             "point at which work gets forgotten, so it stops here."
-    fi
+#
+# The repository is no longer tested in this condition. Doing so short circuited
+# the whole check before require_base could apply its own guard, so a bad repo=
+# printed "landed-work checks passed" and then a raw fatal: from git further
+# down. The helper owns that message; let it speak.
+if [ -n "$br" ]; then
+  require_base
+  # A recorded branch that does not resolve is a check that cannot run, not a
+  # branch with nothing on it. Skipping it silently reported a pass, and on a
+  # detached copy that is check 5's fail-open again by another door.
+  git -C "$repo" rev-parse --verify --quiet "refs/heads/$br" >/dev/null 2>&1 \
+    || refuse "the recorded branch '$br' does not exist in $repo." \
+      "The landed-work test has nothing to compare against, so it stops rather than assume the" \
+      "work is safe. Correct the branch= line in $(meta_file "$id"), or find out whether that" \
+      "branch was deleted before its commits landed."
+  ahead=$(git -C "$repo" rev-list --count "$base_sha..$br" 2>/dev/null) || ahead=''
+  # A count that did not come back is not a count of zero. The base and the
+  # branch both resolve by this point, so anything still failing here is
+  # something nobody anticipated, which is precisely when to stop. Deliberate
+  # fail-closed defence in depth: unreachable today, kept on purpose.
+  [ -n "$ahead" ] || refuse "could not count the commits on $br that $base does not have." \
+    "The base and the branch both resolve, so this failure is unexplained and the script will" \
+    "not guess that the answer was zero. Investigate before removing anything."
+  if [ "$ahead" -gt 0 ]; then
+    unlanded=$(git -C "$repo" log --oneline "$base_sha..$br" 2>/dev/null \
+               | head -5 | sed 's/^/    /')
+    refuse "$br has $ahead commit(s) that $base does not have." \
+           "$unlanded" \
+           "Rebase or merge it first. Removing the copy now leaves the branch, but this is the" \
+           "point at which work gets forgotten, so it stops here."
   fi
 fi
 
-# 5. a detached read-only copy must have produced no commits at all
-if [ -z "$br" ] && [ "$writes" = no ] && [ -n "$wt" ] && [ -d "$wt" ]; then
+# 5. a detached copy must still be sitting on its base.
+#
+# Gated on the SHAPE of the copy, not on the permission it was given. Removing a
+# worktree destroys commits only when its HEAD is detached, because a branch
+# keeps them reachable, so this is the only guard on that case and every
+# detached copy has to pass it whatever it was allowed to write. Gating it on
+# writes=no meant a detached copy recorded as anything else satisfied neither
+# this check nor check 4: nothing was compared, and the script printed
+# "landed-work checks passed" on its way to removing the commits. A steward is
+# excluded by writes=home, which works in the reeve's home and has no copy.
+if [ -z "$br" ] && [ "$writes" != home ] && [ -n "$wt" ] && [ -d "$wt" ]; then
   require_base
   head_now=$(git -C "$wt" rev-parse HEAD 2>/dev/null) || head_now=''
+  # Deliberate fail-closed defence in depth: unreachable through an ordinary
+  # dispatch, kept because the alternative to reading HEAD is assuming it.
   [ -n "$head_now" ] || refuse "the copy at $wt has no readable HEAD." \
     "This check cannot tell whether that copy committed anything, so it stops rather than assume" \
     "it did not. Look at the copy before removing it."
   if [ "$head_now" != "$base_sha" ]; then
-    refuse "this was a read-only errand but its copy has moved off $base ($head_now)." \
-           "Something committed in a copy that was forbidden to commit. Look before removing it."
+    refuse "the copy at $wt has moved off $base ($head_now)." \
+           "Its HEAD is detached and this errand has no branch, so nothing would keep those" \
+           "commits reachable once the copy is removed. Look before removing it."
   fi
 fi
 
