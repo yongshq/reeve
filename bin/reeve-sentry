@@ -48,6 +48,13 @@ attn_file() { printf '%s/state/.attn-%s\n' "$REEVE_HOME_D" "$1"; }
 # noise. Overridable only so the test suite can drive it.
 attn_dwell=${REEVE_ATTN_DWELL:-90}
 
+# The clock the dwell is measured against. Overridable only so the test suite
+# can hold time still while it backdates a reading and then asserts the exact
+# boundary: without this, the gap between writing that reading and this process
+# reading the real clock is enough wall time to cross a one-second edge on a
+# loaded machine, which is a flake, not a bug in the dwell itself.
+attn_now() { printf '%s' "${REEVE_ATTN_NOW:-$(date +%s)}"; }
+
 # Clean up a hand that has finished. An agent does not exit itself, so without
 # this every completed errand leaves a session idling at a prompt, holding a
 # pane, until a human closes it. That is exactly the babysitting this household
@@ -151,7 +158,7 @@ check_one() {
   if [ "$attn" = waiting ]; then
     since=''; woke=no
     [ -f "$af" ] && read -r since woke < "$af"
-    nowsec=$(date +%s)
+    nowsec=$(attn_now)
     case ${since:-} in ''|*[!0-9]*) since=$nowsec; woke=no; printf '%s %s\n' "$since" no > "$af" ;; esac
     # Two guards, and they are different guards. The dwell is against a reading
     # taken in the instant between two tool calls. The latch is against saying

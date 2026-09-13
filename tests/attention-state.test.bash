@@ -126,10 +126,17 @@ printf 'target=s|s:p1\nbackend=stub\noffice=artificer\nrepo=\nworktree=\nbranch=
 printf 'working: reading the auth module\n' > "$REEVE_HOME/errands/stalled/status"
 
 attn_state=$REEVE_HOME/state/.attn-stalled
-sentry() { OUT=$("$ROOT/bin/reeve-sentry" --once --no-reap 2>&1); RC=$?; }
+# Frozen once, not re-read per call: the dwell boundary in 3b/3c is asserted at
+# the exact second, and a wall clock that keeps ticking while the test harness
+# does its own work (writing files, forking sentry) can cross that edge between
+# a backdate and the sentry call that checks it. REEVE_ATTN_NOW pins the sentry
+# process to this same instant so the elapsed time is exactly what backdate
+# wrote, never more.
+NOW=$(date +%s)
+sentry() { OUT=$(REEVE_ATTN_NOW=$NOW "$ROOT/bin/reeve-sentry" --once --no-reap 2>&1); RC=$?; }
 backdate() { # backdate <seconds ago>
   local woke; woke=$(cut -d' ' -f2 "$attn_state" 2>/dev/null); woke=${woke:-no}
-  printf '%s %s\n' "$(( $(date +%s) - $1 ))" "$woke" > "$attn_state"
+  printf '%s %s\n' "$(( NOW - $1 ))" "$woke" > "$attn_state"
 }
 seen() { [ -f "$attn_state" ] && printf 'present\n' || printf 'absent\n'; }
 
