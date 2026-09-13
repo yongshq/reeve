@@ -22,6 +22,7 @@ inscribe|true|Record something the liege told you to remember, in the right scop
 strike|true|Retire a fact the liege says to forget, to the cold archive.
 recall|true|Read back what the household remembers, scoped, with dates.
 glean|true|End of session sweep: harvest what was actually learned, then report the budget.
+amend|true|Change how every reeve behaves, not just this one, by amending the contract itself.
 survey|true|Meet an unfamiliar repository and propose which project it belongs to.
 handoff|true|Write down the part of this session that will not survive a reset, so the next reeve resumes instead of restarting.
 memory|false|How the reeve decides what to remember and where. Load before writing any memory file.

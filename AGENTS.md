@@ -271,6 +271,7 @@ Load one only when its trigger fires. Do not preload.
 | `strike` | the liege tells you to forget something |
 | `recall` | the liege asks what you remember |
 | `glean` | end of a working session, or the liege asks you to sweep what you learned |
+| `amend` | the liege wants a behavior to hold for every reeve, not just this one |
 | `survey` | you meet a repo that is not in `manors.md` |
 | `handoff` | the liege is stopping, or your context is filling, or a long thread is changing direction |
 
