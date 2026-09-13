@@ -111,13 +111,49 @@ if [ "$writes" != home ] && [ -n "$wt" ] && [ -d "$wt" ]; then
   fi
 fi
 
+# Both landed-work checks below compare against the recorded base, and they are
+# only as trustworthy as that comparison. Every one of them therefore refuses
+# when it cannot be made: a verification that cannot run is a refusal, never a
+# pass. This is not hypothetical tidiness. `rev-list --count` used to fall back
+# to 0 on failure, and 0 reads as "nothing unlanded", so a base that no longer
+# resolved was indistinguishable from a fully landed branch and the copy was
+# removed with its commits still on it.
+#
+# Resolved on first use rather than up front, so an errand whose checks never
+# consult the base is not refused over a base it does not use.
+base_sha=''
+require_base() {
+  [ -n "$base_sha" ] && return 0
+  [ -n "$repo" ] || refuse "no repository is recorded for this errand." \
+    "The landed-work test has nothing to compare against, so it stops. Check the repo= line in" \
+    "$(meta_file "$id")."
+  base_sha=$(git -C "$repo" rev-parse --verify --quiet "$base^{commit}" 2>/dev/null) || base_sha=''
+  [ -n "$base_sha" ] && return 0
+  # No guessing a replacement. Falling back to main, to HEAD or to the default
+  # branch is the same fail-open wearing a friendlier face.
+  refuse "the recorded base '$base' does not name a commit in $repo." \
+    "Without it this script cannot tell landed work from unlanded work, so it refuses rather than" \
+    "assume the work is safe. Usually that base has itself landed and been deleted." \
+    "Correct the base= line in $(meta_file "$id") to the branch the work actually landed on," \
+    "then tear down again."
+}
+
 # 4. committed but unlanded work. "Landed" means the base already contains it.
 if [ -n "$br" ] && [ -n "$repo" ]; then
   if git -C "$repo" rev-parse --verify --quiet "refs/heads/$br" >/dev/null 2>&1; then
-    ahead=$(git -C "$repo" rev-list --count "$base..$br" 2>/dev/null || echo 0)
-    if [ "${ahead:-0}" -gt 0 ]; then
+    require_base
+    ahead=$(git -C "$repo" rev-list --count "$base_sha..$br" 2>/dev/null) || ahead=''
+    # A count that did not come back is not a count of zero. The base and the
+    # branch both resolve by this point, so anything still failing here is
+    # something nobody anticipated, which is precisely when to stop.
+    [ -n "$ahead" ] || refuse "could not count the commits on $br that $base does not have." \
+      "The base and the branch both resolve, so this failure is unexplained and the script will" \
+      "not guess that the answer was zero. Investigate before removing anything."
+    if [ "$ahead" -gt 0 ]; then
+      unlanded=$(git -C "$repo" log --oneline "$base_sha..$br" 2>/dev/null \
+                 | head -5 | sed 's/^/    /')
       refuse "$br has $ahead commit(s) that $base does not have." \
-             "$(git -C "$repo" log --oneline "$base..$br" 2>/dev/null | head -5 | sed 's/^/    /')" \
+             "$unlanded" \
              "Rebase or merge it first. Removing the copy now leaves the branch, but this is the" \
              "point at which work gets forgotten, so it stops here."
     fi
@@ -126,9 +162,12 @@ fi
 
 # 5. a detached read-only copy must have produced no commits at all
 if [ -z "$br" ] && [ "$writes" = no ] && [ -n "$wt" ] && [ -d "$wt" ]; then
-  head_now=$(git -C "$wt" rev-parse HEAD 2>/dev/null || echo '')
-  base_sha=$(git -C "$repo" rev-parse "$base" 2>/dev/null || echo '')
-  if [ -n "$head_now" ] && [ -n "$base_sha" ] && [ "$head_now" != "$base_sha" ]; then
+  require_base
+  head_now=$(git -C "$wt" rev-parse HEAD 2>/dev/null) || head_now=''
+  [ -n "$head_now" ] || refuse "the copy at $wt has no readable HEAD." \
+    "This check cannot tell whether that copy committed anything, so it stops rather than assume" \
+    "it did not. Look at the copy before removing it."
+  if [ "$head_now" != "$base_sha" ]; then
     refuse "this was a read-only errand but its copy has moved off $base ($head_now)." \
            "Something committed in a copy that was forbidden to commit. Look before removing it."
   fi
