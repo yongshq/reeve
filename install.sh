@@ -87,17 +87,20 @@ if [ "$skills" = yes ]; then
   n=$(ls "$ROOT/.claude/skills" 2>/dev/null | wc -l | tr -d ' ')
   printf '  %s skill(s) scoped to this repo at .claude/skills\n' "$n"
 
-  # Clean up after older versions of this installer, which did link globally.
-  # Only links pointing back into this repo are touched; anything else in
-  # ~/.claude/skills belongs to the liege and is left exactly as it is.
-  stale=0
-  for t in "$HOME/.claude/skills"/*; do
-    [ -L "$t" ] || continue
-    case "$(readlink "$t")" in
-      "$ROOT"/*) rm "$t"; stale=$((stale+1)) ;;
-    esac
-  done
-  [ "$stale" -gt 0 ] && printf '  removed %s reeve skill(s) that an earlier install leaked into ~/.claude/skills\n' "$stale"
+  # An older version of this installer linked skills globally into
+  # ~/.claude/skills. This one never writes there, so any such links an
+  # earlier install left behind are now dead. Only a note: nothing on the
+  # liege's machine is touched.
+  if [ -d "$HOME/.claude/skills" ]; then
+    for t in "$HOME/.claude/skills"/*; do
+      [ -L "$t" ] || continue
+      case "$(readlink "$t")" in
+        "$ROOT"/*)
+          printf '  note: %s is a leftover link from an earlier install; remove it yourself, it is no longer used\n' "$t"
+          ;;
+      esac
+    done
+  fi
 
   for h in codex opencode cursor grok gemini pi; do
     command -v "$h" >/dev/null 2>&1 && printf '  %s is installed but has no skill adapter yet, see harnesses/README.md\n' "$h"
