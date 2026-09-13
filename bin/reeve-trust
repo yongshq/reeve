@@ -26,8 +26,18 @@ case $mode in
   --check|--grant)
     [ -n "$target" ] || die "$mode needs a repository path"
     [ -d "$target" ] || die "no such directory: $target"
-    # trust follows the repository, so resolve to its toplevel first
-    target=$(git -C "$target" rev-parse --show-toplevel 2>/dev/null || (cd "$target" && pwd))
+    # trust follows the repository, so resolve to its toplevel first. A linked
+    # worktree's own --show-toplevel names that worktree, not the repository:
+    # claude keys the trust dialog to the main working tree instead, the one
+    # whose .git is a real directory. --git-common-dir always points at that
+    # directory's .git, worktree or not, so its parent is the path claude
+    # actually recorded.
+    common=$(git -C "$target" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)
+    if [ -n "$common" ]; then
+      target=$(cd "$(dirname "$common")" && pwd)
+    else
+      target=$(cd "$target" && pwd)
+    fi
     ;;
   --list) ;;
   *) sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
