@@ -9,7 +9,10 @@
 # state. REMOVING its copy can lose commits, so that waits until the work has
 # landed. --dismiss-only does the first and stops.
 #
-# Refuses while work could still be lost. A refusal is a stop-and-investigate
+# Refuses while the errand holds anything its base does not. That is narrower
+# than "while work could still be lost", deliberately: it also refuses when some
+# other ref would have kept the commits, because a copy whose record and reality
+# disagree is the thing worth hearing about. A refusal is a stop-and-investigate
 # result, never an obstacle to route around. There is deliberately no --force:
 # if git or this script objects, something is there that you did not expect, and
 # past that objection the work is unrecoverable.
@@ -182,8 +185,77 @@ require_base() {
 # its base, and stays one when unrelated work lands there afterwards, so asking
 # whether HEAD equals the base refused the cleanup of every scout and warden the
 # moment anything landed on main.
+
+# Paths as git prints them in `worktree list`, which is physically: on macOS
+# /var is a symlink to /private/var, so comparing that output against a recorded
+# worktree= literally never matches. The directory may be gone, which is the
+# case this exists for, so it resolves the deepest ancestor that is still there
+# and re-attaches what had to be stripped to reach it.
+phys_path() { # phys_path <path> -> the same path with its real ancestors
+  local p=$1 tail='' head
+  while :; do
+    if head=$(cd -P "$p" 2>/dev/null && pwd); then
+      [ "$head" = / ] && head=''
+      printf '%s%s\n' "$head" "$tail"; return 0
+    fi
+    case $p in
+      */?*) tail="/${p##*/}$tail"; p=${p%/*}; [ -n "$p" ] || p=/ ;;
+      *)    printf '%s%s\n' "$p" "$tail"; return 0 ;;
+    esac
+  done
+}
+
+# One field of git's own record of the copy at worktree=. `worktree list
+# --porcelain` prints a `worktree <path>` line and then that copy's other
+# fields, so the value wanted is the first <field> line after the matching path.
+# Empty when git holds no entry for that path, which includes a repo= naming
+# nothing git can read: a copy git has never heard of is one this script has to
+# treat as never created.
+#
+# The path and the field go through the environment, not through `awk -v`, which
+# backslash-escapes the values it is handed: a worktree path holding a backslash
+# would quietly stop matching, and a lookup that misses is a check that skips,
+# which is the failure this whole block exists to remove.
+copy_record() { # copy_record <field> -> the value, or empty
+  [ -n "$repo" ] && [ -n "$wt" ] || return 0
+  git -C "$repo" worktree list --porcelain 2>/dev/null \
+    | CR_WANT="$(phys_path "$wt")" CR_FIELD="$1" awk '
+        $1 == "worktree" { here = (substr($0, 10) == ENVIRON["CR_WANT"]); next }
+        here && $1 == ENVIRON["CR_FIELD"] { print $2; exit }'
+}
+
+# Whether there is a copy to ask about at all. `[ -d "$wt" ]` used to be the
+# whole answer, and it is right for only one of the two things it was asked. For
+# the REMOVAL it means "there is nothing to delete", which is true. For this
+# CHECK it was read as "there is nothing at risk", which is false: a directory
+# that is not there is either a copy that was never created, which holds
+# nothing, or a copy that was deleted out of band with commits on it, which
+# holds everything, and the filesystem cannot tell those apart. Skipping the
+# check on the second reported a pass over an unreachable commit, which the
+# `git worktree prune` at the end of this script then destroyed on the next
+# teardown in the same repository.
+#
+# Git can tell them apart: its admin entry under .git/worktrees/ outlives the
+# directory and still names that copy's HEAD, so there is something to compare
+# even when there is nothing to look at. Refusing on the missing directory alone
+# is not the answer and never was, because bin/reeve-brief records worktree=
+# before bin/reeve-dispatch creates it: every errand spends that window with a
+# recorded copy that does not exist and genuinely nothing at risk.
+#
+# copy_examined below says which of the two the check actually looked at, and
+# the removal reads that rather than deriving its own opinion from the
+# filesystem a second time.
 copy_at_risk=no
-[ "$writes" != home ] && [ -n "$wt" ] && [ -d "$wt" ] && copy_at_risk=yes
+copy_head=''
+copy_examined=no
+if [ "$writes" != home ] && [ -n "$wt" ]; then
+  if [ -d "$wt" ]; then
+    copy_at_risk=yes
+  else
+    copy_head=$(copy_record HEAD)
+    [ -n "$copy_head" ] && copy_at_risk=yes
+  fi
+fi
 
 if [ -n "$br" ] || [ "$copy_at_risk" = yes ]; then
   # The repository is not tested in this condition. Doing so short circuited the
@@ -221,25 +293,60 @@ if [ -n "$br" ] || [ "$copy_at_risk" = yes ]; then
 
   # 4b. the copy's own HEAD, whatever it is or is not sitting on. A branch in
   # the meta file is a claim ABOUT the copy, not an observation OF it, so it is
-  # never a substitute for asking the copy itself. Removing a worktree destroys
-  # commits when nothing else holds them, and only the copy knows what it holds.
+  # never a substitute for asking the copy itself. The question put to it is the
+  # same strict one: is that HEAD on the recorded base. Not whether some other
+  # ref would have kept it alive through the removal, which is the loose reading
+  # this script does not implement.
   # A steward is excluded by writes=home: it works in the reeve's home, and that
   # same label keeps the removal section below off any path it records anyway.
   if [ "$copy_at_risk" = yes ]; then
-    head_now=$(git -C "$wt" rev-parse HEAD 2>/dev/null) || head_now=''
+    if [ -d "$wt" ]; then
+      copy_examined=directory
+      head_now=$(git -C "$wt" rev-parse HEAD 2>/dev/null) || head_now=''
+      on_branch=$(git -C "$wt" symbolic-ref --short -q HEAD 2>/dev/null) || on_branch=''
+    else
+      # Nothing to look at, and something to check anyway: the gate above only
+      # set copy_at_risk when git still held a HEAD for this path. Asking git is
+      # the whole difference between this and reporting a pass over a commit no
+      # ref holds.
+      copy_examined=record
+      head_now=$copy_head
+      on_branch=$(copy_record branch); on_branch=${on_branch#refs/heads/}
+    fi
     # Fail-closed, and reachable: a worktree= naming a plain directory, or a
     # copy whose worktree admin data was already pruned, both arrive here.
     [ -n "$head_now" ] || refuse "the copy at $wt has no readable HEAD." \
       "This check cannot tell whether that copy committed anything, so it stops rather than" \
       "assume it did not. Look at the copy before removing it."
+    # --is-ancestor is non-zero for "not an ancestor" and for "not a commit in
+    # this repository" alike, so a repo= naming the wrong repository was
+    # diagnosed below as a record/copy disagreement and sent the reader to the
+    # branch= line. Separate them here and name the line that is actually wrong.
+    git -C "$repo" cat-file -e "$head_now^{commit}" 2>/dev/null \
+      || refuse "the copy at $wt is not a copy of $repo." \
+           "Its HEAD ($head_now) is not a commit in that repository at all, so there is nothing" \
+           "to compare and the test stops rather than read the failure as unlanded work." \
+           "Correct the repo= line in $(meta_file "$id")."
     if ! git -C "$repo" merge-base --is-ancestor "$head_now" "$base_sha" 2>/dev/null; then
-      if [ -n "$br" ]; then
-        refuse "the copy at $wt has moved off $base ($head_now)." \
+      # Where the work is, not merely that it is somewhere: the branch a copy
+      # sits on is the one fact that finds it again, and a detached copy has
+      # none, so this says so rather than leaving the sha to stand alone.
+      holds="detached at $head_now"
+      [ -n "$on_branch" ] && holds="on $on_branch, at $head_now"
+      if [ "$copy_examined" = record ]; then
+        refuse "the copy recorded at $wt holds work that is not on $base ($holds)." \
+               "Its directory is not there, so this is git's own record of the copy rather than" \
+               "the copy itself: the entry under .git/worktrees/ still names that HEAD, and the" \
+               "next 'git worktree prune' in $repo discards it and the commit with it." \
+               "Give that commit a ref (git -C $repo branch <name> $head_now) or land it, then" \
+               "tear down again."
+      elif [ -n "$br" ]; then
+        refuse "the copy at $wt has moved off $base ($holds)." \
                "$br is landed, but the copy is not on it: the record and the copy disagree, so" \
                "that branch says nothing about what this copy holds. Find out where that work" \
                "belongs, or correct the branch= line in $(meta_file "$id"), then tear down again."
       else
-        refuse "the copy at $wt has moved off $base ($head_now)." \
+        refuse "the copy at $wt has moved off $base ($holds)." \
                "It holds work that has not landed on $base, and this errand records no branch," \
                "so the test has nothing else to ask. Look at the copy before removing it."
       fi
@@ -253,11 +360,31 @@ info "landed-work checks passed for $id"
 if [ -n "$target" ]; then
   run "$BIN/reeve-backend" call kill "$target" --backend "$backend" || warn "could not close the endpoint $target, continuing"
 fi
-if [ "$writes" != home ] && [ -n "$wt" ] && [ -d "$wt" ]; then
+# The check above and this removal are two decisions that want different answers
+# to the same question, asked at different times, so they are deliberately not
+# folded into one shared condition. What they must not do is derive that answer
+# twice: `[ "$writes" != home ] && [ -n "$wt" ] && [ -d "$wt" ]` stood here as
+# well as at the gate, and the one term that can change in between, the
+# directory, made them disagree inside a single run. Always in the same
+# direction, because the check runs first: check skipped, removal performed, and
+# a copy created in that window was removed with its commits on it.
+#
+# So this asks the check what it did rather than the filesystem what it holds.
+# `directory` is the only answer that permits a removal: `record` means the
+# check had to read git's entry because the directory was gone, which is also
+# the state in which there is nothing to remove.
+if [ "$copy_examined" = directory ] && [ -d "$wt" ]; then
   # No --force, ever. A clean merged worktree removes without it, so needing it
   # means git found something unexpected, and that refusal is the safety net.
   run git -C "$repo" worktree remove "$wt" || refuse "git refused to remove the worktree at $wt." "That refusal is the safety net. Do not add --force; find out what git objected to."
-  run git -C "$repo" worktree prune
+  # Deliberately no `git worktree prune` here. It never did anything for this
+  # errand: `worktree remove` deletes the admin entry under .git/worktrees/
+  # itself, and a remove that fails refuses above instead. What the prune did
+  # reach was every OTHER stale entry in the shared repository, and such an
+  # entry is the last root holding the commits of a copy whose directory went
+  # missing. So this script destroyed, on one errand's cleanup, exactly the work
+  # another errand's cleanup now refuses over. Pruning is not this errand's
+  # business and never was.
   # rmdir, never rm -r: it removes the shared <repo>.worktrees parent only when
   # this was the last errand in it, and refuses silently if a sibling remains
   [ "$dry" = yes ] || rmdir "$(dirname "$wt")" 2>/dev/null || :

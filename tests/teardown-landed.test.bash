@@ -470,7 +470,148 @@ ck_eq  "15b a copy on another branch refuses"       "$RC" 1
 ck_eq  "15b its copy survives"                      "$(gone "$wt")" present
 ck_has "15b the refusal says they disagree"         "$OUT" "the record and the copy disagree"
 ck_has "15b it names the line to correct"           "$OUT" "branch= line in $other_meta"
+ck_has "15b it names the branch the copy is on"     "$OUT" "on fix/other-branch-actual"
 ck_eq  "15b the other branch's commit is kept"      "$(survives "$repo" "$other_sha")" survived
+
+# --- the copy that is not there ---------------------------------------------
+# Whether a recorded copy's directory exists is two different questions. For the
+# REMOVAL, missing means "nothing to delete". For the CHECK it was read as
+# "nothing at risk", which the filesystem cannot actually say: a path that is
+# not there is either a copy never created, holding nothing, or a copy deleted
+# out of band, holding everything. Git's admin entry under .git/worktrees/
+# outlives the directory and still names the HEAD, so these cases are about
+# asking git rather than the filesystem.
+
+torn() { # torn <id> -> yes|no  (did the script mark the errand cleaned up)
+  if grep -q '^tornDown=' "$REEVE_HOME/state/$1.meta" 2>/dev/null
+  then printf 'yes\n'; else printf 'no\n'; fi
+}
+
+# 16. THE FIFTH HOLE. A recorded, detached copy that committed, whose directory
+#     then went missing out of band: rm -rf, an unmounted volume, a moved
+#     folder. Neither half of the gate fired, so nothing was compared and the
+#     script printed "landed-work checks passed" three lines below the comment
+#     saying a check that cannot run is a refusal and never a pass.
+cell absent-copy empty off-ref no
+absent_repo=$repo absent_wt=$wt absent_sha=$sha
+rm -rf "$absent_wt"
+run_teardown absent-copy
+ck_eq  "16 an absent copy holding a commit refuses"  "$RC" 1
+ck_not "16 it does not claim the checks passed"      "$OUT" "landed-work checks passed"
+ck_has "16 it says the directory is not there"       "$OUT" "Its directory is not there"
+ck_has "16 it names the commit at risk"              "$OUT" "$absent_sha"
+ck_eq  "16 the errand is not marked cleaned up"      "$(torn absent-copy)" no
+ck_eq  "16 nothing is orphaned"                      "$(unreachable "$absent_repo")" none
+
+# 16b. THE CHAIN, which is where the commit actually died. The refusal above is
+#      only half the fix: git's entry for the absent copy was the last root
+#      holding that commit, and this script used to run `git worktree prune`
+#      unconditionally on every successful removal, so the NEXT teardown in the
+#      same repository destroyed it. `worktree remove` deletes its own entry, so
+#      that prune only ever reached other errands.
+next_wt=$SCRATCH/absent-copy.worktrees/next
+git -C "$absent_repo" worktree add -q "$next_wt" -b fix/absent-next main
+printf 'next\n' > "$next_wt/d.txt"
+git -C "$next_wt" add -A >/dev/null
+git -C "$next_wt" commit -qm 'work that lands'
+git -C "$absent_repo" merge -q --ff-only fix/absent-next
+mkdir -p "$REEVE_HOME/errands/absent-next"
+printf 'repo=%s\nworktree=%s\nbranch=fix/absent-next\nbase=main\nwrites=yes\n' \
+  "$absent_repo" "$next_wt" > "$REEVE_HOME/state/absent-next.meta"
+printf 'done: finished\n' > "$REEVE_HOME/errands/absent-next/status"
+run_teardown absent-next
+ck_eq  "16b the next errand in the same repository tears down" "$RC" 0
+ck_eq  "16b its own copy is removed"                  "$(gone "$next_wt")" removed
+absent_still=$(survives "$absent_repo" "$absent_sha")
+ck_eq  "16b the absent copy's commit is not lost"     "$absent_still" survived
+ck_eq  "16b and git still holds it"                   "$(unreachable "$absent_repo")" none
+
+# 17. the other direction, and the reason a blanket refusal on a missing
+#     directory is wrong. bin/reeve-brief records worktree= and
+#     bin/reeve-dispatch creates it, so between the two every errand has a
+#     recorded copy that does not exist. Git has never heard of that path, so
+#     there is nothing at risk and nothing to refuse over. Built by removing the
+#     copy through git, which leaves exactly that state.
+cell never-dispatched empty at-base no
+git -C "$repo" worktree remove "$wt"
+run_teardown never-dispatched
+ck_eq  "17 a copy git never heard of tears down"     "$RC" 0
+ck_eq  "17 the errand is marked cleaned up"          "$(torn never-dispatched)" yes
+ck_eq  "17 nothing is orphaned"                      "$(unreachable "$repo")" none
+
+# 18. the same absent directory, with a HEAD that IS on the base: git knows the
+#     copy, so the check runs, and it passes. Proof that the hole was closed by
+#     asking the question rather than by refusing whenever a directory is gone.
+cell absent-landed empty at-base no
+rm -rf "$wt"
+run_teardown absent-landed
+ck_eq  "18 an absent copy whose HEAD is landed tears down" "$RC" 0
+ck_eq  "18 the errand is marked cleaned up"          "$(torn absent-landed)" yes
+ck_eq  "18 nothing is orphaned"                      "$(unreachable "$repo")" none
+
+# 19. THE GATE DISAGREEMENT. The check and the removal asked the same question
+#     at different times, and the only term that can change between them is the
+#     directory, so they could disagree inside one run. Always in the same
+#     direction, because the check runs first: check skipped, removal performed.
+#     A copy that appeared in that window was removed with its commits on it.
+#
+#     The window is two rev-parse calls and two merge-base calls wide, so it is
+#     widened here deliberately, with a git on PATH that creates the copy the
+#     first time the script asks a merge-base question. That is after the gate
+#     decided nothing was there and before the removal runs. The race is the
+#     instrument, not the finding: the finding is that the removal had its own
+#     opinion at all.
+cell raced-copy landed at-base yes
+git -C "$repo" worktree remove "$wt"        # recorded, absent, git knows nothing
+raced_repo=$repo raced_wt=$wt
+REAL_GIT=$(command -v git)
+mkdir -p "$SCRATCH/shim"
+cat > "$SCRATCH/shim/git" <<'SHIM'
+#!/usr/bin/env bash
+for a in "$@"; do
+  if [ "$a" = merge-base ] && [ ! -e "$RACE_MARKER" ]; then
+    : > "$RACE_MARKER"
+    "$REAL_GIT" -C "$RACE_REPO" worktree add -q --detach "$RACE_WT" main
+    printf 'raced\n' > "$RACE_WT/raced.txt"
+    "$REAL_GIT" -C "$RACE_WT" add -A >/dev/null
+    "$REAL_GIT" -C "$RACE_WT" commit -qm 'work made inside the window'
+    "$REAL_GIT" -C "$RACE_WT" rev-parse HEAD > "$RACE_SHA"
+    break
+  fi
+done
+exec "$REAL_GIT" "$@"
+SHIM
+chmod +x "$SCRATCH/shim/git"
+RACE_MARKER=$SCRATCH/race.marker RACE_SHA=$SCRATCH/race.sha
+RACE_REPO=$raced_repo RACE_WT=$raced_wt
+export REAL_GIT RACE_MARKER RACE_SHA RACE_REPO RACE_WT
+OUT=$(PATH="$SCRATCH/shim:$PATH" "$ROOT/bin/reeve-teardown" raced-copy 2>&1); RC=$?
+unset REAL_GIT RACE_MARKER RACE_SHA RACE_REPO RACE_WT
+raced_sha=$(cat "$SCRATCH/race.sha" 2>/dev/null)
+ck_eq  "19 the copy was really created inside the window" \
+       "$([ -n "$raced_sha" ] && printf 'yes\n' || printf 'no\n')" yes
+ck_eq  "19 an unchecked copy is not removed"         "$(gone "$raced_wt")" present
+raced_still=$(survives "$raced_repo" "$raced_sha")
+ck_eq  "19 the commit made in the window survives"   "$raced_still" survived
+ck_eq  "19 nothing is orphaned"                      "$(unreachable "$raced_repo")" none
+
+# 20. low 6. `--is-ancestor` is non-zero for "not an ancestor" and for "not a
+#     commit in this repository" alike, so a repo= naming the wrong repository
+#     failed closed with the right instinct and the wrong diagnosis: it was
+#     reported as a record/copy disagreement and sent the reader to the branch=
+#     line of a record whose repo= line is what is wrong.
+cell wrong-repo-donor empty at-base no
+donor_repo=$repo
+cell wrong-repo empty off-ref no
+wrong_meta=$REEVE_HOME/state/wrong-repo.meta
+printf 'repo=%s\nworktree=%s\nbranch=\nbase=main\nwrites=no\n' "$donor_repo" "$wt" > "$wrong_meta"
+run_teardown wrong-repo
+ck_eq  "20 a repo= naming another repository refuses" "$RC" 1
+ck_has "20 it says the copy is not a copy of it"     "$OUT" "is not a copy of $donor_repo"
+ck_has "20 it names the line to correct"             "$OUT" "repo= line in $wrong_meta"
+ck_not "20 it does not blame the branch record"      "$OUT" "the record and the copy disagree"
+ck_eq  "20 its copy survives"                        "$(gone "$wt")" present
+ck_eq  "20 the commit is not lost"                   "$(survives "$repo" "$sha")" survived
 
 echo
 echo "passed=$PASS failed=$FAIL"
