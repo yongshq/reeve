@@ -46,7 +46,7 @@ one() {
   printf 'errand    %s\n' "$i"
   printf 'office    %s on %s via %s\n' "$(meta_get "$i" office '?')" "$(meta_get "$i" harness '?')" "$(meta_get "$i" backend '?')"
   printf 'holding   %s\n' "$(meta_get "$i" repo '?')"
-  printf 'copy      %s\n' "$(meta_get "$i" cwd "$(meta_get "$i" worktree '?')")"
+  local c; c=$(meta_get "$i" cwd "$(meta_get "$i" worktree '?')"); printf 'copy      %s\n' "${c:-?}"
   local br; br=$(meta_get "$i" branch '')
   printf 'branch    %s\n' "${br:-none, detached at $(meta_get "$i" base '?')}"
   printf 'reported  %s\n' "$st"

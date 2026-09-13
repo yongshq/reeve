@@ -33,8 +33,15 @@ require_id "$id"
 [ -n "$holding" ] || die "no holding given. a holding is a repo: a registered name, or a path"
 [ -n "$office" ]  || die "no --office given. one of: $(office_names | tr '\n' ' ')"
 
+# The office becomes a component of the worktree path below, so assert
+# membership in the real list rather than the existence of a file. A bare
+# `-f offices/$office.md` test follows `..` happily: `--office ../README` finds
+# offices/../README.md and the composed path then escapes <repo>.worktrees
+# entirely. office_names excludes README, which is exactly the file that
+# defeats an existence check.
+lines_has "$office" "$(office_names)" \
+  || die "no such office '$office'. offices are: $(office_names | tr '\n' ' ')"
 office_file="$REEVE_ROOT_D/offices/$office.md"
-[ -f "$office_file" ] || die "no such office '$office'. offices are: $(office_names | tr '\n' ' ')"
 
 home_ensure >/dev/null
 brief=$(brief_file "$id")
@@ -142,7 +149,7 @@ You have no local copy of any repository. You work in the reeve's home at \`$cop
 you write goes anywhere else. Confirm it is there:
 
 \`\`\`sh
-ls $copy
+ls "$copy"
 \`\`\`
 
 If it is not, stop immediately, append
