@@ -69,12 +69,18 @@ Both ways this goes wrong are silent, and only the first is obvious:
 A cheap tier does not make a hand read less or take fewer turns. Scope does that, in the `{SPEC}`
 seam. The tier sets the price per token, not the count.
 
+The office predicts most of that table, so each office declares its own default in
+`offices/README.md` and a dispatch that names no flag gets the office's tier rather than the richest
+thing going. Your flags still win. The artificer is the row that splits both ways, so that is the
+one office where the tier is still yours to name.
+
 ### What actually reaches the hand
 
 Rendering is per harness: `model_flag` and `effort_flag` in `harnesses/<harness>.toml`. Several
 declare one or both empty, and an empty flag is dropped silently, so the setting is recorded in
-`$REEVE_HOME/state/<id>.meta` and never appears on the command line. `bin/reeve-status` does not
-print it either. Confirm before relying on it:
+`$REEVE_HOME/state/<id>.meta` and never appears on the command line. `bin/reeve-dispatch` warns when
+that happens and `bin/reeve-status` prints the axis as dropped, which covers an office default too.
+Confirm anyway before relying on it:
 
 ```sh
 bin/reeve-dispatch <id> --dry-run --model <model> --effort <effort>   # prints the launch line
@@ -84,7 +90,7 @@ Read that line. If the flag is not in it, the harness has no flag to render it i
 goes out on that harness's default whatever you passed.
 
 Both flags belong to the dispatch and not to the brief, so a relaunch (below) that omits them
-relaunches on defaults.
+relaunches on the office default, not on whatever the first dispatch was given.
 
 ## After dispatching
 

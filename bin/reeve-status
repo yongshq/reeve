@@ -46,6 +46,33 @@ live_state() {
   fi
 }
 
+# What the errand actually spends, and who decided it. The origin is the point:
+# an errand running cheap is fine when an office chose it and a mistake when a
+# flag did, and the two are indistinguishable from the value alone.
+#
+# A harness with an empty flag template for an axis drops it silently, so this
+# says dropped rather than letting the recorded value imply it applied. Derived
+# here from the harness file rather than stored at dispatch: one fact, one
+# record, read back through the same file that decides it.
+tier_line() {
+  local i=$1 h out='' axis val from note
+  h=$(meta_get "$i" harness '')
+  for axis in model effort; do
+    val=$(meta_get "$i" "$axis" '')
+    # An errand dispatched before origins were recorded has the value but not
+    # its origin, and back then a value could only have come from a flag.
+    if [ -n "$val" ]; then from=$(meta_get "$i" "${axis}_from" flag)
+    else                  from=$(meta_get "$i" "${axis}_from" harness); fi
+    note=''
+    if [ -n "$val" ] && [ -n "$h" ] \
+       && [ -z "$("$BIN/reeve-harness" get "$h" "${axis}_flag" '' 2>/dev/null)" ]; then
+      note="dropped: $h has no ${axis}_flag"
+    fi
+    out="$out, $axis $(tier_say "$val" "$from" "$note")"
+  done
+  printf '%s\n' "${out#, }"
+}
+
 one() {
   local i=$1 rec st open div last
   rec=$(status_reconcile "$i")
@@ -56,6 +83,7 @@ one() {
 
   printf 'errand    %s\n' "$i"
   printf 'office    %s on %s via %s\n' "$(meta_get "$i" office '?')" "$(meta_get "$i" harness '?')" "$(meta_get "$i" backend '?')"
+  printf 'tier      %s\n' "$(tier_line "$i")"
   printf 'holding   %s\n' "$(meta_get "$i" repo '?')"
   local c; c=$(meta_get "$i" cwd "$(meta_get "$i" worktree '?')"); printf 'copy      %s\n' "${c:-?}"
   local br; br=$(meta_get "$i" branch '')

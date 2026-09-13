@@ -266,6 +266,77 @@ office_names() {
   done
 }
 
+# --- the office default tier ------------------------------------------------
+# What an office spends when the dispatch names nothing. Declared as one table
+# row per office under "## The default tier" in offices/README.md, and read from
+# there rather than described there.
+#
+# Why that file, and not either of the two an office already owns:
+#   offices/<office>.settings.json is a claude permissions document, copied
+#     verbatim into the errand directory for the harness to enforce. A harness
+#     agnostic tier in a harness specific file would be shipped to every hand
+#     and read by nothing.
+#   offices/<office>.md is inlined verbatim into every brief, so anything
+#     declared there becomes text the hand reads as instruction. The tier is the
+#     reeve's spending decision about a hand, not part of the hand's role.
+# offices/README.md is already where an office is described, so the table a
+# human reads and the table dispatch parses are one table. Same reasoning as
+# manors.md above: two representations of one registry drift, and then neither
+# is true.
+#
+# An empty cell is written `(none)`, which means unset: today's behaviour, the
+# harness deciding. Never a guess at what the harness would have chosen.
+
+office_tier() {
+  # office_tier <office> <model|effort>   prints the value, or nothing
+  local office=$1 axis=$2 f val
+  case $axis in model|effort) ;; *) die "office_tier: unknown axis '$axis'" ;; esac
+  f="$REEVE_ROOT_D/offices/README.md"
+  [ -f "$f" ] || return 0
+  # One awk, no pipeline: `sed | grep -m1` would close the pipe on the first
+  # match, and under pipefail that reads as a failed lookup rather than a found
+  # row. The section guard is what keeps an office name in the first column of
+  # some other table in this file from becoming a declaration by accident.
+  val=$(awk -F'|' -v office="$office" -v a="$axis" '
+    /^## / { insec = ($0 ~ /^## The default tier/) }
+    insec && !found && $0 ~ "^\\|[ \t]*" office "[ \t]*\\|" {
+      v = (a == "model") ? $3 : $4
+      gsub(/`/, "", v); gsub(/^[ \t]+|[ \t]+$/, "", v)
+      print v; found = 1
+    }' "$f")
+  case $val in ''|'(none)'|'-') return 0 ;; esac
+  # The value is substituted into a harness flag and lands unquoted on a command
+  # line, so a cell that is not one plain token is a documentation error worth
+  # refusing over, not something to pass through and find out about at launch.
+  case $val in *[!a-zA-Z0-9._-]*) die "office '$office' declares an unusable default $axis '$val' in $f" ;; esac
+  printf '%s\n' "$val"
+}
+
+tier_say() {
+  # tier_say <value> <origin> [note]   one phrase, for anything that prints a
+  # tier. Single owner of the wording so dispatch and status never disagree
+  # about what "harness" means: no value, because the household never learns
+  # what the harness picked.
+  local val=${1:-} from=${2:-harness} note=${3:-}
+  if [ -z "$val" ]; then printf 'harness default\n'
+  elif [ -n "$note" ]; then printf '%s (%s, %s)\n' "$val" "$from" "$note"
+  else printf '%s (%s)\n' "$val" "$from"; fi
+}
+
+tier_resolve() {
+  # tier_resolve <office> <model|effort> [flag-value]   prints <value>|<origin>
+  #
+  # Precedence, highest first: the flag the reeve passed, the office default,
+  # then the harness. Each axis resolves alone, so an office may default effort
+  # without pinning a model. Origin travels with the value because "this errand
+  # ran cheap" and "who decided that" are two different questions, and the
+  # second one is the one a reeve asks later.
+  local office=$1 axis=$2 flag=${3:-} val
+  if [ -n "$flag" ]; then printf '%s|flag\n' "$flag"; return 0; fi
+  val=$(office_tier "$office" "$axis") || return 1
+  if [ -n "$val" ]; then printf '%s|office\n' "$val"; else printf '|harness\n'; fi
+}
+
 # --- holdings registry -----------------------------------------------------
 # manors.md is one file that both a human and a script can read. Each holding is
 # one line in a fixed field order so `holding_field` can pull a value out

@@ -8,6 +8,10 @@
 #
 # --dry-run prints every command it would run and changes nothing. Use it when
 # you are unsure: this is the one script in the household that mutates a repo.
+#
+# --model and --effort are optional: without them the office's own default
+# applies, from the table in offices/README.md, and without that the harness
+# decides. reeve-status reports which of the three it was.
 
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/reeve-lib.sh"
 BIN=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -22,7 +26,7 @@ while [ $# -gt 0 ]; do
     --effort)  effort=${2:-}; shift 2 ;;
     --allow-unverified) allow_unverified=yes; shift ;;
     --dry-run) dry=yes; shift ;;
-    -h|--help) sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "unknown option '$1'" ;;
   esac
 done
@@ -75,6 +79,30 @@ if ! out=$("$BIN/reeve-harness" check "$harness" 2>&1); then
     exit 1
   fi
 fi
+
+# --- the tier: flag, then office, then harness ------------------------------
+# The office knows its own tier in most cases, so a dispatch that names neither
+# flag is not a request for the richest thing available: it is a request for
+# whatever this office usually costs. Resolved here rather than in the render so
+# that the meta records what actually went out, origin included.
+tier=$(tier_resolve "$office" model "$model")   || exit 1
+model=${tier%%|*}; model_from=${tier##*|}
+tier=$(tier_resolve "$office" effort "$effort") || exit 1
+effort=${tier%%|*}; effort_from=${tier##*|}
+
+# An empty flag template renders away to nothing and the hand runs on the
+# harness default. Silent is the problem: the meta would record a tier the
+# command line never carried. Say it once, here, while it can still be acted on.
+for axis in model effort; do
+  case $axis in
+    model)  tier_val=$model;  tier_from=$model_from ;;
+    effort) tier_val=$effort; tier_from=$effort_from ;;
+  esac
+  [ -n "$tier_val" ] || continue
+  if [ -z "$("$BIN/reeve-harness" get "$harness" "${axis}_flag" '')" ]; then
+    warn "harness '$harness' declares no ${axis}_flag, so $axis=$tier_val (from the $tier_from) will not reach the command line. The errand runs on the harness default for it."
+  fi
+done
 
 # --- preflight: will this harness actually be able to start here -----------
 # claude keys folder trust to the git repository, so a worktree of an untrusted
@@ -179,6 +207,7 @@ cmdline=$("$BIN/reeve-harness" render "$harness" "$brief" \
 if [ "$dry" = yes ]; then
   printf '  would run: reeve-backend call launch %s <cmdline> --backend %s\n' "$target" "$backend"
   printf '\ncmdline:\n  %s\n' "$cmdline"
+  printf '\ntier: model %s, effort %s\n' "$(tier_say "$model" "$model_from")" "$(tier_say "$effort" "$effort_from")"
   printf '\nnothing was changed.\n'
   exit 0
 fi
@@ -190,13 +219,19 @@ meta_set "$id" backend "$backend"
 meta_set "$id" harness "$harness"
 meta_set "$id" target "$target"
 meta_set "$id" cwd "$cwd"
+# The value and where it came from, one key each. No second copy of the value:
+# an absent model key with model_from=harness is the harness deciding, which is
+# the one case where the household does not know the value and must not pretend.
 [ -n "$model" ]  && meta_set "$id" model "$model"
 [ -n "$effort" ] && meta_set "$id" effort "$effort"
+meta_set "$id" model_from "$model_from"
+meta_set "$id" effort_from "$effort_from"
 meta_set "$id" dispatched "$(date +%Y-%m-%dT%H:%M:%S)"
 touch "$(status_file "$id")"
 
 info "dispatched $id"
 info "  office   $office on $harness via $backend"
+info "  tier     model $(tier_say "$model" "$model_from"), effort $(tier_say "$effort" "$effort_from")"
 info "  copy     $cwd"
 [ -n "$branch" ] && info "  branch   $branch (from $base)" || info "  branch   none, detached at $base"
 info "  running  $target"
