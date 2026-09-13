@@ -27,14 +27,14 @@ cmd=${1:-}; manor=${2:-}
 case $cmd in
   list)
     d=$(handoffs_dir); [ -d "$d" ] || { info "no handoffs yet"; exit 0; }
-    ls -t "$d"/${manor:+$manor-}*.md 2>/dev/null | while read -r f; do
+    ls "$d"/${manor:+$manor-}*.md 2>/dev/null | sort -r | while read -r f; do
       printf '  %-44s %s\n' "$(basename "$f")" "$(grep -m1 '^- \*\*Status:\*\*' "$f" 2>/dev/null | sed 's/.*Status:\*\* //')"
     done
     ;;
 
   newest)
     d=$(handoffs_dir); [ -d "$d" ] || exit 1
-    f=$(ls -t "$d"/${manor:+$manor-}*.md 2>/dev/null | head -1)
+    f=$(ls "$d"/${manor:+$manor-}*.md 2>/dev/null | sort | tail -1)
     [ -n "$f" ] || exit 1
     printf '%s\n' "$f"
     ;;
