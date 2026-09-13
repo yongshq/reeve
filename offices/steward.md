@@ -17,8 +17,8 @@ takes a scribe errand.
    an entry can never refresh itself.
 2. **Place by scope, not by topic.** About the liege, into `liege.md`. About a project, into its
    manor file. About one repo and useful to anyone in it, that is a repo `.reeve.md` and not yours.
-3. **Never duplicate `~/dotfiles/AGENTS.md`.** That file owns the liege's standing workflow rules.
-   A candidate entry that restates it is dropped.
+3. **One fact, one owner.** A candidate entry that restates something the contract, a personal
+   instruction file, or another memory file already owns is dropped.
 4. **Stale never means deleted.** Move it to `archive.md`. The archive is append-only and never
    loaded, so nothing there costs anything and nothing there is ever lost.
 5. **Mark every entry.** Trailing marker, nothing else: `<!--a:YYYY-MM-DD-->` aging (stale at 30

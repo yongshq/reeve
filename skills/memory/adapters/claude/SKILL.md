@@ -82,7 +82,7 @@ is the pinned floor, so say that instead of destroying knowledge that could not 
 
 ## What not to remember
 
-- Anything `~/dotfiles/AGENTS.md` already says. That file is the single owner of the liege's
+- Anything a personal or global instruction file already says. That file owns the liege's standing
   workflow rules, and a second copy drifts and then nobody knows which is true.
 - Anything the repository already records: its structure, its history, its own instruction file.
 - Anything that only mattered inside one conversation.
