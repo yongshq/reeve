@@ -27,10 +27,30 @@ errand_ids() {
   ls "$REEVE_HOME_D/state"/*.meta 2>/dev/null | while read -r f; do basename "$f" .meta; done
 }
 
+# meta_get hands back its fallback only when the key is ABSENT, and reeve-brief
+# writes several keys present and empty for dispatch to fill in later. To a
+# reader of a cell those two are the same thing, an unknown, so anything printed
+# for a human goes through here rather than through meta_get directly.
+meta_show() {
+  local v; v=$(meta_get "$1" "$2" '')
+  printf '%s\n' "${v:-${3:-?}}"
+}
+
 live_state() {
   local i=$1 tgt bk st attn
   tgt=$(meta_get "$i" target '')
-  [ -n "$tgt" ] || { printf 'never-dispatched\n'; return; }
+  # `target=` is emptied when a session is freed, so on its own it cannot tell a
+  # dispatch that ended from one that never happened: both look identical here,
+  # which is how nearly every errand in the home came to read never-dispatched.
+  # The dispatched stamp is what separates them, and the tornDown stamp, written
+  # by reeve-teardown and read the same way in reeve-handoff, says whether the
+  # copy went with the session or is still on disk.
+  if [ -z "$tgt" ]; then
+    if [ -z "$(meta_get "$i" dispatched '')" ]; then printf 'never-dispatched\n'
+    elif [ -n "$(meta_get "$i" tornDown '')" ]; then printf 'torn-down\n'
+    else printf 'session-gone\n'; fi
+    return
+  fi
   bk=$(meta_get "$i" backend herdr)
   st=$("$BIN/reeve-backend" call agent_state "$tgt" --backend "$bk" 2>/dev/null) || st=unreadable
   # Two facts, because they are two questions. `alive` alone once covered a hand
@@ -82,12 +102,12 @@ one() {
   last=$(printf '%s\n' "$rec" | grep -m1 '^last='       | sed 's/^last=//')
 
   printf 'errand    %s\n' "$i"
-  printf 'office    %s on %s via %s\n' "$(meta_get "$i" office '?')" "$(meta_get "$i" harness '?')" "$(meta_get "$i" backend '?')"
+  printf 'office    %s on %s via %s\n' "$(meta_show "$i" office)" "$(meta_show "$i" harness)" "$(meta_show "$i" backend)"
   printf 'tier      %s\n' "$(tier_line "$i")"
-  printf 'holding   %s\n' "$(meta_get "$i" repo '?')"
+  printf 'holding   %s\n' "$(meta_show "$i" repo)"
   local c; c=$(meta_get "$i" cwd "$(meta_get "$i" worktree '?')"); printf 'copy      %s\n' "${c:-?}"
   local br; br=$(meta_get "$i" branch '')
-  printf 'branch    %s\n' "${br:-none, detached at $(meta_get "$i" base '?')}"
+  printf 'branch    %s\n' "${br:-none, detached at $(meta_show "$i" base)}"
   printf 'reported  %s\n' "$st"
   printf 'process   %s\n' "$(live_state "$i")"
   [ -n "$last" ] && printf 'last said %s\n' "$last"
@@ -107,11 +127,15 @@ one() {
   # A branch with commits that the base does not have is unlanded work. Say so
   # plainly, because that is what makes teardown refuse later.
   if [ -n "$br" ]; then
-    local repo ahead dirty wt
+    local repo ahead dirty wt base
     repo=$(meta_get "$i" repo ''); wt=$(meta_get "$i" worktree '')
+    # Counted against the same base that gets printed, and an empty base falls
+    # back to the same default an absent one does: otherwise the range reads
+    # `..branch`, which counts the branch's whole history as unlanded work.
+    base=$(meta_show "$i" base main)
     if [ -n "$repo" ] && git -C "$repo" rev-parse --verify --quiet "refs/heads/$br" >/dev/null 2>&1; then
-      ahead=$(git -C "$repo" rev-list --count "$(meta_get "$i" base main)..$br" 2>/dev/null || echo '?')
-      printf 'commits   %s ahead of %s, not pushed\n' "$ahead" "$(meta_get "$i" base main)"
+      ahead=$(git -C "$repo" rev-list --count "$base..$br" 2>/dev/null || echo '?')
+      printf 'commits   %s ahead of %s, not pushed\n' "$ahead" "$base"
     fi
     if [ -n "$wt" ] && [ -d "$wt" ]; then
       dirty=$(git -C "$wt" status --porcelain 2>/dev/null | wc -l | tr -d ' ')
@@ -128,7 +152,7 @@ if [ "$all" = yes ] || [ -z "$id" ]; then
     [ -n "$i" ] || continue
     o=$(status_field "$i" open); o=${o:-0}
     printf '%-24s %-11s %-16s %-16s %s\n' \
-      "$i" "$(meta_get "$i" office '?')" "$(status_field "$i" state)" "$(live_state "$i")" \
+      "$i" "$(meta_show "$i" office)" "$(status_field "$i" state)" "$(live_state "$i")" \
       "$([ "$o" -gt 0 ] && printf '%s waiting' "$o" || printf '-')"
   done
   exit 0
