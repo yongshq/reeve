@@ -160,6 +160,28 @@ printf '_You are the reeve._\n' > "$r/AGENTS.md"
 brief_for e-prefix-underscore "$r"
 eq "single underscore is not a prefix the pattern allows" "" "$(named e-prefix-underscore)"
 
+# --- the shapes the pattern must keep refusing -------------------------------
+# A negative per way the pattern can be WIDENED. Pinning what fires leaves every
+# loosening mutation alive: each case below fires today only if someone has
+# widened the character class, made the one optional prefix repeatable, dropped
+# the anchor, or dropped the space that makes "are" a whole word. The paragraph
+# firing on four briefs out of five is how hands learn to skim it.
+i=0
+for shape in \
+  '+ You are the reeve.' \
+  '# You are the reeve.' \
+  '- - You are the reeve.' \
+  '**> You are the reeve.' \
+  "You aren't allowed to push." \
+  'If you are unsure, ask.' \
+; do
+  i=$((i+1))
+  r=$(mkrepo "widen$i")
+  printf '# House\n\n%s\n' "$shape" > "$r/AGENTS.md"
+  brief_for "e-widen$i" "$r"
+  eq "does not fire on '$shape'" "" "$(named "e-widen$i")"
+done
+
 # --- the paragraph's tail turns on what the office may write -----------------
 # A scout is told the same thing about the file, and the opposite thing about
 # editing, so this paragraph never contradicts the hard rules below it.

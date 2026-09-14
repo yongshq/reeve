@@ -112,7 +112,16 @@ branch=''
 # created.
 if [ "$writes" = home ]; then
   worktree=''
-  copy=$REEVE_HOME_D
+  # Resolved, because the guard below hands the steward an expectation it must
+  # match against `pwd -P`, and $REEVE_HOME is whatever the liege typed: a path
+  # through a symlink (/tmp is one on macOS), a trailing slash, a relative
+  # `homeF`. Any of those renders an expectation no hand can ever satisfy, so a
+  # healthy steward blocks into a pane nobody is watching. Only rendered text
+  # reads `copy` in this branch, and nothing recorded in state/<id>.meta does:
+  # `worktree=` stays empty here and reeve-dispatch records `cwd=` from
+  # $REEVE_HOME itself, so resolving moves the brief and leaves the record.
+  copy=$(cd -P "$REEVE_HOME_D" 2>/dev/null && pwd) || copy=$REEVE_HOME_D
+  [ -n "$copy" ] || copy=$REEVE_HOME_D
   copy_cell="none, you work in \`$copy\`"
 else
   worktree="$(dirname "$repo")/$(basename "$repo").worktrees/$office-$id"
@@ -175,6 +184,27 @@ file applies in full, git conduct and writing style especially.
 
 PREC
 
+# What the steward's guard establishes, mechanically: the hand's physical cwd is
+# the path its brief names, and that path is either no repository at all or a
+# repository's own toplevel. Nothing else is asked.
+#
+# What it deliberately does not establish. A chosen edge, not an oversight, and
+# the reason is the load-bearing half: a limit reported as a bug, or closed
+# without reading why it was left, costs more than the limit does.
+#
+# - A $REEVE_HOME that IS some repository's toplevel passes, including one that
+#   is a project checkout with tracked source in it. That is the dangerous shape
+#   the paragraph exists to catch, and it is the same clause that lets a home the
+#   liege keeps under git through. The two are indistinguishable from inside the
+#   home with the two commands a hand runs once: both print the home twice.
+#   Dropping the clause closes it and refuses every git-managed home instead,
+#   which is the false refusal this guard was rewritten to avoid, into a pane
+#   nobody is watching. Telling them apart needs the registry rather than the
+#   filesystem (is this toplevel a holding in manors.md), which is a check, not a
+#   paragraph, and it belongs to reeve-dispatch where the home is chosen, not to
+#   the hand that has already been launched into it. The nested variant, a home
+#   under a holding, is caught, so the hole is exactly "home == some repository's
+#   toplevel" and it requires the liege to have pointed $REEVE_HOME at a checkout.
 if [ "$writes" = home ]; then
 cat <<HOME_ISO
 ## Before you touch anything
@@ -188,8 +218,9 @@ git rev-parse --show-toplevel 2>/dev/null || echo 'not a repository'
 \`\`\`
 
 The first must print \`$copy\`. The second must print \`not a repository\`, or \`$copy\` itself if the
-liege keeps the home under git. Any other path means you are standing in a holding, where a write
-breaks hard rule 1. If either disagrees, stop at once, append
+liege keeps the home under git. Any other path means the home sits inside a repository that is not
+the home, and the check cannot tell a holding, where a write breaks hard rule 1, from any other
+repository, so it stops for both. If either disagrees, stop at once, append
 
 \`\`\`
 blocked: not in the reeve's home, or inside a project checkout
