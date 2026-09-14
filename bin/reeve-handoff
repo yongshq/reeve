@@ -94,7 +94,7 @@ case $cmd in
 
   new)
     [ -n "$manor" ] || die "which manor? bin/reeve-handoff new <manor>"
-    d=$(handoffs_dir); mkdir -p "$d"
+    d=$(handoffs_dir); mkdir -p "$d" || die "could not create $d"
     stamp=$(date +%Y-%m-%d-%H%M)
     f="$d/$manor-$stamp.md"
     [ -e "$f" ] && die "a handoff for this minute already exists: $f"
@@ -129,7 +129,7 @@ case $cmd in
       printf '## Next\n\n'
       printf 'The specific next action, and whose move it is. Never leave this as "continue".\n\n'
       printf '{NEXT}\n'
-    } > "$f"
+    } > "$f" || die "could not write $f"
 
     info "handoff scaffolded: $f"
     info "seams to fill: {TITLE} {RESUME} {GOAL} {OPEN} {DECIDED} {NEXT}"

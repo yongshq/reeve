@@ -37,7 +37,7 @@ if [ "${1:-}" = "--register" ]; then
   path=$(cd "$path" && pwd)
   home_ensure >/dev/null
   f=$(manors_file)
-  [ -f "$f" ] || printf '# Manors\n\nProjects the household knows. One block per manor, one line per repo.\nProposed by reeve-survey, confirmed by the liege.\n' > "$f"
+  [ -f "$f" ] || printf '# Manors\n\nProjects the household knows. One block per manor, one line per repo.\nProposed by `bin/reeve-survey`, confirmed by the liege.\n' > "$f"
   if holding_line "$holding" >/dev/null 2>&1; then
     die "holding '$holding' is already registered. edit $f by hand to change it"
   fi
