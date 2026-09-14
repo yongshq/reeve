@@ -36,6 +36,30 @@ meta_show() {
   printf '%s\n' "${v:-${3:-?}}"
 }
 
+# --- the ticket -------------------------------------------------------------
+# One errand is one holding, one copy, one branch, so a tracker item spanning
+# three repositories is three errands and the key they share is the only record
+# that they are one piece of work. It is stored in whatever case the liege
+# typed, and two errands on one ticket may disagree about it, so grouping
+# matches on the lowercased key while every label keeps a spelling as given.
+
+ticket_key() {  # the group's identity: lowercased, empty when there is none
+  meta_get "$1" ticket '' | tr '[:upper:]' '[:lower:]'
+}
+
+ticket_label() {  # ticket_label <key> <id>...   the header line for one group
+  local key=$1 shown='' title='' i
+  shift
+  # First spelling and first title in id order, which is the order these arrive
+  # in: a title is optional, so the row carrying the key need not carry one.
+  for i in "$@"; do
+    [ -n "$shown" ] || shown=$(meta_get "$i" ticket '')
+    [ -n "$title" ] || title=$(meta_get "$i" ticket_title '')
+  done
+  if [ -n "$title" ]; then printf 'ticket %s: %s\n' "${shown:-$key}" "$title"
+  else                     printf 'ticket %s\n' "${shown:-$key}"; fi
+}
+
 live_state() {
   local i=$1 tgt bk st attn
   tgt=$(meta_get "$i" target '')
@@ -105,6 +129,18 @@ one() {
   printf 'office    %s on %s via %s\n' "$(meta_show "$i" office)" "$(meta_show "$i" harness)" "$(meta_show "$i" backend)"
   printf 'tier      %s\n' "$(tier_line "$i")"
   printf 'holding   %s\n' "$(meta_show "$i" repo)"
+  # No line at all when there is no ticket: an errand that belongs to nothing
+  # should not say so on a line of its own. Title and url are optional labels
+  # and each appears only if it is there.
+  local tk tt tu
+  tk=$(meta_get "$i" ticket '')
+  if [ -n "$tk" ]; then
+    tt=$(meta_get "$i" ticket_title '')
+    tu=$(meta_get "$i" ticket_url '')
+    [ -n "$tt" ] && tk="$tk ($tt)"
+    [ -n "$tu" ] && tk="$tk $tu"
+    printf 'ticket    %s\n' "$tk"
+  fi
   local c; c=$(meta_get "$i" cwd "$(meta_get "$i" worktree '?')"); printf 'copy      %s\n' "${c:-?}"
   local br; br=$(meta_get "$i" branch '')
   printf 'branch    %s\n' "${br:-none, detached at $(meta_show "$i" base)}"
@@ -144,16 +180,47 @@ one() {
   fi
 }
 
+# One row, in the only layout there is. Grouped and ungrouped rows print
+# through here so a ticket can never give an errand a different shape.
+table_row() {
+  local i=$1 o
+  o=$(status_field "$i" open); o=${o:-0}
+  printf '%-24s %-11s %-16s %-16s %s\n' \
+    "$i" "$(meta_show "$i" office)" "$(status_field "$i" state)" "$(live_state "$i")" \
+    "$([ "$o" -gt 0 ] && printf '%s waiting' "$o" || printf '-')"
+}
+
 if [ "$all" = yes ] || [ -z "$id" ]; then
   ids=$(errand_ids)
   if [ -z "$ids" ]; then info "no errands in $REEVE_HOME_D"; exit 0; fi
   printf '%-24s %-11s %-16s %-16s %s\n' ERRAND OFFICE REPORTED PROCESS OPEN
-  printf '%s\n' "$ids" | while read -r i; do
+
+  # <key>TAB<id> per errand, key empty when there is no ticket, sorted once.
+  # That single sort settles both orders the view needs, tickets by key
+  # ascending and rows by id inside a ticket, and it puts every ungrouped row
+  # first, where an empty key sorts, so the two blocks split with no second
+  # pass over the metadata.
+  TAB=$(printf '\t')
+  index=$(printf '%s\n' "$ids" | while read -r i; do
     [ -n "$i" ] || continue
-    o=$(status_field "$i" open); o=${o:-0}
-    printf '%-24s %-11s %-16s %-16s %s\n' \
-      "$i" "$(meta_show "$i" office)" "$(status_field "$i" state)" "$(live_state "$i")" \
-      "$([ "$o" -gt 0 ] && printf '%s waiting' "$o" || printf '-')"
+    printf '%s\t%s\n' "$(ticket_key "$i")" "$i"
+  done | LC_ALL=C sort)
+  grouped=$(printf '%s\n' "$index" | grep -v "^$TAB") || :
+  loose=$(printf '%s\n' "$index" | grep "^$TAB" | cut -f2) || :
+
+  printf '%s\n' "$grouped" | cut -f1 | uniq | while read -r key; do
+    [ -n "$key" ] || continue
+    gids=$(printf '%s\n' "$grouped" | awk -F"$TAB" -v k="$key" '$1 == k { print $2 }')
+    ticket_label "$key" $gids
+    for i in $gids; do table_row "$i"; done
+    # One blank line after every group, so the ungrouped block below is not
+    # read as part of the last ticket.
+    printf '\n'
+  done
+
+  printf '%s\n' "$loose" | while read -r i; do
+    [ -n "$i" ] || continue
+    table_row "$i"
   done
   exit 0
 fi

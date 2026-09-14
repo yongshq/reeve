@@ -4,6 +4,14 @@
 # Usage:
 #   reeve-brief <id> <holding> --office <office> [--type feat] [--base main]
 #                              [--harness NAME] [--manor NAME]
+#                              [--ticket KEY] [--ticket-title TEXT]
+#                              [--ticket-url URL]
+#
+# --ticket names the foreign tracker item this errand belongs to, e.g. a Jira
+# key. One errand is one holding, one copy, one branch, so a ticket that spans
+# three repositories is three errands; the shared key is the only record that
+# they are one piece of work, and reeve-status groups them by it. The title and
+# the url are optional labels on that key and need it to be given.
 #
 # Writes $REEVE_HOME/errands/<id>/brief.md with two unfilled seams, {INTENT} and
 # {SPEC}, then stops. The reeve fills them in. reeve-dispatch refuses to launch
@@ -18,6 +26,7 @@ case ${1:-} in -h|--help) print_help "$0"; exit 0 ;; esac
 id=${1:-}; holding=${2:-}
 shift 2 2>/dev/null || :
 office='' type='' base='' harness='' manor=''
+ticket='' ticket_title='' ticket_url=''
 while [ $# -gt 0 ]; do
   case $1 in
     --office)  office=${2:-}; shift 2 ;;
@@ -25,6 +34,9 @@ while [ $# -gt 0 ]; do
     --base)    base=${2:-}; shift 2 ;;
     --harness) harness=${2:-}; shift 2 ;;
     --manor)   manor=${2:-}; shift 2 ;;
+    --ticket)       ticket=${2:-}; shift 2 ;;
+    --ticket-title) ticket_title=${2:-}; shift 2 ;;
+    --ticket-url)   ticket_url=${2:-}; shift 2 ;;
     -h|--help) print_help "$0"; exit 0 ;;
     *) die "unknown option '$1'" ;;
   esac
@@ -33,6 +45,33 @@ done
 require_id "$id"
 [ -n "$holding" ] || die "no holding given. a holding is a repo: a registered name, or a path"
 [ -n "$office" ]  || die "no --office given. one of: $(office_names | tr '\n' ' ')"
+
+# --- the ticket -------------------------------------------------------------
+# A key belonging to a foreign tracker, so its shape is not ours to constrain:
+# no id rules, no uppercasing, no prefix. Two things are refused, and both are
+# about the record rather than the key. Whitespace, because the key lands in a
+# meta file whose grammar is one key=value per line and a newline in a value
+# reads back as a second record; the same reason rejects a newline inside the
+# title or the url, where a space is ordinary and stays allowed.
+#
+# The title and the url are labels on a key, so without one they label nothing.
+# A usage error rather than a silent drop: a reeve that typed only
+# --ticket-title meant to group this errand and would otherwise never find out
+# that it is not grouped.
+if [ -n "$ticket" ]; then
+  case $ticket in *[[:space:]]*) die "bad --ticket '$ticket': a tracker key cannot contain whitespace" ;; esac
+else
+  [ -z "$ticket_title" ] && [ -z "$ticket_url" ] \
+    || die "--ticket-title and --ticket-url need a --ticket to label"
+fi
+# A literal newline held in a variable, because $(printf '\n') is the empty
+# string: command substitution strips the exact character this has to find, and
+# the pattern would then match every value.
+nl='
+'
+case $ticket_title$ticket_url in
+  *"$nl"*) die "bad --ticket-title or --ticket-url: no newlines, one would split the errand's record" ;;
+esac
 
 # The office becomes a component of the worktree path below, so assert
 # membership in the real list rather than the existence of a file. A bare
@@ -378,6 +417,18 @@ Never call work finished that you have not verified.
 TAIL
 } > "$brief"
 
+# Absent ticket flags write no key at all, rather than a key with an empty
+# value. reeve-status reads an absent key as unknown and a present empty one as
+# a value, so `ticket=` on every errand ever briefed would put each of them in a
+# group of its own named by the empty string. The keys that ARE written present
+# and empty above are the ones dispatch fills in later; a ticket has no later.
+ticket_meta=()
+if [ -n "$ticket" ]; then
+  ticket_meta+=("ticket=$ticket")
+  [ -n "$ticket_title" ] && ticket_meta+=("ticket_title=$ticket_title")
+  [ -n "$ticket_url" ]   && ticket_meta+=("ticket_url=$ticket_url")
+fi
+
 meta_write "$id" \
   "office=$office" \
   "holding=$holding" \
@@ -388,7 +439,8 @@ meta_write "$id" \
   "base=$base" \
   "writes=$writes" \
   "harness=$harness" \
-  "created=$(today)"
+  "created=$(today)" \
+  ${ticket_meta+"${ticket_meta[@]}"}
 
 info "brief written: $brief"
 info "seams to fill: {INTENT} and {SPEC}"
