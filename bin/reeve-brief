@@ -180,16 +180,19 @@ cat <<HOME_ISO
 ## Before you touch anything
 
 No local copy of any repository. You work in the reeve's home at \`$copy\`, and write nowhere else.
-Confirm it exists:
+Confirm you are standing in it, and not inside a project checkout:
 
 \`\`\`sh
-ls "$copy"
+pwd -P
+git rev-parse --show-toplevel 2>/dev/null || echo 'not a repository'
 \`\`\`
 
-If it does not, stop at once, append
+The first must print \`$copy\`. The second must print \`not a repository\`, or \`$copy\` itself if the
+liege keeps the home under git. Any other path means you are standing in a holding, where a write
+breaks hard rule 1. If either disagrees, stop at once, append
 
 \`\`\`
-blocked: the reeve's home is not where the brief says it is
+blocked: not in the reeve's home, or inside a project checkout
 \`\`\`
 
 to \`$status\`, and do nothing else.
