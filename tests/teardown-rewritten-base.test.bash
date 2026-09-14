@@ -44,6 +44,18 @@ ck_eq()  { if [ "$2" = "$3" ]; then ok "$1"; else bad "$1" "got [$2] want [$3]";
 ck_has() { case $2 in *"$3"*) ok "$1" ;; *) bad "$1" "output did not mention [$3]" ;; esac; }
 ck_not() { case $2 in *"$3"*) bad "$1" "output should not have said [$3]" ;; *) ok "$1" ;; esac; }
 
+# Which of two lines comes first, for the one part of a refusal whose ORDER is
+# the claim: the advice that ends in a removal must not be read before the
+# safeguard that makes acting on it survivable.
+order() { # order <text> <first> <second> -> before|after|missing
+  local a b
+  a=$(printf '%s\n' "$1" | grep -n -F -- "$2" | head -1 | cut -d: -f1)
+  b=$(printf '%s\n' "$1" | grep -n -F -- "$3" | head -1 | cut -d: -f1)
+  if [ -z "$a" ] || [ -z "$b" ]; then printf 'missing\n'
+  elif [ "$a" -lt "$b" ]; then printf 'before\n'
+  else printf 'after\n'; fi
+}
+
 # --- scene builder ----------------------------------------------------------
 # One scratch repository per case. `mk` leaves a copy that has committed
 # something; what happens to the base afterwards is each case's own business,
@@ -66,6 +78,7 @@ mk() { # mk <id> <shape>
   git -C "$repo" config user.name reeve-test
   printf 'one\n' > "$repo/a.txt"
   git -C "$repo" add -A >/dev/null; git -C "$repo" commit -qm 'init'
+  init_sha=$(git -C "$repo" rev-parse main)
   if [ "$shape" = branch ]; then
     br="fix/$id"
     git -C "$repo" worktree add -q "$wt" -b "$br" main
@@ -81,6 +94,21 @@ mk() { # mk <id> <shape>
 }
 
 land() { git -C "$repo" merge -q --ff-only "$sha"; }   # the work reaches the base
+
+# n further positions of the base, none of them holding the copy's work, so that
+# the entry that DOES hold it can be put at a chosen reflog index. Plumbing
+# rather than commits, because what this needs is where main has BEEN, not what
+# is in it, and moving the base branch under its own checkout is the point.
+filler() { # filler <n>
+  local n=$1 i c tree prev
+  tree=$(git -C "$repo" rev-parse "$init_sha^{tree}")
+  prev=$init_sha
+  for i in $(seq 1 "$n"); do
+    c=$(git -C "$repo" commit-tree "$tree" -p "$prev" -m "filler $i")
+    git -C "$repo" update-ref -m "filler $i" refs/heads/main "$c"
+    prev=$c
+  done
+}
 
 record() { # record <id> [recorded-base]
   local id=$1 recorded=${2:-main}
@@ -123,7 +151,12 @@ kept() { # kept <label> <id> <repo> <wt> <sha>
   ck_eq "$1 commit not lost"   "$(survives "$3" "$5")" survived
 }
 
-MOVED='moved after this errand went out'   # the new diagnosis, in one phrase
+# The diagnosis in one phrase, and it is deliberately not a claim about WHEN the
+# base moved. The walk proves that the base has held a position containing this
+# work and nothing at all about the order of that against the dispatch, so a base
+# force-moved before the errand existed reaches the same message.
+MOVED='has held a position that does contain that work'
+DATED='after this errand went out'          # what it must no longer assert
 
 # 1. THE DEFECT. An artificer's branch that landed, and then main was reset back
 #    under it. Before this fix the refusal said the branch had commits main does
@@ -144,6 +177,7 @@ ck_has "1 it names the move that did it"     "$OUT" "reset: moving to HEAD~1"
 ck_has "1 it names the line to correct"      "$OUT" "base= line in $REEVE_HOME/state/reset-branch.meta"
 ck_not "1 it does not blame the copy"        "$OUT" "has moved off main"
 ck_not "1 it does not say rebase or merge"   "$OUT" "Rebase or merge it first"
+ck_not "1 it does not date the move"         "$OUT" "$DATED"
 
 # 2. the same shape with an amended base, which is the common half: the work IS
 #    on main, under another sha. Patch equivalence is allowed to say so, as a
@@ -174,8 +208,12 @@ ck_has "3 it names where the copy is"        "$OUT" "detached at $sha"
 ck_not "3 it does not blame the copy"        "$OUT" "has moved off main"
 # Correcting base= to a position the base no longer holds ends in a removal, and
 # for a detached copy nothing else is holding that commit. The refusal has to say
-# so, or its own advice is the way the work is lost.
+# so, or its own advice is the way the work is lost. It also has to say it FIRST:
+# a safeguard read after the edit it protects against has already been read too
+# late, and this is the one paragraph in the file where that is true.
 ck_has "3 it says how to give the work a ref" "$OUT" "git -C $repo branch <name> $sha"
+ck_eq  "3 the ref comes before the base= advice" \
+       "$(order "$OUT" "branch <name> $sha" "correct the base= line")" before
 
 # 3b. the same, with the copy's directory gone out of band. The base moving does
 #     not make git's entry under .git/worktrees/ any less the last root holding
@@ -193,6 +231,31 @@ ck_eq  "3b commit not lost"                  "$(survives "$repo" "$sha")" surviv
 ck_has "3b it says the base moved"           "$OUT" "$MOVED"
 ck_has "3b it still warns about the prune"   "$OUT" "git worktree prune"
 ck_has "3b it says the directory is absent"  "$OUT" "Its directory is not there"
+
+# 3c. the base moved AND the copy moved, which is one scene rather than two. The
+#     branch landed; the copy then detached and committed on top of it; the base
+#     took that in and was reset back. So check 4a passes on the branch, check 4b
+#     fails on the copy, and the base's reflog does hold a position containing
+#     the copy's HEAD. The new diagnosis fires, and it must not swallow the other
+#     half: a copy sitting off a branch that DID land is the disagreement the
+#     unmoved-base refusal reports, and the base having moved as well does not
+#     make it any less true. Saying only that the base moved points the reader at
+#     base=, which here is not the only line that went stale.
+mk branch-landed-copy-off branch
+land
+git -C "$wt" checkout -q --detach
+printf 'three\n' > "$wt/c.txt"
+git -C "$wt" add -A >/dev/null; git -C "$wt" commit -qm 'work on top of the landed branch'
+later=$(git -C "$wt" rev-parse HEAD)
+git -C "$repo" merge -q --ff-only "$later"
+git -C "$repo" reset -q --hard "$sha"
+record branch-landed-copy-off
+run_teardown branch-landed-copy-off
+kept "3c" branch-landed-copy-off "$repo" "$wt" "$later"
+ck_has "3c it says the base moved"           "$OUT" "$MOVED"
+ck_has "3c it names the branch that landed"  "$OUT" "fix/branch-landed-copy-off, which did land"
+ck_has "3c it keeps the disagreement too"    "$OUT" "The record and the copy disagree"
+ck_not "3c it does not say nothing moved"    "$OUT" "So nothing this errand holds has moved"
 
 # --- the refusals that must NOT change --------------------------------------
 # Everything below arrives at the same two checks with the same failure, and
@@ -245,6 +308,64 @@ run_teardown no-reflog
 kept "5" no-reflog "$repo" "$wt" "$sha"
 ck_has "5 it falls back to the old wording"  "$OUT" "1 commit(s) that main does not have"
 ck_not "5 it does not claim the base moved"  "$OUT" "$MOVED"
+
+# 5a. cannot tell: the reflog expired rather than being deleted, which is a
+#     different mechanism from case 5 and lands in a different place in the walk.
+#     The log FILE is still there and git still answers; it just answers with
+#     nothing, so the emptiness has to be caught as its own "cannot tell".
+mk expired-reflog branch
+land
+git -C "$repo" reset -q --hard HEAD~1
+git -C "$repo" reflog expire --expire=now --all
+record expired-reflog
+run_teardown expired-reflog
+kept "5a" expired-reflog "$repo" "$wt" "$sha"
+ck_has "5a it falls back to the old wording" "$OUT" "1 commit(s) that main does not have"
+ck_not "5a it does not claim the base moved" "$OUT" "$MOVED"
+
+# 5a2. cannot tell: the reflog is there and cannot be read. Whether git errors or
+#      returns nothing is git's business and has varied; either way this is a
+#      question that was not answered, and an unanswered question is the original
+#      refusal. Asserted as a fallback, never as a particular git behaviour.
+mk unreadable-reflog branch
+land
+git -C "$repo" reset -q --hard HEAD~1
+chmod 000 "$repo/.git/logs/refs/heads/main"
+record unreadable-reflog
+run_teardown unreadable-reflog
+chmod 644 "$repo/.git/logs/refs/heads/main"
+kept "5a2" unreadable-reflog "$repo" "$wt" "$sha"
+if [ "$(id -u)" = 0 ]; then
+  # The scene is still built and the gate still asserted above, so case 7 below
+  # keeps its count; only the claim this mode cannot make is withheld.
+  ok "5a2 wording not asserted as root, where a mode of 000 stops no read"
+else
+  ck_has "5a2 it falls back to the old wording" "$OUT" "1 commit(s) that main does not have"
+  ck_not "5a2 it does not claim the base moved" "$OUT" "$MOVED"
+fi
+
+# 5a3. cannot tell: the move is further back than the walk looks. And 5a4, its
+#      control: the same scene one entry nearer, where the diagnosis does fire.
+#      Both halves or neither, because a bound is a claim about an edge and one
+#      side of it alone says nothing about where that edge is. BASE_REFLOG_DEPTH
+#      entries are read, indices 0 to 39, so the work at index 40 is outside.
+mk reflog-depth-40 branch
+land
+filler 40
+record reflog-depth-40
+run_teardown reflog-depth-40
+kept "5a3" reflog-depth-40 "$repo" "$wt" "$sha"
+ck_has "5a3 past the bound it falls back"    "$OUT" "1 commit(s) that main does not have"
+ck_not "5a3 past the bound it says nothing"  "$OUT" "$MOVED"
+
+mk reflog-depth-39 branch
+land
+filler 39
+record reflog-depth-39
+run_teardown reflog-depth-39
+kept "5a4" reflog-depth-39 "$repo" "$wt" "$sha"
+ck_has "5a4 at the bound it still diagnoses" "$OUT" "$MOVED"
+ck_has "5a4 it names the entry it found"     "$OUT" "main@{39}"
 
 # 5b. cannot tell: base= recorded as a sha. It resolves, so the invariant runs,
 #     but a sha has no reflog of its own and nothing says which ref it came
@@ -335,14 +456,19 @@ done 3<<'IDS'
 reset-branch
 amended-branch
 reset-detached
+branch-landed-copy-off
 unlanded
 unlanded-busy-base
 unlanded-detached
 no-reflog
+expired-reflog
+unreadable-reflog
+reflog-depth-40
+reflog-depth-39
 sha-base
 detached-base
 IDS
-ck_eq "7 every refused scene was checked"    "$n" 9
+ck_eq "7 every refused scene was checked"    "$n" 14
 
 echo
 echo "passed=$PASS failed=$FAIL"

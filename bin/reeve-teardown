@@ -86,8 +86,8 @@
 #   detached HEAD, neither of which has a reflog of its own; a reflog that
 #   expired or was never kept, which is the normal state of a fresh clone; and a
 #   move further back than the last few dozen entries. Patch equivalence is in
-#   that message and nowhere near the gate: it tells a rebase from a reset, and
-#   two commits with the same patch are not the same commit.
+#   that message and nowhere near the gate: it guesses a rebase from a reset,
+#   and two commits with the same patch are not the same commit.
 #
 # - Ignored files. A copy's ignored files are deleted with it, silently:
 #   `git status --porcelain` does not list them and `git worktree remove` does
@@ -309,13 +309,25 @@ base_moved_off() { # base_moved_off <sha> -> 0 if an earlier base position holds
   return 1
 }
 
+# Set by check 4b to the recorded branch when the copy is sitting off it. Getting
+# that far with a branch recorded means 4a already proved that branch landed, so
+# the record and the copy disagree as well, and the summary below has to say so
+# instead of asserting that nothing this errand holds has moved. Empty everywhere
+# else, which includes every call from 4a: there the copy has not been looked at.
+copy_off_landed_branch=''
+
 # One refusal for both facts below, because the diagnosis does not depend on
 # which of them noticed: the thing is where it always was, and the base is not.
 refuse_base_moved() { # refuse_base_moved <subject> <sha> [extra line...]
   local subject=$1 sha=$2 cherry guess='' msg
   shift 2
-  msg=("$subject is not on $base, because $base moved after this errand went out.")
-  msg+=("$base was at $base_was, which does contain that work ($base_was_at, $base_was_when).")
+  # What the walk proves is that the base HAS HELD a position containing this
+  # work, and that is all it is allowed to say. It never compares that position
+  # against when the errand went out, so a base force-moved before the errand
+  # existed reaches here too, and "moved after this errand went out" dated a move
+  # this script cannot date.
+  msg=("$subject is not on $base. $base has held a position that does contain that work:")
+  msg+=("$base_was ($base_was_at, $base_was_when).")
   msg+=("It is at $base_sha now, and its most recent move was: ${base_last_move:-not recorded}.")
   # Patch equivalence tells a rebase from a reset, and nothing else. It is in the
   # message and nowhere near the gate deliberately: two commits with the same
@@ -332,17 +344,30 @@ refuse_base_moved() { # refuse_base_moved <subject> <sha> [extra line...]
     msg+=("remove anything.")
   fi
   while [ $# -gt 0 ]; do msg+=("$1"); shift; done
-  msg+=("So nothing this errand holds has moved: $base has, and the base= line is what went stale.")
-  msg+=("Which move it was decides the fix. A rebase or an amend: the work is on $base already")
-  msg+=("under other shas, so correct the base= line in $(meta_file "$id") to $base_was, the")
-  msg+=("position it did land on, then tear down again. A reset or a force-move: it was taken back")
-  msg+=("off $base deliberately, so land it again instead. Nothing is removed until one is true.")
-  # The advice above ends in a removal, and correcting base= to a position the
+  if [ -n "$copy_off_landed_branch" ]; then
+    # Both records are stale at once here, and the one about the copy is the one
+    # this diagnosis used to swallow: it is the whole of what the non-moved
+    # refusal below says, and the base having moved does not make it any less
+    # true. Saying only that the base moved sends the reader to base=, which is
+    # not the line that is wrong in this case, or not the only one.
+    msg+=("So base= is not the only line that went stale: $base has moved, and the copy is off")
+    msg+=("$copy_off_landed_branch, which did land. The record and the copy disagree, so that")
+    msg+=("branch says nothing about what this copy holds.")
+  else
+    msg+=("So nothing this errand holds has moved: $base has, and the base= line is what went stale.")
+  fi
+  # The advice below ends in a removal, and correcting base= to a position the
   # base no longer holds is the one way to reach it over a commit that nothing
-  # else keeps. Said once here rather than argued about per case: a ref costs
-  # nothing and is the difference between a decision and a loss.
-  msg+=("Either way, if nothing but this errand still holds that work, give it a ref before you")
-  msg+=("act on any of this: git -C $repo branch <name> $sha.")
+  # else keeps. So it comes BEFORE that advice rather than tenth of ten lines: a
+  # ref costs nothing, is the difference between a decision and a loss, and is
+  # worth nothing at all if it is read after the edit it protects against.
+  msg+=("Before you act on any of this: if nothing but this errand still holds that work, give it")
+  msg+=("a ref, with git -C $repo branch <name> $sha.")
+  msg+=("Then, which move it was decides the fix. A rebase or an amend: the work is on $base")
+  msg+=("already under other shas, so correct the base= line in $(meta_file "$id") to $base_was,")
+  msg+=("the position it did land on, then tear down again. A reset or a force-move: it was taken")
+  msg+=("back off $base deliberately, so land it again instead. Nothing is removed until one is")
+  msg+=("true.")
   refuse "${msg[@]}"
 }
 
@@ -525,9 +550,15 @@ if [ -n "$br" ] || [ "$copy_at_risk" = yes ]; then
       [ -n "$on_branch" ] && holds="on $on_branch, at $head_now"
       # Asked before all three, because each of them describes the COPY as the
       # thing that is out of place, and one of the ways to arrive here is the
-      # base having moved instead. The absent-directory warning survives that
-      # rediagnosis: whatever moved, git's entry under .git/worktrees/ is still
-      # the last root holding that commit.
+      # base having moved instead. Two of those three facts survive that
+      # rediagnosis rather than being replaced by it, because the base having
+      # moved does not make either one less true: git's entry under
+      # .git/worktrees/ is still the last root holding that commit, and a copy
+      # sitting off a branch that DID land is still a record and a copy that
+      # disagree. Both were swallowed by the new diagnosis, and the second one
+      # left the reader pointed at base= when that was not the line that went
+      # stale, or not the only one.
+      [ -n "$br" ] && copy_off_landed_branch=$br
       if base_moved_off "$head_now"; then
         if [ "$copy_examined" = record ]; then
           refuse_base_moved "the copy recorded at $wt ($holds)" "$head_now" \
