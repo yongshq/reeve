@@ -16,11 +16,64 @@
 # The factual sections are filled in from disk. The judgement sections are left
 # as seams for the reeve, the same way a brief leaves {INTENT} and {SPEC},
 # because a handoff written by a script is a status report and not a handoff.
+#
+# For the same reason `## In flight` carries a count and the live rows only, not
+# the whole fleet table: an errand that finished and was cleaned up is already
+# rebuilt by `reeve-status --all`, and copying it in here buries the part that
+# is not.
 
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/reeve-lib.sh"
 BIN=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
 handoffs_dir() { printf '%s/handoffs\n' "$REEVE_HOME_D"; }
+
+# Which errands the session was still holding.
+#
+# Live means NOT terminal-and-cleaned-up. A finished errand whose copy and
+# session are gone is pure record: it rebuilds from disk and listing it here
+# only buries the four things a handoff exists to carry. A finished errand that
+# still has a branch or a copy is not that, because somebody still has to decide
+# what happens to it, so it stays.
+#
+# Both halves are asked of their existing owner. status_reconcile in
+# reeve-lib.sh is the only thing allowed to turn a status log into a verdict,
+# and the tornDown stamp is written by reeve-teardown when it removes a copy.
+# Nothing is reconciled a second time here.
+live_ids() {
+  ls "$REEVE_HOME_D/state"/*.meta 2>/dev/null | while read -r f; do
+    i=$(basename "$f" .meta)
+    case $(status_field "$i" state) in
+      done|failed) [ -z "$(meta_get "$i" tornDown '')" ] || continue ;;
+    esac
+    printf '%s\n' "$i"
+  done
+}
+
+# The `## In flight` block, whole. The rows come from `reeve-status --all`
+# verbatim, header included, so this file never learns to render an errand on
+# its own: it only drops the rows live_ids did not name.
+in_flight() {
+  local ids n table line first
+  ids=$(live_ids)
+  n=$(printf '%s' "$ids" | grep -c . 2>/dev/null) || n=0
+  n=$(printf '%s' "$n" | tr -d '[:space:]'); n=${n:-0}
+
+  if [ "$n" -eq 0 ]; then
+    printf 'Nothing still live at the time of writing. `reeve-status --all` is the live truth.\n\n'
+    return 0
+  fi
+
+  printf '%s errand(s) still live at the time of writing. Finished and cleaned up ones are\n' "$n"
+  printf 'left out: they rebuild from disk, and `reeve-status --all` is the live truth for\n'
+  printf 'all of them.\n\n'
+  table=$("$BIN/reeve-status" --all 2>/dev/null) || table=''
+  printf '```\n'
+  printf '%s\n' "$table" | while IFS= read -r line; do
+    first=${line%% *}
+    if [ "$first" = ERRAND ] || lines_has "$first" "$ids"; then printf '%s\n' "$line"; fi
+  done
+  printf '```\n\n'
+}
 
 cmd=${1:-}; manor=${2:-}
 
@@ -60,11 +113,7 @@ case $cmd in
       printf '{GOAL}\n\n'
 
       printf '## In flight\n\n'
-      printf 'Recorded from disk at the time of writing. `reeve-status --all` is the live truth;\n'
-      printf 'this is here so a reader knows what the session was holding.\n\n'
-      printf '```\n'
-      "$BIN/reeve-status" --all 2>/dev/null || printf 'none\n'
-      printf '```\n\n'
+      in_flight
 
       printf '## Open with the liege\n\n'
       printf 'Raised in conversation, not yet an errand. This is the part that does not survive a\n'

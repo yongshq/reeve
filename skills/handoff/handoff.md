@@ -45,6 +45,12 @@ It fills the factual sections from disk and leaves seams: `{TITLE}`, `{RESUME}`,
 `{OPEN}`, `{DECIDED}`, `{NEXT}`. Fill every one. A handoff with an unfilled seam is worse than
 none, because it reads as complete.
 
+`## In flight` holds a count and the live rows only, on the rule above: an errand that reached a
+terminal state and was cleaned up is pure record, so it is left out and `reeve-status --all`
+rebuilds it. A finished errand that still has a branch or a copy is not pure record, because
+somebody still has to decide what happens to it, and it stays. With nothing live the section is
+one line saying so. Short is the point, so do not restore the full table believing it was lost.
+
 Then:
 
 1. **Run `/glean` first if you have not.** A handoff is for session working state; durable facts
