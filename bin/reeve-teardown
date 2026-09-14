@@ -68,6 +68,27 @@
 #   anything here. Expect it rather than reading it as a malfunction. The reeve
 #   corrected that line by hand eight times on the day this guard was built.
 #
+# - A base that was rewritten under the errand. A rebase, an amend, a `reset
+#   --hard` or a force-move on the base leaves work that DID land, under the
+#   position the base held at the time, unreachable from the position it holds
+#   now, and the invariant below fails on it exactly as on work that never
+#   landed. That refusal stays, deliberately: this is the landed-work test, and
+#   reachable from the recorded base is what landed means here. What is closed is
+#   the DIAGNOSIS, which said the copy had moved off the base and sent the reader
+#   to the branch= line. The copy had not moved. The base ref's own reflog is now
+#   walked, bounded, and when an earlier position of it does contain the work the
+#   refusal names that position, the operation that moved it and the base= line
+#   to correct. This is the stack case's sibling, and one more costume of the
+#   sentence below: the description that went stale is base=, and the copy it
+#   accused stayed exactly where it was.
+#   What that still does not catch, each left open because it fails closed onto
+#   the original refusal at no cost: a base recorded as a sha or resolving to a
+#   detached HEAD, neither of which has a reflog of its own; a reflog that
+#   expired or was never kept, which is the normal state of a fresh clone; and a
+#   move further back than the last few dozen entries. Patch equivalence is in
+#   that message and nowhere near the gate: it tells a rebase from a reset, and
+#   two commits with the same patch are not the same commit.
+#
 # - Ignored files. A copy's ignored files are deleted with it, silently:
 #   `git status --porcelain` does not list them and `git worktree remove` does
 #   not object. Right for build output, wrong for a hand's local env file. An
@@ -231,6 +252,100 @@ require_base() {
     "then tear down again."
 }
 
+# A base that moved out from under the errand.
+#
+# `base=` is a DESCRIPTION of where this errand's work was meant to land, and it
+# goes stale the same way every other line in the record does. A rebase, an
+# amend, a `reset --hard` or a force-move on the base leaves work that DID land,
+# under the position the base held at the time, unreachable from the position it
+# holds now. Both facts below then fail, and both used to report that as the copy
+# having moved off the base. The copy never moved. Saying it did sent the reader
+# to the branch= line, or to "find out where that work belongs", when the line
+# that actually went stale is base=.
+#
+# Git keeps the record that separates them: the base ref's own reflog still holds
+# the positions it used to have, so an earlier position that DOES contain this
+# work names the moment the base was rewritten and says which operation did it.
+#
+# Diagnosis only, and that boundary is the whole safety story. This changes what
+# a refusal SAYS, never whether there is one: removal still requires
+# reachability from base_sha exactly as before, because a rewritten base is a
+# reason to say something true and actionable, never a reason to delete a copy.
+# Uncertainty therefore costs nothing and is always answered the same way. A base
+# recorded as a sha, a detached HEAD, a ref whose reflog is absent or expired, a
+# repository git cannot read: each returns "cannot tell" and leaves the original
+# refusal exactly as it was.
+BASE_REFLOG_DEPTH=40
+base_was='' base_was_at='' base_was_when='' base_last_move=''
+base_moved_off() { # base_moved_off <sha> -> 0 if an earlier base position holds it
+  base_was='' base_was_at='' base_was_when='' base_last_move=''
+  local ref log old sel what
+  ref=$(git -C "$repo" rev-parse --symbolic-full-name "$base" 2>/dev/null) || return 1
+  # A sha, a detached HEAD and anything git cannot resolve all print nothing
+  # here, and none of them has a reflog of its own to walk.
+  case $ref in refs/*) ;; *) return 1 ;; esac
+  # Bounded, because a long-lived main has thousands of entries and this asks git
+  # a reachability question per entry. Past the bound the answer is "cannot
+  # tell", which is the refusal that was already going to be printed.
+  log=$(git -C "$repo" reflog show --format='%H%x09%gd%x09%gs' -n "$BASE_REFLOG_DEPTH" "$ref" \
+        2>/dev/null) || return 1
+  [ -n "$log" ] || return 1
+  # Entry 0 is the move that put the base where it is, which is the one the
+  # reader has to recognise: "reset: moving to HEAD~1" names the mistake where
+  # the position it landed on only dates it.
+  base_last_move=$(printf '%s\n' "$log" | head -1 | cut -f3)
+  while IFS=$'\t' read -r old sel what; do
+    [ -n "$old" ] || continue
+    # Skipped on the sha rather than on the entry number, because a ref returns
+    # to a position it held before often enough (a reset and a re-merge) that
+    # skipping entry 0 alone would leave the current position in the walk, where
+    # the caller has already found it does not contain this work.
+    [ "$old" = "$base_sha" ] && continue
+    if git -C "$repo" merge-base --is-ancestor "$1" "$old" 2>/dev/null; then
+      base_was=$old base_was_at=$sel base_was_when=$what
+      return 0
+    fi
+  done <<< "$log"
+  return 1
+}
+
+# One refusal for both facts below, because the diagnosis does not depend on
+# which of them noticed: the thing is where it always was, and the base is not.
+refuse_base_moved() { # refuse_base_moved <subject> <sha> [extra line...]
+  local subject=$1 sha=$2 cherry guess='' msg
+  shift 2
+  msg=("$subject is not on $base, because $base moved after this errand went out.")
+  msg+=("$base was at $base_was, which does contain that work ($base_was_at, $base_was_when).")
+  msg+=("It is at $base_sha now, and its most recent move was: ${base_last_move:-not recorded}.")
+  # Patch equivalence tells a rebase from a reset, and nothing else. It is in the
+  # message and nowhere near the gate deliberately: two commits with the same
+  # patch are not the same commit, so this never decides anything and is always
+  # labelled as the guess it is.
+  cherry=$(git -C "$repo" cherry "$base_sha" "$sha" 2>/dev/null) || cherry=''
+  case $cherry in
+    ''|*+*) ;;
+    *) guess=yes ;;
+  esac
+  if [ -n "$guess" ]; then
+    msg+=("Every commit it holds already has an equivalent on $base by patch text, so this looks")
+    msg+=("like a rebase rather than a reset. That is a guess for you to confirm, never a reason to")
+    msg+=("remove anything.")
+  fi
+  while [ $# -gt 0 ]; do msg+=("$1"); shift; done
+  msg+=("So nothing this errand holds has moved: $base has, and the base= line is what went stale.")
+  msg+=("Which move it was decides the fix. A rebase or an amend: the work is on $base already")
+  msg+=("under other shas, so correct the base= line in $(meta_file "$id") to $base_was, the")
+  msg+=("position it did land on, then tear down again. A reset or a force-move: it was taken back")
+  msg+=("off $base deliberately, so land it again instead. Nothing is removed until one is true.")
+  # The advice above ends in a removal, and correcting base= to a position the
+  # base no longer holds is the one way to reach it over a commit that nothing
+  # else keeps. Said once here rather than argued about per case: a ref costs
+  # nothing and is the difference between a decision and a loss.
+  msg+=("Either way, if nothing but this errand still holds that work, give it a ref before you")
+  msg+=("act on any of this: git -C $repo branch <name> $sha.")
+  refuse "${msg[@]}"
+}
+
 # 4. the landed-work invariant, asked of every copy in the same way.
 #
 # One question: is everything this errand holds already landed on the base. In
@@ -348,6 +463,10 @@ if [ -n "$br" ] || [ "$copy_at_risk" = yes ]; then
       "work is safe. Correct the branch= line in $(meta_file "$id"), or find out whether that" \
       "branch was deleted before its commits landed."
     if ! git -C "$repo" merge-base --is-ancestor "$br_sha" "$base_sha" 2>/dev/null; then
+      # Asked before the count, because "rebase or merge it first" is advice the
+      # reader cannot act on when the branch already did land and the base was
+      # rewritten afterwards. Same refusal either way, different diagnosis.
+      base_moved_off "$br_sha" && refuse_base_moved "$br" "$br_sha"
       # Counted for the message only, never to decide. --is-ancestor has already
       # decided, and it is non-zero on an error exactly as on unlanded work, so
       # a count that does not come back can no longer read as "nothing unlanded"
@@ -404,6 +523,21 @@ if [ -n "$br" ] || [ "$copy_at_risk" = yes ]; then
       # none, so this says so rather than leaving the sha to stand alone.
       holds="detached at $head_now"
       [ -n "$on_branch" ] && holds="on $on_branch, at $head_now"
+      # Asked before all three, because each of them describes the COPY as the
+      # thing that is out of place, and one of the ways to arrive here is the
+      # base having moved instead. The absent-directory warning survives that
+      # rediagnosis: whatever moved, git's entry under .git/worktrees/ is still
+      # the last root holding that commit.
+      if base_moved_off "$head_now"; then
+        if [ "$copy_examined" = record ]; then
+          refuse_base_moved "the copy recorded at $wt ($holds)" "$head_now" \
+            "Its directory is not there either, so this is git's own record of the copy rather" \
+            "than the copy itself: the entry under .git/worktrees/ still names that HEAD, and it" \
+            "is the last root holding that commit until the next 'git worktree prune' in $repo."
+        else
+          refuse_base_moved "the copy at $wt ($holds)" "$head_now"
+        fi
+      fi
       if [ "$copy_examined" = record ]; then
         refuse "the copy recorded at $wt holds work that is not on $base ($holds)." \
                "Its directory is not there, so this is git's own record of the copy rather than" \
