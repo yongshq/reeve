@@ -2,13 +2,13 @@
 # Write and find reeve handoffs. Single owner of the handoff format.
 #
 # Usage:
-#   reeve-handoff new <manor>      scaffold one, print its path
-#   reeve-handoff newest [manor]   path of the most recent, if any
-#   reeve-handoff list [manor]
+#   bin/reeve-handoff new <manor>      scaffold one, print its path
+#   bin/reeve-handoff newest [manor]   path of the most recent, if any
+#   bin/reeve-handoff list [manor]
 #
 # A handoff exists because of a specific gap. Nearly everything the reeve knows
 # already survives a reset: errand records, briefs, reports, status logs and
-# memory are all on disk, and `reeve-status --all` rebuilds the fleet from them.
+# memory are all on disk, and `bin/reeve-status --all` rebuilds the fleet from them.
 # What does NOT survive is the conversation: the goal above the individual
 # errands, threads raised but not yet dispatched, and decisions made in chat
 # that never reached a brief. That is about one page, and this is where it goes.
@@ -19,7 +19,7 @@
 #
 # For the same reason `## In flight` carries a count and the live rows only, not
 # the whole fleet table: an errand that finished and was cleaned up is already
-# rebuilt by `reeve-status --all`, and copying it in here buries the part that
+# rebuilt by `bin/reeve-status --all`, and copying it in here buries the part that
 # is not.
 
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/reeve-lib.sh"
@@ -59,12 +59,12 @@ in_flight() {
   n=$(printf '%s' "$n" | tr -d '[:space:]'); n=${n:-0}
 
   if [ "$n" -eq 0 ]; then
-    printf 'Nothing still live at the time of writing. `reeve-status --all` is the live truth.\n\n'
+    printf 'Nothing still live at the time of writing. `bin/reeve-status --all` is the live truth.\n\n'
     return 0
   fi
 
   printf '%s errand(s) still live at the time of writing. Finished and cleaned up ones are\n' "$n"
-  printf 'left out: they rebuild from disk, and `reeve-status --all` is the live truth for\n'
+  printf 'left out: they rebuild from disk, and `bin/reeve-status --all` is the live truth for\n'
   printf 'all of them.\n\n'
   table=$("$BIN/reeve-status" --all 2>/dev/null) || table=''
   printf '```\n'
@@ -93,7 +93,7 @@ case $cmd in
     ;;
 
   new)
-    [ -n "$manor" ] || die "which manor? reeve-handoff new <manor>"
+    [ -n "$manor" ] || die "which manor? bin/reeve-handoff new <manor>"
     d=$(handoffs_dir); mkdir -p "$d"
     stamp=$(date +%Y-%m-%d-%H%M)
     f="$d/$manor-$stamp.md"
@@ -133,7 +133,9 @@ case $cmd in
 
     info "handoff scaffolded: $f"
     info "seams to fill: {TITLE} {RESUME} {GOAL} {OPEN} {DECIDED} {NEXT}"
-    [ -n "$prev" ] && info "supersedes: $(basename "$prev")"
+    # `[ ... ] && info ...` here would make a missing predecessor the script's
+    # own exit status, because this is the last command in the arm.
+    if [ -n "$prev" ]; then info "supersedes: $(basename "$prev")"; fi
     ;;
 
   ''|-h|--help) print_help "$0" ;;

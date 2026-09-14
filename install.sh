@@ -53,7 +53,7 @@ EOF
 
 Projects the household knows. One block per manor, one line per repository.
 
-Proposed by `reeve-survey` from evidence, confirmed by the liege, recorded here. A repository that
+Proposed by `bin/reeve-survey` from evidence, confirmed by the liege, recorded here. A repository that
 is not listed is one no hand may be dispatched into.
 EOF
 
