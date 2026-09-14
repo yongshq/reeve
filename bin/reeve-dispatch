@@ -191,10 +191,17 @@ fi
 # Per-errand permissions, copied from the office's own declaration into the
 # errand directory. Copied rather than referenced so that changing an office
 # later cannot retroactively alter what an errand already in flight may do.
+#
+# Through run(), like every other mutation here, because --dry-run promises to
+# change nothing and this was the one write that escaped it: a dry run left a
+# settings.json behind and then printed "nothing was changed". The variable still
+# carries the path afterwards, so the launch line a dry run prints is unchanged;
+# reeve-harness render only substitutes that path into a flag and never reads the
+# file, so the line stays true about what would run.
 office_settings="$REEVE_ROOT_D/offices/$office.settings.json"
 errand_settings="$(errand_dir "$id")/settings.json"
 if [ -f "$office_settings" ]; then
-  cp "$office_settings" "$errand_settings"
+  run cp "$office_settings" "$errand_settings"
 else
   warn "office '$office' declares no settings.json, the hand will run on harness defaults and may stall on a permission prompt"
   errand_settings=''
