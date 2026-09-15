@@ -261,7 +261,22 @@ EOS
 
 status_field() {
   # status_field <id> <field>
-  status_reconcile "$1" | grep -m1 "^$2=" | sed "s/^$2=//"
+  #
+  # Read without a pipe, for the reason the header of this file gives about
+  # `grep -q`: `grep -m1` exits on its first match and closes the pipe under it,
+  # and status_reconcile is still writing its `decision=` lines when it does. The
+  # value was always right, because the match had already come back, but the
+  # writer got EPIPE and bash printed "printf: write error: Broken pipe" on
+  # stderr for it. Only when the errand had an open decision, and only when the
+  # reader won the race, so it read as noise from nowhere. A caretaker has to be
+  # silent to be useful, and that includes not saying this.
+  local line key=$2
+  while IFS= read -r line; do
+    case $line in "$key="*) printf '%s\n' "${line#"$key="}"; return 0 ;; esac
+  done <<STATUS_FIELD_EOF
+$(status_reconcile "$1")
+STATUS_FIELD_EOF
+  return 0
 }
 
 # --- offices ---------------------------------------------------------------

@@ -3,6 +3,7 @@
 #
 # Usage:
 #   reeve-sentry [--poll SECONDS] [--timeout SECONDS] [--once] [--no-reap]
+#   reeve-sentry --caretaker [--poll SECONDS]
 #
 # When an errand finishes it is cleaned up automatically: the session is freed
 # always, and the copy is removed only when nothing would be lost. --no-reap
@@ -12,8 +13,22 @@
 # single line is the whole agent facing payload, so it has to be readable on its
 # own. Benign changes are absorbed and the watch continues.
 #
+# --caretaker splits the cleaning off from the watching. Two jobs live in this
+# file and only one of them needs a reeve: telling the reeve something is
+# actionable needs a reeve by definition, cleaning up after a finished hand does
+# not, because bin/reeve-teardown owns the safety rules and they are mechanical.
+# So a caretaker polls and cleans and says nothing at all: it never prints a
+# reason line, never exits 0 on an actionable change, and never touches the wake
+# cursors, because those exist to de-duplicate reports and it makes none. The
+# status file is already the durable truth and a fresh reeve reads the whole
+# fleet at startup, so nothing is lost by its silence. bin/reeve-dispatch starts
+# one, which is what makes a finished hand get cleaned up even when no reeve
+# session is alive. One per home, enforced by a lock; a second start is a quiet
+# no-op. It exits when nothing is left to tend, so nothing lingers.
+#
 # Exit codes:
-#   0  something actionable, reason printed on stdout
+#   0  something actionable, reason printed on stdout (or: a caretaker already
+#      holds this home, so this one did nothing)
 #   3  nothing in flight, there is nothing to watch
 #   4  timed out with nothing actionable
 #
@@ -26,17 +41,78 @@
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/reeve-lib.sh"
 BIN=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
-poll=15 timeout=0 once=no reap=yes
+poll=15 timeout=0 once=no reap=yes caretaker=no
 while [ $# -gt 0 ]; do
   case $1 in
-    --poll)    poll=${2:-15}; shift 2 ;;
-    --timeout) timeout=${2:-0}; shift 2 ;;
-    --once)    once=yes; shift ;;
-    --no-reap) reap=no; shift ;;
-    -h|--help) print_help "$0"; exit 0 ;;
+    --poll)      poll=${2:-15}; shift 2 ;;
+    --timeout)   timeout=${2:-0}; shift 2 ;;
+    --once)      once=yes; shift ;;
+    --no-reap)   reap=no; shift ;;
+    --caretaker) caretaker=yes; shift ;;
+    -h|--help)   print_help "$0"; exit 0 ;;
     *) die "unknown option '$1'" ;;
   esac
 done
+
+# Everything this process prints is the one reason line the reeve reads, so the
+# mode that reports nothing has to say nothing: in caretaker mode every line
+# below is a no-op rather than something written to a log nobody opens.
+say() { [ "$caretaker" = yes ] && return 0; printf "$@"; }
+
+# --- one caretaker per home -------------------------------------------------
+# bin/reeve-dispatch starts one on every dispatch, so a household with four
+# hands out would otherwise end up with four cleaners racing each other over the
+# same errand. A second start is a no-op and exits 0: not being needed is not a
+# failure.
+#
+# mkdir is the atomic primitive, deliberately, not flock: macOS ships no
+# util-linux flock and this household runs on macOS. The pid written inside is
+# what separates a lock that is held from one left behind by a process that was
+# killed, and reclaiming the second is not optional: without it one crash
+# disables cleanup for this home forever.
+#
+# Not lock_acquire from reeve-lib.sh, which is a different contract for a
+# different job: it waits for the lock and then dies, and it deliberately never
+# breaks a stale one. Both are right for a command a human is watching. A
+# caretaker wants neither, because nobody is watching it.
+LOCK_D="$REEVE_HOME_D/state/.sentry.lock"
+
+lock_take() {
+  mkdir -p "$REEVE_HOME_D/state" 2>/dev/null || return 1
+  mkdir "$LOCK_D" 2>/dev/null && { printf '%s\n' "$$" > "$LOCK_D/pid"; return 0; }
+  local held stale
+  held=$(tr -d '[:space:]' < "$LOCK_D/pid" 2>/dev/null)
+  case ${held:-} in
+    ''|*[!0-9]*) ;;                                # no readable pid: stale
+    *) kill -0 "$held" 2>/dev/null && return 1 ;;  # a live caretaker holds it
+  esac
+  # Reclaim. Moved aside before it is removed, so two processes reclaiming in the
+  # same instant cannot both believe they won: the loser finds nothing to move.
+  # A window remains between the move and the new lock, and the price of losing
+  # that one is a second caretaker over a lock that only exists because something
+  # already died. Cheap, against a guard that has to be simple to be trusted.
+  stale="$LOCK_D.stale.$$"
+  mv "$LOCK_D" "$stale" 2>/dev/null || return 1
+  rm -rf "$stale"
+  mkdir "$LOCK_D" 2>/dev/null || return 1
+  printf '%s\n' "$$" > "$LOCK_D/pid"
+  return 0
+}
+
+# Only ever remove a lock this process still holds. It may have been reclaimed
+# while this one was dying, and removing the reclaimer's lock would let a third
+# caretaker in.
+lock_drop() {
+  [ "$(tr -d '[:space:]' < "$LOCK_D/pid" 2>/dev/null)" = "$$" ] || return 0
+  rm -rf "$LOCK_D"
+}
+
+if [ "$caretaker" = yes ]; then
+  lock_take || exit 0
+  trap 'lock_drop' EXIT
+  trap 'lock_drop; exit 130' INT
+  trap 'lock_drop; exit 143' TERM
+fi
 
 cursor_file() { printf '%s/state/.cursor-%s\n' "$REEVE_HOME_D" "$1"; }
 # Alongside the cursor, and for the same reason: what this errand looked like
@@ -67,7 +143,7 @@ attn_now() { printf '%s' "${REEVE_ATTN_NOW:-$(date +%s)}"; }
 # the sentry's contract is exactly one line.
 reap_one() {
   local i=$1 wt
-  [ "$reap" = yes ] || { printf '\n'; return; }
+  [ "$reap" = yes ] || { say '\n'; return; }
   wt=$(meta_get "$i" worktree '')
   "$BIN/reeve-teardown" "$i" >/dev/null 2>&1
   if [ -n "$wt" ] && [ -d "$wt" ]; then
@@ -75,13 +151,27 @@ reap_one() {
     br=$(meta_get "$i" branch '')
     if [ -n "$br" ]; then
       ahead=$(git -C "$(meta_get "$i" repo '')" rev-list --count "$(meta_get "$i" base main)..$br" 2>/dev/null || echo '?')
-      printf ' [session freed, %s kept with %s commit(s)]\n' "$br" "$ahead"
+      say ' [session freed, %s kept with %s commit(s)]\n' "$br" "$ahead"
     else
-      printf ' [session freed, copy kept]\n'
+      say ' [session freed, copy kept]\n'
     fi
   else
-    printf ' [session freed, copy removed]\n'
+    say ' [session freed, copy removed]\n'
   fi
+}
+
+# The one rule for whether a finished hand may be cleaned up, so the watch and
+# the caretaker can never disagree about it. Both halves are load bearing: a
+# `blocked:` hand is not finished and can still be steered, and a hand that
+# reported done with a question never answered is not finished whatever it says,
+# so neither is ever reaped. Reached with the reconciled verdict, never with the
+# last line of a status file.
+reapable() { # reapable <state> <divergence>
+  case $1 in
+    failed) return 0 ;;
+    done)   [ "${2:-no}" = yes ] || return 0 ;;
+  esac
+  return 1
 }
 
 live_errands() {
@@ -97,16 +187,37 @@ live_errands() {
 check_one() {
   local i=$1 f seen now new st open div bk tgt live
   local attn af since woke nowsec last
+
+  st=$(status_field "$i" state)
+  open=$(status_field "$i" open); open=${open:-0}
+  div=$(status_field "$i" divergence)
+
+  # A caretaker asks one question and no others: is this hand finished, and is
+  # it safe to clean up. Not the cursor, because a cursor de-duplicates REPORTS
+  # and this mode makes none, and reading the cleanup off one would mean a
+  # caretaker started after the `done:` line was written never cleans it up. Not
+  # the attention probe either: a hand stalled at a dialog is never reaped by
+  # either mode, and only the reeve can answer it. And never a return 0, because
+  # an actionable event is the reeve's business, not this process's.
+  if [ "$caretaker" = yes ]; then
+    if reapable "$st" "$div"; then
+      reap_one "$i"
+      # Tended once. A teardown that refused has said all it is going to say,
+      # and retrying it every poll would hammer git over a decision that is now
+      # the reeve's. This is also what lets the process end: an errand nothing
+      # can do anything more about stops counting as work in flight.
+      tended="$tended$i
+"
+    fi
+    return 1
+  fi
+
   f=$(status_file "$i")
   seen=$(cat "$(cursor_file "$i")" 2>/dev/null || echo 0)
   now=0
   [ -f "$f" ] && now=$(grep -c . "$f" 2>/dev/null || echo 0)
   now=$(printf '%s' "$now" | tr -d '[:space:]'); now=${now:-0}
   seen=$(printf '%s' "$seen" | tr -d '[:space:]'); seen=${seen:-0}
-
-  st=$(status_field "$i" state)
-  open=$(status_field "$i" open); open=${open:-0}
-  div=$(status_field "$i" divergence)
 
   if [ "$now" -gt "$seen" ]; then
     new=$(sed -n "$((seen + 1)),\$p" "$f" 2>/dev/null)
@@ -124,13 +235,13 @@ check_one() {
         reap_one "$i"
         return 0 ;;
       done)
-        if [ "$div" = yes ]; then
+        if reapable "$st" "$div"; then
+          printf 'signal: %s is done - %s' "$i" "$(printf '%s' "$new" | tail -1)"
+          reap_one "$i"
+        else
           # Never reap a divergence. The errand is not finished whatever it says,
           # and its session may still be the only place to find out why.
           printf 'signal: %s reported done with %s question(s) never answered, treat as unfinished\n' "$i" "$open"
-        else
-          printf 'signal: %s is done - %s' "$i" "$(printf '%s' "$new" | tail -1)"
-          reap_one "$i"
         fi
         return 0 ;;
     esac
@@ -206,11 +317,29 @@ poll_sleep() {
   sleep "$1"
 }
 
+# Errands this caretaker has already cleaned up after, one id per line. Empty
+# in every other mode.
+tended=''
+
+# What is left for this caretaker to do. An errand it has already tended is no
+# longer work in flight from where it stands, whatever the record still says,
+# which is what gives this process a lifetime: the last job finishing ends it.
+untended() { # untended <newline-separated ids>
+  local line
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    lines_has "$line" "$tended" || printf '%s\n' "$line"
+  done <<EOS
+${1:-}
+EOS
+}
+
 start=$(date +%s)
 while :; do
   ids=$(live_errands)
+  [ "$caretaker" = yes ] && [ -n "$tended" ] && ids=$(untended "$ids")
   if [ -z "$ids" ]; then
-    printf 'nothing in flight\n'
+    say 'nothing in flight\n'
     exit 3
   fi
 
@@ -223,10 +352,10 @@ $ids
 EOS
   [ "$hit" = yes ] && exit 0
 
-  [ "$once" = yes ] && { printf 'quiet: %s errand(s) working, nothing to report\n' "$(printf '%s\n' "$ids" | grep -c .)"; exit 4; }
+  [ "$once" = yes ] && { say 'quiet: %s errand(s) working, nothing to report\n' "$(printf '%s\n' "$ids" | grep -c .)"; exit 4; }
 
   if [ "$timeout" -gt 0 ]; then
-    [ $(( $(date +%s) - start )) -lt "$timeout" ] || { printf 'quiet: timed out after %ss with nothing actionable\n' "$timeout"; exit 4; }
+    [ $(( $(date +%s) - start )) -lt "$timeout" ] || { say 'quiet: timed out after %ss with nothing actionable\n' "$timeout"; exit 4; }
   fi
 
   # Prefer the backend's bounded native wait over a blind sleep, but treat its

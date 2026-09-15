@@ -12,6 +12,11 @@
 # --model and --effort are optional: without them the office's own default
 # applies, from the table in offices/README.md, and without that the harness
 # decides. reeve-status reports which of the three it was.
+#
+# A successful launch also leaves a caretaker running (bin/reeve-sentry
+# --caretaker, detached, one per home), so a hand that finishes is cleaned up
+# even when no reeve session is alive. Set REEVE_NO_CARETAKER=1 to skip it,
+# which you want while debugging a hand you do not want torn down.
 
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/reeve-lib.sh"
 BIN=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -214,6 +219,9 @@ cmdline=$("$BIN/reeve-harness" render "$harness" "$brief" \
 
 if [ "$dry" = yes ]; then
   printf '  would run: reeve-backend call launch %s <cmdline> --backend %s\n' "$target" "$backend"
+  [ -n "${REEVE_NO_CARETAKER:-}" ] \
+    || printf '  would run: bin/reeve-sentry --caretaker, detached, appending to %s\n' \
+              "$REEVE_HOME_D/state/sentry.log"
   printf '\ncmdline:\n  %s\n' "$cmdline"
   printf '\ntier: model %s, effort %s\n' "$(tier_say "$model" "$model_from")" "$(tier_say "$effort" "$effort_from")"
   printf '\nnothing was changed.\n'
@@ -236,6 +244,46 @@ meta_set "$id" model_from "$model_from"
 meta_set "$id" effort_from "$effort_from"
 meta_set "$id" dispatched "$(date +%Y-%m-%dT%H:%M:%S)"
 touch "$(status_file "$id")"
+
+# --- the caretaker ---------------------------------------------------------
+# A hand does not exit itself, so a finished one sits at a prompt holding a
+# session until something tears it down, and until now the only thing that ever
+# did was a reeve running bin/reeve-sentry in the foreground. Terminate or
+# refresh that session and there is no cleaner at all: every hand already out
+# idles forever. Cleaning up does not need a live reeve, because
+# bin/reeve-teardown owns the safety rules and they are mechanical, so a
+# dispatch starts a caretaker of its own. Notification is untouched and still
+# needs a reeve: the status files are the durable truth and a fresh session
+# reads the whole fleet at startup.
+#
+# Started unconditionally rather than after a check of its own: the lock inside
+# reeve-sentry is the single owner of "is one already running", and a second
+# start is a quiet no-op there. Two answers to that question would drift.
+#
+# Below the dry run's exit, not guarded by it, so the promise that a dry run
+# changes nothing is kept by construction rather than by a condition somebody
+# has to remember. Never fatal either: a dispatch that worked is not a failure
+# because the cleaner did not come up.
+caretaker_log="$REEVE_HOME_D/state/sentry.log"
+caretaker_advice="Finished hands will keep their sessions until a reeve runs bin/reeve-sentry."
+if [ -n "${REEVE_NO_CARETAKER:-}" ]; then
+  :
+elif ! mkdir -p "$(dirname "$caretaker_log")" 2>/dev/null; then
+  warn "no caretaker started: $(dirname "$caretaker_log") cannot be written. $caretaker_advice"
+elif [ ! -x "$BIN/reeve-sentry" ]; then
+  warn "no caretaker started: $BIN/reeve-sentry is not executable. $caretaker_advice"
+else
+  # nohup, both streams redirected and stdin closed, so it outlives this session
+  # and holds none of its terminal open. A caretaker still attached to the
+  # dispatching shell dies with that shell, which is the whole defect being
+  # fixed here. REEVE_HOME is passed explicitly rather than inherited: this
+  # process resolved it once already and the caretaker must tend that same home.
+  # The poll seam is overridable only so the test suite can drive it.
+  REEVE_HOME="$REEVE_HOME_D" nohup "$BIN/reeve-sentry" --caretaker \
+      ${REEVE_CARETAKER_POLL:+--poll "$REEVE_CARETAKER_POLL"} \
+      >>"$caretaker_log" 2>&1 </dev/null &
+  { disown; } 2>/dev/null || :
+fi
 
 info "dispatched $id"
 info "  office   $office on $harness via $backend"
