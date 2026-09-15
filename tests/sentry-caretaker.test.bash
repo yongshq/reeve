@@ -22,6 +22,10 @@
 #      ends when the last job it was tending is done.
 #   4. detached. It has to outlive the dispatch that started it, or the fix does
 #      nothing at all.
+#   5. a STANDBY, not a peer. While a foreground watch holds the home it reaps
+#      nothing at all, because cleaning up an errand the watch has not reported
+#      yet destroys that report instead of delaying it. Sections 4 and 5 run the
+#      two of them genuinely concurrently, which is the only way that shows.
 #
 # Scratch homes only, never the real one. Every case that starts a process waits
 # for it and kills it: a suite that leaks a poller is a failed suite.
@@ -47,14 +51,29 @@ for guard in "${REEVE_HOME:-}" "$real_home/.reeve"; do
   esac
 done
 
-# Every caretaker this suite starts, so the trap can account for all of them.
-# Read from the scratch homes' own lock files, which nothing else writes.
+# Every process this suite starts, so the trap can account for all of them.
+# Also read from the scratch homes' own markers, which nothing else writes: a
+# lock names the caretaker holding it and a watch names the watch that published
+# it, both in the same shape, `<pid> <epoch> <poll>`.
 STARTED=''
+marker_pid() { cut -d' ' -f1 "$1" 2>/dev/null; }
+# marker <pid> <seconds of age> [poll]   what a process with that pid would have
+# written that many seconds ago. Age is the point: a marker is only believed
+# while its writer is alive AND still refreshing it.
+marker() { printf '%s %s %s\n' "$1" "$(( $(date +%s) - ${2:-0} ))" "${3:-1}"; }
 reap_started() {
-  local p
+  local p f
   for p in $STARTED; do kill -0 "$p" 2>/dev/null && kill "$p" 2>/dev/null; done
-  for p in $(cat "$SCRATCH"/home*/state/.sentry.lock/pid 2>/dev/null); do
+  for f in "$SCRATCH"/*/state/.sentry.lock "$SCRATCH"/*/state/.sentry.watch; do
+    [ -f "$f" ] || continue
+    p=$(marker_pid "$f")
     case $p in ''|*[!0-9]*) continue ;; esac
+    # Never this process. Several cases below plant a marker naming it on
+    # purpose, because it is the one pid certain to be alive, and a sweep that
+    # read that back as a stray poller would kill the suite in its own trap:
+    # every case passing and the run still ending 143, with the scratch
+    # directory left behind unremoved.
+    [ "$p" = "$$" ] && continue
     kill -0 "$p" 2>/dev/null && kill "$p" 2>/dev/null
   done
   return 0
@@ -168,26 +187,51 @@ eq  "1 a failed hand is cleaned up"              "$(reaped broke)" yes
 eq  "1 a divergence is not"                      "$(reaped diverged)" no
 eq  "1 and it is still silent about both"        "$OUT" ""
 
-echo "--- 2. the lock: one per home, and a dead one does not hold it ---"
+echo "--- 2. the lock: one per home, and neither a dead nor a forgotten one holds it ---"
 export REEVE_HOME="$SCRATCH/home2"
 LOCK="$REEVE_HOME/state/.sentry.lock"
-mkdir -p "$LOCK"
+mkdir -p "$REEVE_HOME/state"
 errand pending no "working: going"
-printf '%s\n' "$$" > "$LOCK/pid"          # this test process: unambiguously alive
+marker "$$" 0 > "$LOCK"                   # this test process: alive, and current
 OUT=$("$ROOT/bin/reeve-sentry" --caretaker --once --poll 1 2>&1); RC=$?
 eq  "2 a second caretaker is a no-op"                "$RC" 0
 eq  "2 and a quiet one"                              "$OUT" ""
-eq  "2 it did not steal the lock"                    "$(cat "$LOCK/pid")" "$$"
+eq  "2 it did not steal the lock"                    "$(marker_pid "$LOCK")" "$$"
 eq  "2 and did no tending while somebody else holds it" "$(reaped pending)" no
 
 # A lock whose pid is dead must be reclaimed, or one crashed caretaker disables
 # cleanup for this home forever.
-printf '%s\n' "$(free_pid)" > "$LOCK/pid"
+marker "$(free_pid)" 0 > "$LOCK"
 errand ghost no "working: going" ; printf 'done: finished\n' >> "$REEVE_HOME/errands/ghost/status"
 OUT=$("$ROOT/bin/reeve-sentry" --caretaker --once --poll 1 2>&1); RC=$?
 eq  "2 a dead pid does not hold the lock"     "$(reaped ghost)" yes
 eq  "2 and the reclaimed lock is released on the way out" \
-    "$([ -d "$LOCK" ] && echo present || echo absent)" absent
+    "$([ -e "$LOCK" ] && echo present || echo absent)" absent
+
+# The other half of the same rule, and the one a pid alone cannot answer: pids
+# are reused. A caretaker killed with -9 leaves its number behind, and the day
+# an unrelated process of this user inherits it, `kill -0` says the lock is held
+# and no caretaker ever starts for this home again, silently, because a refused
+# start is exit 0. So a holder that stopped refreshing does not hold it either,
+# however alive its pid looks: this one names THIS process, which is certainly
+# running, and is five minutes stale against a one second poll.
+errand zombie no "working: going" ; printf 'done: finished\n' >> "$REEVE_HOME/errands/zombie/status"
+marker "$$" 300 1 > "$LOCK"
+OUT=$("$ROOT/bin/reeve-sentry" --caretaker --once --poll 1 2>&1); RC=$?
+eq  "2 a live pid that stopped refreshing does not hold it either" "$(reaped zombie)" yes
+eq  "2 and reclaiming it is silent"                                "$OUT" ""
+
+# Anything unreadable is stale, and saying so is not the caretaker's job. This
+# is the lock a caretaker leaves when it is killed between creating the file and
+# writing into it, which is a state the lock can no longer reach at all now that
+# its contents are written before it is installed, but a reader that trips over
+# an empty one must still be silent rather than print a shell error into
+# state/sentry.log, which the case at the end of section 3 asserts stays empty.
+errand husk no "working: going" ; printf 'done: finished\n' >> "$REEVE_HOME/errands/husk/status"
+: > "$LOCK"
+OUT=$("$ROOT/bin/reeve-sentry" --caretaker --once --poll 1 2>&1); RC=$?
+eq  "2 an unreadable lock is reclaimed"       "$(reaped husk)" yes
+eq  "2 without a word about it"               "$OUT" ""
 
 # Nothing in flight is the end of a caretaker's life: the last job finishing must
 # end the process so nothing lingers.
@@ -196,7 +240,64 @@ mkdir -p "$REEVE_HOME/state"
 OUT=$("$ROOT/bin/reeve-sentry" --caretaker --poll 1 2>&1); RC=$?
 eq  "2 nothing in flight exits 3"             "$RC" 3
 eq  "2 without saying so"                     "$OUT" ""
-eq  "2 and leaves no lock behind"             "$([ -d "$REEVE_HOME/state/.sentry.lock" ] && echo present || echo absent)" absent
+eq  "2 and leaves no lock behind"             "$([ -e "$REEVE_HOME/state/.sentry.lock" ] && echo present || echo absent)" absent
+eq  "2 and no half written one either"        "$(ls -a "$REEVE_HOME/state" | grep -c '^\.sentry')" 0
+
+# A caretaker that finds its own lock reclaimed out from under it ends itself
+# rather than becoming the second one. That is what bounds the one window
+# acquisition cannot close: a pair is a pair for at most one poll.
+export REEVE_HOME="$SCRATCH/home3b"
+LOCK="$REEVE_HOME/state/.sentry.lock"
+mkdir -p "$REEVE_HOME/state"
+errand held no "working: going"
+"$ROOT/bin/reeve-sentry" --caretaker --poll 1 >"$SCRATCH/held.out" 2>&1 &
+CARE=$!; STARTED="$STARTED $CARE"
+if waitfor 10 '[ -f "$LOCK" ]'; then
+  marker "$$" 0 > "$LOCK"                 # somebody else now holds this home
+  if waitfor 10 '! kill -0 "$CARE" 2>/dev/null'; then
+    ok "2 a caretaker whose lock was taken stands down"
+  else
+    bad "2 a caretaker whose lock was taken stands down" "pid $CARE is still alive"
+  fi
+  eq "2 and does not remove the lock it no longer holds" "$(marker_pid "$LOCK")" "$$"
+  eq "2 nor says anything on the way out"                "$(cat "$SCRATCH/held.out")" ""
+else
+  bad "2 a caretaker whose lock was taken stands down" "no lock appeared at $LOCK"
+fi
+
+# The other direction, and it is not the same question. Standing down is right
+# when somebody live holds the home and wrong when nobody does: a lock that went
+# stale or vanished under a running caretaker has to be taken back, or a reclaim
+# race ends with every caretaker having politely stood down and the home left
+# with no cleaner at all. That is a worse outcome than briefly having two, and
+# it happened: forty simultaneous starts against one stale lock settled on zero
+# survivors twice in twelve rounds before this.
+export REEVE_HOME="$SCRATCH/home3c"
+LOCK="$REEVE_HOME/state/.sentry.lock"
+mkdir -p "$REEVE_HOME/state"
+errand kept no "working: going"
+"$ROOT/bin/reeve-sentry" --caretaker --poll 1 >"$SCRATCH/kept.out" 2>&1 &
+CARE=$!; STARTED="$STARTED $CARE"
+if waitfor 10 '[ -f "$LOCK" ]'; then
+  rm -f "$LOCK"                           # a reclaimer took it and thought better
+  if waitfor 10 '[ "$(marker_pid "$LOCK")" = "$CARE" ]'; then
+    ok "2 a caretaker whose lock vanished takes the home back"
+  else
+    bad "2 a caretaker whose lock vanished takes the home back" \
+        "lock reads [$(cat "$LOCK" 2>/dev/null)], caretaker is $CARE"
+  fi
+  eq "2 and is still the one tending it" \
+     "$(kill -0 "$CARE" 2>/dev/null && echo alive || echo gone)" alive
+  printf 'done: branch ready\n' >> "$REEVE_HOME/errands/kept/status"
+  if waitfor 15 '[ -n "$(meta_of kept tornDown)" ]'; then
+    ok "2 and still cleans up after the hand it was left with"
+  else
+    bad "2 and still cleans up after the hand it was left with" "never torn down"
+  fi
+  waitfor 10 '! kill -0 "$CARE" 2>/dev/null' || kill "$CARE" 2>/dev/null
+else
+  bad "2 a caretaker whose lock vanished takes the home back" "no lock appeared at $LOCK"
+fi
 
 echo "--- 3. dispatch starts one, detaches it, and a dry run does not ---"
 export REEVE_HOME="$SCRATCH/home4"
@@ -230,7 +331,7 @@ eq  "3 the dry run succeeds"                 "$RC" 0
 has "3 it says it would start a caretaker"   "$OUT" "would run: bin/reeve-sentry --caretaker"
 has "3 and still claims nothing was changed" "$OUT" "nothing was changed."
 eq  "3 no caretaker was started"             "$([ -e "$LOG" ] && echo present || echo absent)" absent
-eq  "3 and no lock was created"              "$([ -d "$LOCK" ] && echo present || echo absent)" absent
+eq  "3 and no lock was created"              "$([ -e "$LOCK" ] && echo present || echo absent)" absent
 
 brief_for optout || bad "3 reeve-brief refused"
 OUT=$(REEVE_NO_CARETAKER=1 REEVE_ROOT="$STUB" "$ROOT/bin/reeve-dispatch" optout \
@@ -239,7 +340,7 @@ nas "3 the opt-out silences the dry run's line too" "$OUT" "--caretaker"
 REEVE_NO_CARETAKER=1 dispatch optout
 eq  "3 a real dispatch under the opt-out succeeds" "$RC" 0
 eq  "3 and starts nothing"                   "$([ -e "$LOG" ] && echo present || echo absent)" absent
-eq  "3 and locks nothing"                    "$([ -d "$LOCK" ] && echo present || echo absent)" absent
+eq  "3 and locks nothing"                    "$([ -e "$LOCK" ] && echo present || echo absent)" absent
 # That dispatch was real, so this home now holds a hand nobody is tending. Finish
 # it here: the case below asserts that a caretaker ENDS when nothing is left, and
 # a hand left working forever is a hand it would be right to keep tending.
@@ -251,15 +352,21 @@ printf 'done: nothing to do\n' > "$REEVE_HOME/errands/optout/status"
 brief_for live || bad "3 reeve-brief refused"
 dispatch live
 eq  "3 the dispatch succeeds" "$RC" 0
-if waitfor 10 '[ -f "$LOCK/pid" ]'; then
+if waitfor 10 '[ -f "$LOCK" ]'; then
   ok "3 a caretaker took the lock"
-  CARE=$(cat "$LOCK/pid"); STARTED="$STARTED $CARE"
+  CARE=$(marker_pid "$LOCK"); STARTED="$STARTED $CARE"
   eq  "3 and it is running"  "$(kill -0 "$CARE" 2>/dev/null && echo alive || echo gone)" alive
   # Its parent was bin/reeve-dispatch, which has long exited: a caretaker still
   # attached to the dispatching shell would die with it, which is the defect.
   eq  "3 detached from the dispatch that started it" \
       "$(ps -o ppid= -p "$CARE" 2>/dev/null | tr -d '[:space:]')" 1
 
+  # Truncated first, and that matters: KILLS is cumulative and every errand in
+  # this suite runs on target stub:1, so section 1 had already recorded a kill of
+  # it. Asserted against that record, "its session was freed" was true before
+  # this dispatch existed and would have passed had the caretaker freed nothing
+  # at all. A case that cannot fail is worse than no case.
+  : > "$KILLS"
   printf 'working: building\ndone: branch ready\n' > "$REEVE_HOME/errands/live/status"
   if waitfor 15 '[ -n "$(meta_of live tornDown)" ]'; then
     ok "3 the finished hand is cleaned up with no reeve anywhere"
@@ -274,12 +381,173 @@ if waitfor 10 '[ -f "$LOCK/pid" ]'; then
   else
     bad "3 and the caretaker then ends itself, leaving nothing running" "pid $CARE is still alive"
   fi
-  eq  "3 the lock is gone with it" "$([ -d "$LOCK" ] && echo present || echo absent)" absent
+  eq  "3 the lock is gone with it" "$([ -e "$LOCK" ] && echo present || echo absent)" absent
   eq  "3 it wrote nothing to its log, having nothing to report" \
       "$([ -s "$LOG" ] && cat "$LOG" || echo '')" ""
 else
   bad "3 a caretaker took the lock" "no lock appeared at $LOCK. log: $(cat "$LOG" 2>/dev/null)"
 fi
+
+# A home the caretaker cannot write to is the one case the start guard exists to
+# name, and the older guard could not see it: `mkdir -p` on a directory that is
+# already there succeeds whatever its permissions, so an unwritable home dropped
+# through to a dispatch that reported perfect success and left no cleaner. Never
+# fatal, still: the dispatch itself worked. A directory standing where the log
+# belongs is the same refusal, and needs no chmod to arrange.
+export REEVE_HOME="$SCRATCH/home4b"
+mkdir -p "$REEVE_HOME/state/sentry.log"
+brief_for walled || bad "3 reeve-brief refused"
+dispatch walled
+eq  "3 a home the caretaker cannot write to is not fatal" "$RC" 0
+has "3 and the dispatch still reports itself"             "$OUT" "dispatched walled"
+has "3 but it says no caretaker started"                  "$ERR" "no caretaker started"
+has "3 and names what could not be written"               "$ERR" "$REEVE_HOME/state/sentry.log"
+eq  "3 and nothing is locking that home"                  \
+    "$([ -e "$REEVE_HOME/state/.sentry.lock" ] && echo present || echo absent)" absent
+
+echo "--- 4. the watch and the caretaker, at the same time, on one home ---"
+# The regression this section exists for, and the reason every case above it is
+# not enough: they run the two modes one after the other, so the only thing they
+# can see is what each does alone. Run together, the caretaker used to destroy
+# the watch's report rather than delay it. It tears the finished errand down,
+# teardown writes tornDown=, live_errands stops listing it, and the watch's next
+# tick finds nothing in flight and leaves. The `is done` line is then gone for
+# good: a fresh watch started afterwards sees nothing either, and `done:` and
+# `failed:` are exactly the two states the household must report.
+#
+# Eight phase offsets across one poll interval, because which of the two ticks
+# first is the whole of it. The offset is measured from the `done:` line, which
+# is the only instant that matters, and the caretaker is started there rather
+# than left to drift into position: a poller's first tick is immediate, so at
+# the short offsets the caretaker reaches that errand first every single run,
+# which is the losing case pinned down instead of waited for. The watch is
+# already established before any of it, so what varies is only how far behind
+# the line the cleaner arrives.
+kept=0; ended=0; noise=''; n=0
+for off in 0 0.125 0.25 0.375 0.5 0.625 0.75 0.875; do
+  n=$((n + 1))
+  export REEVE_HOME="$SCRATCH/race$n"
+  errand racer no "working: going"
+  "$ROOT/bin/reeve-sentry" --poll 1 --timeout 12 >"$REEVE_HOME/fg.out" 2>&1 &
+  WATCHER=$!; STARTED="$STARTED $WATCHER"
+  waitfor 10 '[ -f "$REEVE_HOME/state/.cursor-racer" ]' \
+    || bad "4 the watch is in its loop before the race starts" "no cursor at offset $off"
+  printf 'done: branch ready\n' >> "$REEVE_HOME/errands/racer/status"
+  sleep "$off"
+  "$ROOT/bin/reeve-sentry" --caretaker --poll 1 >"$REEVE_HOME/care.out" 2>&1 &
+  CARE=$!; STARTED="$STARTED $CARE"
+  wait "$WATCHER"
+  if grep -qF 'racer is done' "$REEVE_HOME/fg.out"; then
+    kept=$((kept + 1))
+  else
+    printf '        offset %s said [%s]\n' "$off" "$(tr '\n' ' ' < "$REEVE_HOME/fg.out")"
+  fi
+  # and the standby ends itself once the watch has cleaned up after itself
+  waitfor 10 '! kill -0 "$CARE" 2>/dev/null' && ended=$((ended + 1)) || kill "$CARE" 2>/dev/null
+  noise="$noise$(cat "$REEVE_HOME/care.out")"
+done
+eq  "4 the watch reported the finished hand at every one of 8 phase offsets" "$kept" 8
+eq  "4 and every caretaker ended once there was nothing left to tend"        "$ended" 8
+eq  "4 none of them said a word"                                             "$noise" ""
+
+echo "--- 5. the watch marker: believed while it is refreshed, never past that ---"
+export REEVE_HOME="$SCRATCH/home5"
+WATCH_F="$REEVE_HOME/state/.sentry.watch"
+mkdir -p "$REEVE_HOME/state"
+errand watched no "working: going"
+"$ROOT/bin/reeve-sentry" --poll 1 --timeout 3 --no-reap >/dev/null 2>&1 &
+WATCHER=$!; STARTED="$STARTED $WATCHER"
+if waitfor 5 '[ -f "$WATCH_F" ]'; then
+  ok "5 a foreground watch says on disk that it holds the home"
+  eq "5 naming the process doing the watching" "$(marker_pid "$WATCH_F")" "$WATCHER"
+else
+  bad "5 a foreground watch says on disk that it holds the home" "nothing appeared at $WATCH_F"
+fi
+wait "$WATCHER"
+eq  "5 and takes the marker with it when it stops" \
+    "$([ -e "$WATCH_F" ] && echo present || echo absent)" absent
+
+# What a caretaker does about one. The three that must not stop it are the
+# reason this is a marker with a clock in it rather than a pid: the reeve's
+# session is routinely killed outright, and a marker that outlived its process
+# must never be able to disable cleanup for a home permanently. That would be a
+# worse failure than the race it closes.
+watched_reap() { # watched_reap <id> <marker line>   -> yes|no
+  errand "$1" no "working: going"
+  printf 'done: finished\n' >> "$REEVE_HOME/errands/$1/status"
+  if [ -n "$2" ]; then printf '%s' "$2" > "$WATCH_F"; else rm -f "$WATCH_F"; fi
+  "$ROOT/bin/reeve-sentry" --caretaker --once --poll 1 >/dev/null 2>&1
+  reaped "$1"
+}
+eq "5 a live watch stops the caretaker reaping"       "$(watched_reap guarded "$(marker "$$" 0 60)")" no
+eq "5 a watch whose process died does not"            "$(watched_reap dead "$(marker "$(free_pid)" 0 60)")" yes
+eq "5 nor one that stopped refreshing, pid or no pid" "$(watched_reap stale "$(marker "$$" 300 1)")" yes
+eq "5 and with no watch at all it just works"         "$(watched_reap alone '')" yes
+
+# Standing by is not retiring. The caretaker must still be there, still polling,
+# for the moment the watch goes away, because that moment is a reeve's session
+# being terminated and every hand it was watching still has to be cleaned up.
+export REEVE_HOME="$SCRATCH/home6"
+WATCH_F="$REEVE_HOME/state/.sentry.watch"
+mkdir -p "$REEVE_HOME/state"
+errand orphan no "working: building" "done: branch ready"
+marker "$$" 0 60 > "$WATCH_F"
+"$ROOT/bin/reeve-sentry" --caretaker --poll 1 >"$SCRATCH/standby.out" 2>&1 &
+CARE=$!; STARTED="$STARTED $CARE"
+sleep 3                                  # three polls, which is a decision made
+eq  "5 it reaps nothing while a watch holds the home" "$(reaped orphan)" no
+eq  "5 and does not exit over it either"              \
+    "$(kill -0 "$CARE" 2>/dev/null && echo alive || echo gone)" alive
+rm -f "$WATCH_F"                         # the session the reeve watched from is gone
+if waitfor 15 '[ -n "$(meta_of orphan tornDown)" ]'; then
+  ok "5 and cleans up the moment that watch is gone"
+else
+  bad "5 and cleans up the moment that watch is gone" "$(cat "$REEVE_HOME/state/orphan.meta")"
+fi
+if waitfor 15 '! kill -0 "$CARE" 2>/dev/null'; then
+  ok "5 then ends itself, with nothing left to tend"
+else
+  bad "5 then ends itself, with nothing left to tend" "pid $CARE is still alive"
+  kill "$CARE" 2>/dev/null
+fi
+eq  "5 silent throughout"  "$(cat "$SCRATCH/standby.out")" ""
+
+echo "--- 6. a line that lands while the log is being read ---"
+# The other way the same wake is lost, and this one needs no caretaker at all.
+# The cursor is what says a line has been dealt with, so moving it past a line
+# the verdict did not include loses that line for good. Reconciling an errand
+# reads its log three times over, and a `done:` appended inside that gap was
+# counted as seen while the verdict still said `working`: absorbed as progress,
+# never reported, and no later poll ever looks again.
+#
+# No sleeps and no luck. The cursor is read with `cat` between the verdict and
+# the count, so a `cat` of this suite's own making, firing once and only on the
+# cursor path, is that gap exactly.
+export REEVE_HOME="$SCRATCH/home7"
+mkdir -p "$REEVE_HOME/state"
+errand midread no "working: going"
+REAL_CAT=$(command -v cat)
+FAKEBIN="$SCRATCH/fakebin"; mkdir -p "$FAKEBIN"
+cat > "$FAKEBIN/cat" <<EOF
+#!/bin/sh
+case \${1:-} in
+  *.cursor-midread)
+    if [ ! -e "$SCRATCH/injected" ]; then
+      : > "$SCRATCH/injected"
+      printf 'done: branch ready\n' >> "$REEVE_HOME/errands/midread/status"
+    fi ;;
+esac
+exec "$REAL_CAT" "\$@"
+EOF
+chmod +x "$FAKEBIN/cat"
+OUT=$(PATH="$FAKEBIN:$PATH" "$ROOT/bin/reeve-sentry" --poll 1 --timeout 10 --no-reap 2>&1); RC=$?
+eq  "6 the line really did land mid read" \
+    "$([ -e "$SCRATCH/injected" ] && echo yes || echo no)" yes
+has "6 and is still reported"             "$OUT" "midread is done"
+eq  "6 on the watch's own exit"           "$RC" 0
+eq  "6 with the cursor caught up, not run ahead" \
+    "$(cat "$REEVE_HOME/state/.cursor-midread" 2>/dev/null)" \
+    "$(grep -c . "$REEVE_HOME/errands/midread/status")"
 
 echo
 echo "passed=$PASS failed=$FAIL"

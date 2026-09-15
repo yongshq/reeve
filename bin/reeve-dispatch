@@ -268,10 +268,18 @@ caretaker_log="$REEVE_HOME_D/state/sentry.log"
 caretaker_advice="Finished hands will keep their sessions until a reeve runs bin/reeve-sentry."
 if [ -n "${REEVE_NO_CARETAKER:-}" ]; then
   :
-elif ! mkdir -p "$(dirname "$caretaker_log")" 2>/dev/null; then
-  warn "no caretaker started: $(dirname "$caretaker_log") cannot be written. $caretaker_advice"
 elif [ ! -x "$BIN/reeve-sentry" ]; then
   warn "no caretaker started: $BIN/reeve-sentry is not executable. $caretaker_advice"
+elif ! { mkdir -p "$(dirname "$caretaker_log")" && : >> "$caretaker_log"; } 2>/dev/null; then
+  # The guard writes rather than asks. `mkdir -p` on a directory that already
+  # exists succeeds whatever its permissions, so the older form could not tell
+  # an unwritable state/ from a healthy one and said nothing at all about the
+  # one case it was there to name: the caretaker simply never appeared, and the
+  # liege was told a dispatch had gone perfectly. Appending to the log is the
+  # first thing the caretaker itself does, so doing it here asks exactly the
+  # question that matters, and leaves behind exactly the empty file the start
+  # below would have created anyway.
+  warn "no caretaker started: $caretaker_log cannot be written. $caretaker_advice"
 else
   # nohup, both streams redirected and stdin closed, so it outlives this session
   # and holds none of its terminal open. A caretaker still attached to the

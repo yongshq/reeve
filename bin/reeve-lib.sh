@@ -270,6 +270,18 @@ status_field() {
   # stderr for it. Only when the errand had an open decision, and only when the
   # reader won the race, so it read as noise from nowhere. A caretaker has to be
   # silent to be useful, and that includes not saying this.
+  #
+  # Same values, and that part was measured: byte identical over 306 cases,
+  # including a missing field, an empty one, values carrying tabs, globs and
+  # backslashes, an errand with sixty open decisions and an errand that does not
+  # exist. Not the same exit status, which an earlier note here claimed and this
+  # one corrects: the piped form returned 1 when the field was absent, because
+  # `grep -m1` missed and pipefail carried it out, and 141 when it lost the race
+  # above. This form returns 0 always. Nothing reads it, today: all ten call
+  # sites capture with $(...) and no script in bin/ runs under `set -e`. Anything
+  # that comes to depend on an absent field being distinguishable from an empty
+  # one has to reintroduce that distinction deliberately, and say so here, rather
+  # than find it by accident in an exit status.
   local line key=$2
   while IFS= read -r line; do
     case $line in "$key="*) printf '%s\n' "${line#"$key="}"; return 0 ;; esac

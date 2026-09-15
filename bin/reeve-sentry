@@ -26,9 +26,21 @@
 # session is alive. One per home, enforced by a lock; a second start is a quiet
 # no-op. It exits when nothing is left to tend, so nothing lingers.
 #
+# A caretaker is a STANDBY, not a peer. While a foreground watch holds this home
+# it reaps nothing at all, because cleaning up an errand the watch has not yet
+# reported destroys that report rather than delaying it: teardown writes
+# tornDown=, live_errands stops listing the errand, and the watch's next tick
+# finds nothing in flight and exits. The "is done" line is then lost for good,
+# and it is the one thing the household exists to deliver. So the foreground
+# publishes state/.sentry.watch while it watches and the caretaker stands by for
+# as long as that marker is live: still polling, reaping nothing, ready to
+# resume the instant the marker goes. Standby rather than exit, because the
+# session holding it is routinely killed outright, which is the case that put
+# the caretaker here in the first place.
+#
 # Exit codes:
 #   0  something actionable, reason printed on stdout (or: a caretaker already
-#      holds this home, so this one did nothing)
+#      holds this home, so this one did nothing, or stopped doing it)
 #   3  nothing in flight, there is nothing to watch
 #   4  timed out with nothing actionable
 #
@@ -59,59 +71,158 @@ done
 # below is a no-op rather than something written to a log nobody opens.
 say() { [ "$caretaker" = yes ] && return 0; printf "$@"; }
 
+# --- markers: who holds this home -------------------------------------------
+# Two files in state/, one shape, one line: `<pid> <epoch seconds> <poll>`.
+#
+#   .sentry.lock   a caretaker saying it is the cleaner for this home
+#   .sentry.watch  a foreground watch saying the reeve is watching this home
+#
+# Both exist to answer the same question from the other side, "is the process
+# that wrote this still there", so both answer it the same way. A pid alone
+# cannot: a process killed with -9 leaves its pid behind, pids are reused, and
+# an unrelated process of the same user inheriting that number reads as alive
+# under `kill -0` forever. For the lock that means no caretaker ever starts for
+# this home again, silently, because a refused start is exit 0. For the watch it
+# would mean cleanup disabled permanently, which is worse than the race the
+# watch exists to close.
+#
+# So the writer refreshes its own timestamp every poll and a reader believes a
+# marker only while BOTH hold: the pid is alive, AND it was refreshed recently
+# enough that the process really is still polling. The poll interval travels
+# inside the marker because the reader has no other way to know the writer's.
+# The allowance is three intervals and five seconds: one iteration costs about
+# one interval, whether it spends it in the backend's native wait or in the
+# sleep that replaces it, so three is slack for a loaded machine rather than a
+# guess. The cost of being wrong is bounded either way, a lock reclaimed early
+# or a report lost the way it was lost before any of this.
+marker_stamp() { # marker_stamp <file> <poll>   write or refresh, whole, atomic
+  local f=$1 p=${2:-15} tmp="$1.new.$$"
+  printf '%s %s %s\n' "$$" "$(date +%s)" "$p" > "$tmp" 2>/dev/null \
+    || { rm -f "$tmp"; return 1; }
+  mv "$tmp" "$f" 2>/dev/null || { rm -f "$tmp"; return 1; }
+  return 0
+}
+
+# The path is an argument, never `< "$f" 2>/dev/null`: redirections are applied
+# left to right, so the shell reports a missing file itself, on its own stderr,
+# before the redirection that was meant to hide it is in effect. A caretaker
+# that has to be silent cannot afford to say that, and it did.
+marker_read() { cat "$1" 2>/dev/null; }
+
+marker_mine() { case $(marker_read "$1") in "$$ "*) return 0 ;; esac; return 1; }
+
+marker_alive() { # marker_alive <marker contents>
+  local fields=${1:-} pid ts p now
+  set -- $fields
+  pid=${1:-}; ts=${2:-}; p=${3:-}
+  case $pid in ''|*[!0-9]*) return 1 ;; esac
+  case $ts  in ''|*[!0-9]*) return 1 ;; esac
+  case $p   in ''|*[!0-9]*) p=15 ;; esac
+  kill -0 "$pid" 2>/dev/null || return 1
+  now=$(date +%s)
+  [ $(( now - ts )) -le $(( p * 3 + 5 )) ]
+}
+
 # --- one caretaker per home -------------------------------------------------
 # bin/reeve-dispatch starts one on every dispatch, so a household with four
 # hands out would otherwise end up with four cleaners racing each other over the
 # same errand. A second start is a no-op and exits 0: not being needed is not a
 # failure.
 #
-# mkdir is the atomic primitive, deliberately, not flock: macOS ships no
-# util-linux flock and this household runs on macOS. The pid written inside is
-# what separates a lock that is held from one left behind by a process that was
-# killed, and reclaiming the second is not optional: without it one crash
-# disables cleanup for this home forever.
+# `ln` is the atomic primitive, deliberately, not flock: macOS ships no
+# util-linux flock and this household runs on macOS. It is a hard link rather
+# than a mkdir because the lock has contents: mkdir is atomic but a directory
+# filled afterwards exists empty for an instant, and a second caretaker arriving
+# in that instant reads no pid, calls the lock stale and takes it. Writing the
+# contents first and linking them into place has no such instant. The link fails
+# if the name is taken, which is the whole of the mutual exclusion.
 #
 # Not lock_acquire from reeve-lib.sh, which is a different contract for a
 # different job: it waits for the lock and then dies, and it deliberately never
 # breaks a stale one. Both are right for a command a human is watching. A
 # caretaker wants neither, because nobody is watching it.
-LOCK_D="$REEVE_HOME_D/state/.sentry.lock"
+LOCK_F="$REEVE_HOME_D/state/.sentry.lock"
 
+# What is guaranteed, exactly, since a comment that overstates a guarantee stops
+# the next reader looking.
+#
+# Two caretakers can never both take a FREE home: the link fails for the second,
+# and the contents are already inside the file the instant it appears, so there
+# is no moment where a lock exists with nothing readable in it to judge.
+#
+# Two caretakers CAN both reclaim the same STALE lock, and that is the honest
+# price of this shape. Judging a lock dead and replacing it is a read and a
+# write, and nothing in POSIX makes that pair atomic. It is one rename rather
+# than a move aside and a re-create, deliberately: a rename leaves no instant in
+# which the home has no lock at all, and a home briefly uncovered is worse than
+# a home briefly covered twice, because the second corrects itself on the next
+# poll and the first does not. That correction is lock_hold below, and it is
+# what bounds the duplicate to one poll interval. A duplicate that short costs
+# duplicate teardown work on one errand, which bin/reeve-teardown is already
+# safe against, and nothing else.
 lock_take() {
   mkdir -p "$REEVE_HOME_D/state" 2>/dev/null || return 1
-  mkdir "$LOCK_D" 2>/dev/null && { printf '%s\n' "$$" > "$LOCK_D/pid"; return 0; }
-  local held stale
-  held=$(tr -d '[:space:]' < "$LOCK_D/pid" 2>/dev/null)
-  case ${held:-} in
-    ''|*[!0-9]*) ;;                                # no readable pid: stale
-    *) kill -0 "$held" 2>/dev/null && return 1 ;;  # a live caretaker holds it
-  esac
-  # Reclaim. Moved aside before it is removed, so two processes reclaiming in the
-  # same instant cannot both believe they won: the loser finds nothing to move.
-  # A window remains between the move and the new lock, and the price of losing
-  # that one is a second caretaker over a lock that only exists because something
-  # already died. Cheap, against a guard that has to be simple to be trusted.
-  stale="$LOCK_D.stale.$$"
-  mv "$LOCK_D" "$stale" 2>/dev/null || return 1
-  rm -rf "$stale"
-  mkdir "$LOCK_D" 2>/dev/null || return 1
-  printf '%s\n' "$$" > "$LOCK_D/pid"
+  local mine="$LOCK_F.new.$$" held
+  printf '%s %s %s\n' "$$" "$(date +%s)" "$poll" > "$mine" 2>/dev/null || return 1
+  if ln "$mine" "$LOCK_F" 2>/dev/null; then rm -f "$mine"; return 0; fi
+  held=$(marker_read "$LOCK_F")
+  if marker_alive "$held"; then rm -f "$mine"; return 1; fi
+  mv "$mine" "$LOCK_F" 2>/dev/null || { rm -f "$mine"; return 1; }
   return 0
+}
+
+# Still ours, and said so again. Both answers matter: a caretaker whose lock was
+# taken while somebody live holds it stands down rather than becoming the second
+# one, and a caretaker whose lock went stale or vanished under it takes the home
+# back rather than leaving it with no cleaner. Whichever way a reclaim race went,
+# one poll later exactly one of the pair is still running.
+lock_hold() {
+  marker_mine "$LOCK_F" && { marker_stamp "$LOCK_F" "$poll" || :; return 0; }
+  lock_take
 }
 
 # Only ever remove a lock this process still holds. It may have been reclaimed
 # while this one was dying, and removing the reclaimer's lock would let a third
 # caretaker in.
 lock_drop() {
-  [ "$(tr -d '[:space:]' < "$LOCK_D/pid" 2>/dev/null)" = "$$" ] || return 0
-  rm -rf "$LOCK_D"
+  marker_mine "$LOCK_F" && rm -f "$LOCK_F"
+  rm -f "$LOCK_F.new.$$"
+  return 0
+}
+
+# --- the watch marker -------------------------------------------------------
+# Published by the foreground watch, read by a caretaker, and nothing else reads
+# it. Refreshed every poll, removed on the way out, and never trusted past the
+# staleness rule above, because the session running the watch is routinely
+# killed outright and a marker that outlived its process must never be able to
+# disable cleanup for this home.
+WATCH_F="$REEVE_HOME_D/state/.sentry.watch"
+watch_publish() { mkdir -p "$REEVE_HOME_D/state" 2>/dev/null && marker_stamp "$WATCH_F" "$poll"; }
+watch_held()    { marker_alive "$(marker_read "$WATCH_F")"; }
+watch_drop() {
+  marker_mine "$WATCH_F" && rm -f "$WATCH_F"
+  rm -f "$WATCH_F.new.$$"
+  return 0
 }
 
 if [ "$caretaker" = yes ]; then
   lock_take || exit 0
+  # EXIT and TERM only. A caretaker is started detached from a non-interactive
+  # shell, so INT and HUP reach it already ignored and bash cannot trap a signal
+  # that was ignored on entry: a trap for either would read as a guard and never
+  # once fire. TERM and EXIT do fire, and -9 leaves a lock the staleness rule
+  # reclaims.
   trap 'lock_drop' EXIT
-  trap 'lock_drop; exit 130' INT
   trap 'lock_drop; exit 143' TERM
+else
+  # The foreground watch is a command the reeve ran, so all four of these are
+  # genuinely deliverable here, and the exit codes are the ones the default
+  # action would have given: the marker goes, nothing else changes.
+  watch_publish || :
+  trap 'watch_drop' EXIT
+  trap 'watch_drop; exit 130' INT
+  trap 'watch_drop; exit 143' TERM
+  trap 'watch_drop; exit 129' HUP
 fi
 
 cursor_file() { printf '%s/state/.cursor-%s\n' "$REEVE_HOME_D" "$1"; }
@@ -183,24 +294,48 @@ live_errands() {
   done
 }
 
+# How many lines this errand's log holds right now. grep -c pads its answer on
+# some platforms and says nothing at all when the file is missing, so the trim
+# and the zero are both load bearing.
+status_lines() {
+  local n=0
+  [ -f "$1" ] && n=$(grep -c . "$1" 2>/dev/null || echo 0)
+  n=$(printf '%s' "$n" | tr -d '[:space:]')
+  printf '%s' "${n:-0}"
+}
+
 # Absorb or escalate. One errand, one verdict.
 check_one() {
-  local i=$1 f seen now new st open div bk tgt live
+  local i=$1 f seen now again new st open div bk tgt live
   local attn af since woke nowsec last
+
+  # Counted BEFORE the verdict is read, and again after. The cursor is what says
+  # a line has been dealt with, so advancing it past a line the verdict did not
+  # include loses that line for good: reconciling this errand takes long enough
+  # to read its log three times, and a `done:` appended inside that gap was
+  # counted as seen while the verdict still said `working`, so the case below
+  # fell through, the cursor moved, and no later poll ever looked at it again.
+  # The log only ever grows, so two equal counts around the read prove nothing
+  # landed inside it. Two different ones mean look again next poll: one poll of
+  # latency, against a wake lost permanently.
+  f=$(status_file "$i")
+  now=$(status_lines "$f")
 
   st=$(status_field "$i" state)
   open=$(status_field "$i" open); open=${open:-0}
   div=$(status_field "$i" divergence)
 
-  # A caretaker asks one question and no others: is this hand finished, and is
-  # it safe to clean up. Not the cursor, because a cursor de-duplicates REPORTS
-  # and this mode makes none, and reading the cleanup off one would mean a
-  # caretaker started after the `done:` line was written never cleans it up. Not
-  # the attention probe either: a hand stalled at a dialog is never reaped by
-  # either mode, and only the reeve can answer it. And never a return 0, because
-  # an actionable event is the reeve's business, not this process's.
+  # A caretaker asks two questions and no others: is this hand finished and safe
+  # to clean up, and is the reeve watching this home right now, in which case the
+  # answer is nothing this tick whatever the first one said. Not the cursor,
+  # because a cursor de-duplicates REPORTS and this mode makes none, and reading
+  # the cleanup off one would mean a caretaker started after the `done:` line was
+  # written never cleans it up. Not the attention probe either: a hand stalled at
+  # a dialog is never reaped by either mode, and only the reeve can answer it.
+  # And never a return 0, because an actionable event is the reeve's business,
+  # not this process's.
   if [ "$caretaker" = yes ]; then
-    if reapable "$st" "$div"; then
+    if [ "$standby" = no ] && reapable "$st" "$div"; then
       reap_one "$i"
       # Tended once. A teardown that refused has said all it is going to say,
       # and retrying it every poll would hammer git over a decision that is now
@@ -212,11 +347,10 @@ check_one() {
     return 1
   fi
 
-  f=$(status_file "$i")
+  again=$(status_lines "$f")
+  [ "$now" = "$again" ] || return 1
+
   seen=$(cat "$(cursor_file "$i")" 2>/dev/null || echo 0)
-  now=0
-  [ -f "$f" ] && now=$(grep -c . "$f" 2>/dev/null || echo 0)
-  now=$(printf '%s' "$now" | tr -d '[:space:]'); now=${now:-0}
   seen=$(printf '%s' "$seen" | tr -d '[:space:]'); seen=${seen:-0}
 
   if [ "$now" -gt "$seen" ]; then
@@ -321,6 +455,10 @@ poll_sleep() {
 # in every other mode.
 tended=''
 
+# Whether a foreground watch holds this home right now. Re-read every tick, and
+# only ever yes in caretaker mode.
+standby=no
+
 # What is left for this caretaker to do. An errand it has already tended is no
 # longer work in flight from where it stands, whatever the record still says,
 # which is what gives this process a lifetime: the last job finishing ends it.
@@ -336,6 +474,16 @@ EOS
 
 start=$(date +%s)
 while :; do
+  if [ "$caretaker" = yes ]; then
+    # Say this process is still here, and find out whether it is still the one
+    # holding this home. Both readings are one poll old at most, which is what
+    # bounds every window either marker leaves open.
+    lock_hold || exit 0
+    standby=no; watch_held && standby=yes
+  else
+    watch_publish || :
+  fi
+
   ids=$(live_errands)
   [ "$caretaker" = yes ] && [ -n "$tended" ] && ids=$(untended "$ids")
   if [ -z "$ids" ]; then
