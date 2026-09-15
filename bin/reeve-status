@@ -208,15 +208,33 @@ if [ "$all" = yes ] || [ -z "$id" ]; then
   grouped=$(printf '%s\n' "$index" | grep -v "^$TAB") || :
   loose=$(printf '%s\n' "$index" | grep "^$TAB" | cut -f2) || :
 
+  first=yes
   printf '%s\n' "$grouped" | cut -f1 | uniq | while read -r key; do
     [ -n "$key" ] || continue
-    gids=$(printf '%s\n' "$grouped" | awk -F"$TAB" -v k="$key" '$1 == k { print $2 }')
+    # No awk here, and the key never becomes part of a program. `awk -v k=$key`
+    # expands escape sequences in the assignment, so a key holding `\t` arrived
+    # as a tab, matched no row, and the whole group vanished from the table with
+    # no error at all. A tracker's key shape is not ours to constrain, so the
+    # filter has to be one with no escape layer: the rows are already sorted, so
+    # reading them back through the same tab that wrote them compares the key as
+    # the bytes it is.
+    gids=$(printf '%s\n' "$grouped" | while IFS="$TAB" read -r k2 i2; do
+      if [ "$k2" = "$key" ]; then printf '%s\n' "$i2"; fi
+    done)
+    # A blank line between groups, and before the ungrouped block below, so
+    # neither is read as part of the ticket above it. Before each group rather
+    # than after, because after one means a blank line at the end of the whole
+    # table whenever nothing follows the last group.
+    [ "$first" = yes ] || printf '\n'
+    first=no
     ticket_label "$key" $gids
     for i in $gids; do table_row "$i"; done
-    # One blank line after every group, so the ungrouped block below is not
-    # read as part of the last ticket.
-    printf '\n'
   done
+
+  # The other half of that separator: the loop above runs in a subshell, so what
+  # it knows about the last group does not reach here. Both sides being non
+  # empty is the same question asked from the outside.
+  [ -n "$grouped" ] && [ -n "$loose" ] && printf '\n'
 
   printf '%s\n' "$loose" | while read -r i; do
     [ -n "$i" ] || continue

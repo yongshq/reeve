@@ -27,6 +27,9 @@ id=${1:-}; holding=${2:-}
 shift 2 2>/dev/null || :
 office='' type='' base='' harness='' manor=''
 ticket='' ticket_title='' ticket_url=''
+# An absent --ticket and a --ticket given blank are the same empty string, and
+# below they are answered differently, so the flag being there is its own fact.
+ticket_given=no
 while [ $# -gt 0 ]; do
   case $1 in
     --office)  office=${2:-}; shift 2 ;;
@@ -34,7 +37,7 @@ while [ $# -gt 0 ]; do
     --base)    base=${2:-}; shift 2 ;;
     --harness) harness=${2:-}; shift 2 ;;
     --manor)   manor=${2:-}; shift 2 ;;
-    --ticket)       ticket=${2:-}; shift 2 ;;
+    --ticket)       ticket=${2:-}; ticket_given=yes; shift 2 ;;
     --ticket-title) ticket_title=${2:-}; shift 2 ;;
     --ticket-url)   ticket_url=${2:-}; shift 2 ;;
     -h|--help) print_help "$0"; exit 0 ;;
@@ -58,6 +61,25 @@ require_id "$id"
 # A usage error rather than a silent drop: a reeve that typed only
 # --ticket-title meant to group this errand and would otherwise never find out
 # that it is not grouped.
+#
+# Nothing but whitespace is not a value either: it passes -n, gets stored, and
+# then prints as empty parens or a header with a trailing space. So a blank one
+# is read as whatever the empty string already means for that flag, which is
+# absent for a label and, just below, a usage error for the key itself.
+blank() { case $1 in *[![:space:]]*) return 1 ;; *) return 0 ;; esac; }
+blank "$ticket_title" && ticket_title=''
+blank "$ticket_url" && ticket_url=''
+
+# `--ticket ''` used to exit 0 having written no key. The record was right, but
+# the reeve got no signal at all that the errand is ungrouped, and an explicitly
+# empty key is nearly always a variable that expanded to nothing. That is the
+# same case the title-without-key refusal below exists for, only likelier, so it
+# fails closed too. An absent flag is untouched: only one actually given is
+# judged, or every ungrouped errand would be a usage error.
+if [ "$ticket_given" = yes ] && blank "$ticket"; then
+  die "bad --ticket: a tracker key cannot be blank. give the key, or leave --ticket off to brief an ungrouped errand"
+fi
+
 if [ -n "$ticket" ]; then
   case $ticket in *[[:space:]]*) die "bad --ticket '$ticket': a tracker key cannot contain whitespace" ;; esac
 else
@@ -66,11 +88,16 @@ else
 fi
 # A literal newline held in a variable, because $(printf '\n') is the empty
 # string: command substitution strips the exact character this has to find, and
-# the pattern would then match every value.
+# the pattern would then match every value. A carriage return survives the same
+# substitution, since only trailing newlines are stripped. It is refused beside
+# the newline for the neighbouring reason: it does not split the record, it
+# redraws over the start of the line it is printed on, so what a reader sees is
+# not what is stored.
 nl='
 '
+cr=$(printf '\r')
 case $ticket_title$ticket_url in
-  *"$nl"*) die "bad --ticket-title or --ticket-url: no newlines, one would split the errand's record" ;;
+  *"$nl"*|*"$cr"*) die "bad --ticket-title or --ticket-url: no newlines or carriage returns, one would split the errand's record and the other would print over the line" ;;
 esac
 
 # The office becomes a component of the worktree path below, so assert

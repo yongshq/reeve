@@ -190,6 +190,11 @@ first_loose=$(printf '%s\n' "$out" | grep -n '^loose-one ' | cut -d: -f1)
 last_group=$(printf '%s\n' "$out" | grep -n '^ticket ' | tail -1 | cut -d: -f1)
 eq "an errand with no ticket prints after the groups" \
   "yes" "$([ "${first_loose:-0}" -gt "${last_group:-0}" ] && echo yes || echo no)"
+# The separator moved to the front of each group so the table would stop ending
+# on a blank line. This is the half of its job that must survive that: the
+# ungrouped block is still not read as more rows of the last ticket.
+eq "a blank line still separates the last group from the ungrouped rows" \
+  "" "$(printf '%s\n' "$out" | sed -n "$((first_loose-1))p")"
 eq "every errand is still in the table" "6" \
   "$(printf '%s\n' "$out" | tail -n +2 | grep -v '^ticket ' | grep -c . | tr -d ' ')"
 
@@ -202,6 +207,99 @@ for col in OFFICE REPORTED PROCESS OPEN; do
     '{ if (substr($0, at - 1, 1) != " ") print NR }' | head -1)
   eq "$col column aligned in every row, grouped or not" "" "$bad"
 done
+
+printf '\n--- a key the table used to lose ---\n'
+
+# The key reached awk through `awk -v k=$key`, which expands escape sequences in
+# the assignment: a key holding a backslash and a `t` became a real tab inside
+# awk, `$1 == k` matched nothing, and every errand under that key disappeared
+# from the table with no error at all. A foreign tracker's key shape is not ours
+# to constrain, so this is reachable input, and the suite above already accepts
+# `ABC_123/4.5`. Both the escape awk reads as a character and the one it reads
+# as an octal code are pinned.
+"$B" bsl-one "$api" --office artificer --ticket 'A\tB' --ticket-title 'Backslash tab' >/dev/null 2>&1
+"$B" bsl-two "$web" --office scribe --ticket 'a\tb' >/dev/null 2>&1
+"$B" bsl-oct "$api" --office artificer --ticket 'ABC\123' >/dev/null 2>&1
+
+out=$(status --all)
+at=$(printf '%s\n' "$out" | grep -n -F 'ticket A\tB' | cut -d: -f1)
+eq "two errands sharing a backslash key group together, under its header" \
+  "bsl-one bsl-two" \
+  "$(printf '%s\n' "$out" | sed -n "$((at+1)),$((at+2))p" | awk '{ printf "%s%s", sep, $1; sep=" " } END { print "" }')"
+# Second symptom of the same line: with no ids reaching ticket_label there was no
+# spelling to show, so the header fell back to the lowercased key.
+eq "the header shows the spelling the liege typed, not the lowercased fallback" \
+  "ticket A\tB: Backslash tab" "$(printf '%s\n' "$out" | grep -F 'ticket A\tB')"
+at=$(printf '%s\n' "$out" | grep -n -F 'ticket ABC\123' | cut -d: -f1)
+eq "a backslash followed by digits groups too" \
+  "bsl-oct" "$(printf '%s\n' "$out" | sed -n "$((at+1))p" | awk '{ print $1 }')"
+
+printf '\n--- a carriage return in a label ---\n'
+
+# The newline guard did not cover it. The record survives whole, but a terminal
+# draws the tail of the value over the start of the line, so what is displayed
+# is not what is stored.
+"$B" cr-title "$api" --office artificer --ticket CR-1 \
+  --ticket-title "$(printf 'real\rFORGED')" >/dev/null 2>&1
+eq "a carriage return in the title is a usage error" "1" "$?"
+"$B" cr-url "$api" --office artificer --ticket CR-2 \
+  --ticket-url "$(printf 'https://example.invalid/x\rFORGED')" >/dev/null 2>&1
+eq "a carriage return in the url is a usage error" "1" "$?"
+for i in cr-title cr-url; do
+  eq "...and nothing was written for $i" \
+    "no" "$([ -e "$REEVE_HOME/state/$i.meta" ] && echo yes || echo no)"
+done
+
+printf '\n--- a label of nothing but whitespace ---\n'
+
+# It passed [ -n ] and was stored, which printed the empty parens the "a bare key
+# prints alone" assertion above exists to prevent; that one only covers the flag
+# being absent. Blank is read as what empty already means for a label: absent.
+"$B" ws-1 "$api" --office artificer --ticket WS-1 --ticket-title ' ' --ticket-url '   ' >/dev/null 2>&1
+eq "a whitespace-only title leaves the detail line bare, no empty parens" \
+  "WS-1" "$(field ticket "$(status ws-1)")"
+for key in ticket_title ticket_url; do
+  eq "a whitespace-only label writes no $key key at all" \
+    "0" "$(grep -c "^$key=" "$REEVE_HOME/state/ws-1.meta" | tr -d ' ')"
+done
+eq "and the group header is bare too, with no trailing space" \
+  "ticket WS-1" "$(status --all | grep '^ticket WS-1')"
+
+printf '\n--- a --ticket that came out blank ---\n'
+
+# The record was right, no key written, but the reeve got no signal that the
+# errand is ungrouped. An explicitly empty key is almost always a variable that
+# expanded to nothing, which is the same case the title-without-key refusal
+# exists for. Fails closed now.
+"$B" empty-ticket "$api" --office artificer --ticket '' >/dev/null 2>&1
+eq "--ticket '' is a usage error" "1" "$?"
+"$B" blank-ticket "$api" --office artificer --ticket '   ' >/dev/null 2>&1
+eq "--ticket '   ' is a usage error" "1" "$?"
+for i in empty-ticket blank-ticket; do
+  eq "...and nothing was written for $i" \
+    "no" "$([ -e "$REEVE_HOME/state/$i.meta" ] && echo yes || echo no)"
+done
+# The flag being absent is untouched by that: it is how every ungrouped errand
+# is briefed, and loose-one above was written exactly that way.
+eq "no --ticket at all is still fine" \
+  "0" "$(grep -c '^ticket=' "$REEVE_HOME/state/loose-one.meta" | tr -d ' ')"
+
+printf '\n--- where the blank line between groups goes ---\n'
+
+# A blank after every group left one at the end of the whole table when nothing
+# followed the last one, where main's table ended on a row. It takes its own
+# home, because it is the ABSENCE of ungrouped errands that shows it.
+ONLY="$SCRATCH/only-tickets"
+mkdir -p "$ONLY/state"
+REEVE_HOME="$ONLY" "$B" only-a "$api" --office artificer --ticket AAA-1 >/dev/null 2>&1
+REEVE_HOME="$ONLY" "$B" only-b "$api" --office artificer --ticket BBB-2 >/dev/null 2>&1
+# To a file, not a variable: command substitution strips the exact trailing
+# newlines this has to count.
+REEVE_HOME="$ONLY" bash "$STUB_BIN/reeve-status" --all >"$SCRATCH/only.out" 2>&1
+eq "with nothing ungrouped, the table does not end on a blank line" \
+  "no" "$([ -z "$(tail -1 "$SCRATCH/only.out")" ] && echo yes || echo no)"
+eq "...and the two groups are still separated by one" \
+  "1" "$(grep -c '^$' "$SCRATCH/only.out" | tr -d ' ')"
 
 printf '\npassed=%s failed=%s\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
