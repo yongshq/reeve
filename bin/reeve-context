@@ -8,8 +8,15 @@
 # Exit: 0 comfortable, 1 getting full (past the threshold), 2 unknown.
 #
 # The model cannot see its own context usage. The statusline can, and writes the
-# figure to $REEVE_HOME/state/context on every render. So this reads a number
-# somebody else measured, which is the only honest way to get it.
+# figure to $REEVE_HOME/state/sessions/<session>/context on every render. So this
+# reads a number somebody else measured, which is the only honest way to get it.
+#
+# Per session, and that is not tidiness. The statusline renders for EVERY claude
+# session on the machine, not only reeve ones, so a single shared file holds
+# whatever the last session to draw its statusline happened to be using. A reeve
+# reading that number is reading a stranger's, and it would offer a handoff at
+# the wrong moment or fail to offer one at all. Measured: with no reeve running
+# at all, the shared file tracked an unrelated session live.
 #
 # An unknown reading is reported as unknown and never guessed at. A reeve that
 # invented a context figure would hand off at the wrong moment, or worse, fail
@@ -19,7 +26,21 @@
 
 case ${1:-} in -h|--help) print_help "$0"; exit 0 ;; esac
 
-f="$REEVE_HOME_D/state/context"
+# An unidentifiable session falls back to the shared path, which is what a
+# harness exporting no session id has always used. It carries the old hazard,
+# and that is the honest trade: with nothing to tell two sessions apart there is
+# no way to keep their figures apart either.
+sid=$(reeve_session)
+legacy="$REEVE_HOME_D/state/context"
+if [ -n "$sid" ]; then f=$(session_dir "$sid")/context
+else f="$legacy"
+fi
+# An install still running the older statusline writes only the shared path, so
+# fall back to it rather than reporting unknown forever and blaming a gauge that
+# is installed and working. The staleness line below is what keeps the fallback
+# honest: a shared file being written by some other session reads as old here
+# the moment this one stops being the last to render.
+[ -f "$f" ] || f="$legacy"
 threshold=$(config_get context-threshold 50)
 
 if [ ! -f "$f" ]; then

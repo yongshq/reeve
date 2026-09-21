@@ -2,7 +2,7 @@
 # Stand watch over the fleet. Wakes the reeve once per actionable change.
 #
 # Usage:
-#   reeve-sentry [--poll SECONDS] [--timeout SECONDS] [--once] [--no-reap]
+#   reeve-sentry [--poll SECONDS] [--timeout SECONDS] [--once] [--no-reap] [--all]
 #   reeve-sentry --caretaker [--poll SECONDS]
 #
 # When an errand finishes it is cleaned up automatically: the session is freed
@@ -53,7 +53,7 @@
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/reeve-lib.sh"
 BIN=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
-poll=15 timeout=0 once=no reap=yes caretaker=no
+poll=15 timeout=0 once=no reap=yes caretaker=no every=no
 while [ $# -gt 0 ]; do
   case $1 in
     --poll)      poll=${2:-15}; shift 2 ;;
@@ -61,10 +61,23 @@ while [ $# -gt 0 ]; do
     --once)      once=yes; shift ;;
     --no-reap)   reap=no; shift ;;
     --caretaker) caretaker=yes; shift ;;
+    --all)       every=yes; shift ;;
     -h|--help)   print_help "$0"; exit 0 ;;
     *) die "unknown option '$1'" ;;
   esac
 done
+
+# --all widens what a foreground watch can SEE, and must never widen what it
+# touches. AGENTS.md tells the reeve to reach for it only to understand the
+# machine, and this household enforces rather than asks: reaping is off whenever
+# a watch is looking at errands that are not its own.
+[ "$every" = yes ] && [ "$caretaker" != yes ] && reap=no
+
+# A caretaker cleans for the whole home rather than for one session, because it
+# exists precisely for errands whose reeve is gone. Ownership still decides what
+# it may touch, in reap_allowed; this only lets it SEE the orphans it is there
+# to find.
+[ "$caretaker" = yes ] && every=yes
 
 # Everything this process prints is the one reason line the reeve reads, so the
 # mode that reports nothing has to say nothing: in caretaker mode every line
@@ -196,9 +209,33 @@ lock_drop() {
 # staleness rule above, because the session running the watch is routinely
 # killed outright and a marker that outlived its process must never be able to
 # disable cleanup for this home.
-WATCH_F="$REEVE_HOME_D/state/.sentry.watch"
+# One marker per watching session, never one per home. Two reeves watch at once
+# on this machine, and a single filename has them overwrite each other: the
+# second publish makes marker_mine false for the first, so that watch stops
+# refreshing a marker it no longer owns, the marker goes stale, and a caretaker
+# starts reaping out from under a watch that is still running. That is the exact
+# failure this marker exists to prevent, reintroduced by sharing the name.
+MY_SESSION=$(reeve_session)
+# `anon-$$` and not plain `anon`: two watches on a harness that exports no
+# session id would otherwise share one filename, the second publish would make
+# marker_mine false for the first, and the first would stop refreshing a marker
+# it no longer owns. That is precisely the clobbering described above, so a
+# process that cannot name its session falls back to naming itself.
+WATCH_F="$REEVE_HOME_D/state/.sentry.watch-${MY_SESSION:-anon-$$}"
 watch_publish() { mkdir -p "$REEVE_HOME_D/state" 2>/dev/null && marker_stamp "$WATCH_F" "$poll"; }
-watch_held()    { marker_alive "$(marker_read "$WATCH_F")"; }
+
+# Is ANY session watching this home. Used for one question only: an errand with
+# no recorded owner cannot be judged by its owner's liveness, so the blanket
+# answer is the only safe one for those. Owned errands are judged per owner in
+# reap_allowed, which is strictly better than a blanket standby.
+watch_held() {
+  local f
+  for f in "$REEVE_HOME_D/state"/.sentry.watch-*; do
+    [ -f "$f" ] || continue
+    marker_alive "$(marker_read "$f")" && return 0
+  done
+  return 1
+}
 watch_drop() {
   marker_mine "$WATCH_F" && rm -f "$WATCH_F"
   rm -f "$WATCH_F.new.$$"
@@ -252,11 +289,19 @@ attn_now() { printf '%s' "${REEVE_ATTN_NOW:-$(date +%s)}"; }
 # be lost. So a scout is cleaned up completely, while an artificer keeps its
 # branch and copy and only loses its idle session. Output is suppressed because
 # the sentry's contract is exactly one line.
+# Set by reap_one: whether the teardown reached a decision at all. A refusal is
+# a decision and is final until the liege acts, so the errand is done with here.
+# Failing to take the lock is not a decision, and treating it as one strands the
+# errand: tended drops it from what is left to do, the caretaker then finds
+# nothing in flight and exits, and nothing ever cleans it up again.
+REAP_UNDECIDED=no
 reap_one() {
-  local i=$1 wt
+  local i=$1 wt rc
+  REAP_UNDECIDED=no
   [ "$reap" = yes ] || { say '\n'; return; }
   wt=$(meta_get "$i" worktree '')
-  "$BIN/reeve-teardown" "$i" >/dev/null 2>&1
+  "$BIN/reeve-teardown" "$i" >/dev/null 2>&1; rc=$?
+  [ "$rc" = 4 ] && REAP_UNDECIDED=yes
   if [ -n "$wt" ] && [ -d "$wt" ]; then
     local br ahead
     br=$(meta_get "$i" branch '')
@@ -277,6 +322,33 @@ reap_one() {
 # reported done with a question never answered is not finished whatever it says,
 # so neither is ever reaped. Reached with the reconciled verdict, never with the
 # last line of a status file.
+# May THIS process clean this errand up. Separate from reapable(), which asks
+# whether the hand is FINISHED: this asks whether it is ours to touch.
+#
+# A foreground watch only ever sees errands it owns, so the answer is yes.
+#
+# A caretaker sees the whole home, because it exists for errands whose reeve is
+# gone, and there it must not act against an owner that is still there. Tearing
+# an errand down writes tornDown=, live_errands stops listing it, and the wake
+# the owning reeve had not yet delivered is destroyed rather than delayed.
+#
+# `alive` is the only answer that refuses. `dead` and `unknown` both permit,
+# which is the deliberate asymmetry: this gate protects a reeve that is
+# demonstrably there, and otherwise leaves the caretaker doing exactly the job
+# it was added for. A home whose sessions never report liveness therefore keeps
+# the behaviour it had before ownership existed rather than silently losing its
+# cleaner.
+reap_allowed() { # reap_allowed <id>
+  local own
+  [ "$caretaker" = yes ] || return 0
+  own=$(meta_get "$1" session '')
+  # No recorded owner: nothing can be proved either way, so fall back to the
+  # blanket rule, which is whether anybody at all is watching this home.
+  [ -n "$own" ] || { [ "$standby" = no ]; return; }
+  [ "$(session_state "$own")" = alive ] && return 1
+  [ "$standby" = no ]
+}
+
 reapable() { # reapable <state> <divergence>
   case $1 in
     failed) return 0 ;;
@@ -285,11 +357,28 @@ reapable() { # reapable <state> <divergence>
   return 1
 }
 
+# Errands this watch is responsible for. Ownership, not the whole home: the
+# home is shared by every reeve on this machine, and a sentry that lists them
+# all reports another reeve's errand as its own and then reaps it. A scout is
+# the case that cannot survive that, because it commits nothing, so the
+# landed-work guard in reeve-teardown has nothing to refuse over and the copy
+# goes for good.
+#
+# An errand briefed before ownership existed, or by a harness that exports no
+# session id, carries an empty session=. That matches a watch that cannot name
+# itself either, which is what keeps a single-harness machine working exactly
+# as it did. It is honest degradation, not isolation: with no ids there is
+# nothing to tell two reeves apart, and --all is the way to see everything.
 live_errands() {
+  local mine own; mine=$(reeve_session)
   ls "$REEVE_HOME_D/state"/*.meta 2>/dev/null | while read -r f; do
     i=$(basename "$f" .meta)
     [ -n "$(meta_get "$i" target '')" ] || continue
     [ -z "$(meta_get "$i" tornDown '')" ] || continue
+    if [ "$every" != yes ]; then
+      own=$(meta_get "$i" session '')
+      [ "$own" = "$mine" ] || [ -z "$own" ] || continue
+    fi
     printf '%s\n' "$i"
   done
 }
@@ -335,13 +424,17 @@ check_one() {
   # And never a return 0, because an actionable event is the reeve's business,
   # not this process's.
   if [ "$caretaker" = yes ]; then
-    if [ "$standby" = no ] && reapable "$st" "$div"; then
+    if reap_allowed "$i" && reapable "$st" "$div"; then
       reap_one "$i"
       # Tended once. A teardown that refused has said all it is going to say,
       # and retrying it every poll would hammer git over a decision that is now
       # the reeve's. This is also what lets the process end: an errand nothing
       # can do anything more about stops counting as work in flight.
-      tended="$tended$i
+      #
+      # Unless it never got as far as deciding. A lock it could not take means
+      # somebody else is mid-teardown, or a previous one was killed holding it,
+      # and both are worth another look next poll.
+      [ "$REAP_UNDECIDED" = yes ] || tended="$tended$i
 "
     fi
     return 1
@@ -482,6 +575,11 @@ while :; do
     standby=no; watch_held && standby=yes
   else
     watch_publish || :
+    # Keep this session's own heartbeat fresh. Sourcing reeve-lib.sh stamped it
+    # once, but a watch runs for minutes without calling another tool, and a
+    # session that goes stale while it is still watching is one whose errands a
+    # caretaker would judge orphaned and reap.
+    session_touch
   fi
 
   ids=$(live_errands)

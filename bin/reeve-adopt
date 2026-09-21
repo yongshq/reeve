@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# Take ownership of an errand, so this session watches and cleans up after it.
+#
+# Usage:
+#   reeve-adopt <id>          take it, if its owner is provably gone
+#   reeve-adopt <id> --force  take it anyway, from an owner that may be alive
+#
+# One home is shared by every reeve on this machine and an errand is owned by
+# the session that briefed it, so a sentry reports and reaps only its own. That
+# leaves one gap: a session that dies leaves errands nobody is watching. This is
+# the deliberate way to pick one up, and it is deliberate on purpose, because
+# taking an errand from a reeve that is still there means its report goes to the
+# wrong session and the hand it was watching gets cleaned up under it.
+#
+# `bin/reeve-status --orphans` lists the ones this will take without --force.
+#
+# Exit: 0 adopted, 1 refused.
+
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/reeve-lib.sh"
+
+# This session is doing something, so it is demonstrably still here. What the
+# caretaker reads to tell a reeve that is gone from one that is merely quiet.
+session_touch
+
+force=no id=''
+while [ $# -gt 0 ]; do
+  case $1 in
+    --force) force=yes; shift ;;
+    -h|--help) print_help "$0"; exit 0 ;;
+    *) id=$1; shift ;;
+  esac
+done
+
+[ -n "$id" ] || die "which errand? usage: reeve-adopt <id>"
+require_id "$id"
+[ -f "$(meta_file "$id")" ] || die "no errand '$id' in $REEVE_HOME_D"
+
+mine=$(reeve_session)
+# Fails closed, and this is the one place it must. Adopting means writing this
+# session's name into the record, and a session with no name would write an
+# empty one, which is not ownership at all: it is the unowned state every watch
+# can see, handed out under a word that says the opposite.
+[ -n "$mine" ] || die "this session has no id, so it cannot own anything. set REEVE_SESSION to adopt from a harness that exports none"
+
+own=$(meta_get "$id" session '')
+[ "$own" = "$mine" ] && { info "errand '$id' is already this session's"; exit 0; }
+
+if [ "$force" != yes ]; then
+  case ${own:+set} in
+    '') die "errand '$id' has no recorded owner, so nothing has been lost and every watch can already see it. adopt it only if you want it to become yours alone: reeve-adopt $id --force" ;;
+  esac
+  state=$(session_state "$own")
+  case $state in
+    alive) die "errand '$id' belongs to session $own, which is still alive. taking it would send its report to this session and clean the hand up under the one watching it. if you are certain: reeve-adopt $id --force" ;;
+    unknown) die "errand '$id' belongs to session $own, which has never reported. that is an absence of evidence, not evidence it is gone, so this refuses rather than guess. if you are certain: reeve-adopt $id --force" ;;
+  esac
+fi
+
+meta_set "$id" session "$mine"
+info "errand '$id' adopted${own:+, from session $own}"
+info "  this session now watches it and is the one that will clean up after it"

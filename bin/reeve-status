@@ -3,20 +3,32 @@
 #
 # Usage:
 #   reeve-status <id>            one errand, in full
+#   reeve-status                 the errands this session owns
 #   reeve-status --all           every errand the home knows about
+#   reeve-status --orphans       errands whose owning session is provably gone
 #   reeve-status <id> --raw      the reconciled key=value form, for scripts
+#
+# One home is shared by every reeve on this machine, so a bare listing is this
+# session's own work and --all is the machine's. An errand with no recorded
+# owner shows in both, because nothing can be proved about it and hiding it
+# would strand it where no reeve would ever look.
 #
 # The status log is append only and every append is a wake event, not the
 # current state. Never read its last line and call that the state: that is what
 # this script exists to prevent.
 
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/reeve-lib.sh"
+
+# This session is doing something, so it is demonstrably still here. What the
+# caretaker reads to tell a reeve that is gone from one that is merely quiet.
+session_touch
 BIN=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
-all=no raw=no id=''
+all=no raw=no orphans=no id=''
 while [ $# -gt 0 ]; do
   case $1 in
     --all) all=yes; shift ;;
+    --orphans) orphans=yes; all=yes; shift ;;
     --raw) raw=yes; shift ;;
     -h|--help) print_help "$0"; exit 0 ;;
     *) id=$1; shift ;;
@@ -24,7 +36,20 @@ while [ $# -gt 0 ]; do
 done
 
 errand_ids() {
-  ls "$REEVE_HOME_D/state"/*.meta 2>/dev/null | while read -r f; do basename "$f" .meta; done
+  local mine own; mine=$(reeve_session)
+  ls "$REEVE_HOME_D/state"/*.meta 2>/dev/null | while read -r f; do
+    i=$(basename "$f" .meta)
+    own=$(meta_get "$i" session '')
+    if [ "$orphans" = yes ]; then
+      # Provably gone, never merely unaccounted for. An owner that never
+      # reported is `unknown`, and listing those as orphans would invite
+      # cleaning up the errands of every reeve that simply has not watched yet.
+      [ -n "$own" ] && [ "$(session_state "$own")" = dead ] || continue
+    elif [ "$all" != yes ]; then
+      [ "$own" = "$mine" ] || [ -z "$own" ] || continue
+    fi
+    printf '%s\n' "$i"
+  done
 }
 
 # meta_get hands back its fallback only when the key is ABSENT, and reeve-brief
@@ -192,7 +217,13 @@ table_row() {
 
 if [ "$all" = yes ] || [ -z "$id" ]; then
   ids=$(errand_ids)
-  if [ -z "$ids" ]; then info "no errands in $REEVE_HOME_D"; exit 0; fi
+  if [ -z "$ids" ]; then
+    if [ "$orphans" = yes ]; then info "no orphaned errands: every owner is alive or unaccounted for"
+    elif [ "$all" = yes ]; then info "no errands in $REEVE_HOME_D"
+    else info "no errands of this session's in $REEVE_HOME_D. --all lists the whole home"
+    fi
+    exit 0
+  fi
   printf '%-24s %-11s %-16s %-16s %s\n' ERRAND OFFICE REPORTED PROCESS OPEN
 
   # <key>TAB<id> per errand, key empty when there is no ticket, sorted once.

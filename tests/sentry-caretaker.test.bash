@@ -64,7 +64,7 @@ marker() { printf '%s %s %s\n' "$1" "$(( $(date +%s) - ${2:-0} ))" "${3:-1}"; }
 reap_started() {
   local p f
   for p in $STARTED; do kill -0 "$p" 2>/dev/null && kill "$p" 2>/dev/null; done
-  for f in "$SCRATCH"/*/state/.sentry.lock "$SCRATCH"/*/state/.sentry.watch; do
+  for f in "$SCRATCH"/*/state/.sentry.lock "$SCRATCH"/*/state/.sentry.watch-*; do
     [ -f "$f" ] || continue
     p=$(marker_pid "$f")
     case $p in ''|*[!0-9]*) continue ;; esac
@@ -302,6 +302,19 @@ fi
 echo "--- 3. dispatch starts one, detaches it, and a dry run does not ---"
 export REEVE_HOME="$SCRATCH/home4"
 mkdir -p "$REEVE_HOME"
+# Everything below is briefed by one named session, so that "no reeve anywhere"
+# can be made TRUE rather than assumed. An errand records the session that
+# briefed it, and a caretaker will not clean up under an owner that is still
+# reporting, so a case that wants the no-reeve path has to retire that owner
+# first. Left implicit, this asserted the opposite of what it claimed: the
+# briefing session was the suite's own, which is alive throughout.
+export REEVE_SESSION=departed
+# The owner walked away. Backdated well past the staleness window, so the
+# caretaker can prove it rather than guess.
+depart() {
+  mkdir -p "$REEVE_HOME/state/sessions/departed"
+  printf '%s\n' "$(( $(date +%s) - 99999 ))" > "$REEVE_HOME/state/sessions/departed/seen"
+}
 REPO="$SCRATCH/holding"
 mkdir -p "$REPO"
 git init -q "$REPO"
@@ -368,6 +381,7 @@ if waitfor 10 '[ -f "$LOCK" ]'; then
   # at all. A case that cannot fail is worse than no case.
   : > "$KILLS"
   printf 'working: building\ndone: branch ready\n' > "$REEVE_HOME/errands/live/status"
+  depart
   if waitfor 15 '[ -n "$(meta_of live tornDown)" ]'; then
     ok "3 the finished hand is cleaned up with no reeve anywhere"
     eq "3 its session was freed"    "$(killed stub:1)" yes
@@ -452,7 +466,11 @@ eq  "4 none of them said a word"                                             "$n
 
 echo "--- 5. the watch marker: believed while it is refreshed, never past that ---"
 export REEVE_HOME="$SCRATCH/home5"
-WATCH_F="$REEVE_HOME/state/.sentry.watch"
+# A watch marker is named for the session that published it, so two reeves
+# watching at once cannot overwrite each other's. Pinning the session here is
+# what makes the filename predictable enough to assert on.
+export REEVE_SESSION=w5
+WATCH_F="$REEVE_HOME/state/.sentry.watch-w5"
 mkdir -p "$REEVE_HOME/state"
 errand watched no "working: going"
 "$ROOT/bin/reeve-sentry" --poll 1 --timeout 3 --no-reap >/dev/null 2>&1 &
@@ -488,7 +506,7 @@ eq "5 and with no watch at all it just works"         "$(watched_reap alone '')"
 # for the moment the watch goes away, because that moment is a reeve's session
 # being terminated and every hand it was watching still has to be cleaned up.
 export REEVE_HOME="$SCRATCH/home6"
-WATCH_F="$REEVE_HOME/state/.sentry.watch"
+WATCH_F="$REEVE_HOME/state/.sentry.watch-w6"
 mkdir -p "$REEVE_HOME/state"
 errand orphan no "working: building" "done: branch ready"
 marker "$$" 0 60 > "$WATCH_F"

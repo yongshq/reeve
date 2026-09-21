@@ -51,6 +51,159 @@ status_file() { printf '%s/errands/%s/status\n' "$REEVE_HOME_D" "$1"; }
 meta_file()   { printf '%s/state/%s.meta\n' "$REEVE_HOME_D" "$1"; }
 config_file() { printf '%s/config/%s\n' "$REEVE_HOME_D" "$1"; }
 
+
+# --- session identity -------------------------------------------------------
+# One home is shared by every reeve on this machine, so an errand id alone
+# cannot say who is watching it. A session owns the errands it briefed, and a
+# sentry reports and reaps only its own. Without this, one reeve absorbs
+# another's wake and tears down a scout that was never its business: a scout
+# commits nothing, so the landed-work guard has nothing to refuse over and the
+# copy goes.
+#
+# The id costs nothing to obtain. Claude Code exports CLAUDE_CODE_SESSION_ID
+# into every tool call, so a script invoked by a reeve inherits it already.
+# REEVE_SESSION overrides it, for another harness and for the tests.
+#
+# An unresolved session is EMPTY, never a fallback value. Two sessions that
+# both guessed the same name would own each other's errands, which is the exact
+# failure this exists to prevent. Callers fail closed on empty: read and
+# dispatch are fine, reaping is not.
+reeve_session() {
+  local s=${REEVE_SESSION:-${CLAUDE_CODE_SESSION_ID:-}}
+  # A session id becomes a directory name, so it is validated the way an errand
+  # id is, with negated classes under LC_COLLATE=C. Anything else is unusable
+  # rather than sanitised: a silently rewritten id is a wrong owner.
+  case $s in
+    '') printf '' ;;
+    *[!A-Za-z0-9._-]*) printf '' ;;
+    .|..) printf '' ;;
+    *) printf '%s' "$s" ;;
+  esac
+}
+
+session_dir() { printf '%s/state/sessions/%s\n' "$REEVE_HOME_D" "$1"; }
+
+# The heartbeat. A session that dies leaves errands nobody watches, and the
+# caretaker must not act against an owner that is still there, so something has
+# to say "still here" without a daemon and without a pid: a pid is reused, and a
+# reused pid would hand one session's errands to a stranger.
+#
+# Called from the commands that mean a reeve is actually working (brief, status,
+# adopt, doctor) and from the sentry's poll loop, plus the statusline gauge,
+# which is the one writer that keeps saying so while a session sits idle.
+# NOT called on sourcing this file: reeve-dispatch promises a --dry-run changes
+# nothing, and a heartbeat written by merely loading the library would break
+# that promise from underneath it.
+session_touch() {
+  local s d; s=$(reeve_session); [ -n "$s" ] || return 0
+  # Only ever inside a home that already exists. Creating one here would make
+  # `reeve-doctor` stop saying "run install.sh" on a machine that never has.
+  [ -d "$REEVE_HOME_D/state" ] || return 0
+  d=$(session_dir "$s"); mkdir -p "$d" 2>/dev/null || return 0
+  printf '%s\n' "$(date +%s)" > "$d/seen.$$" 2>/dev/null || return 0
+  mv -f "$d/seen.$$" "$d/seen" 2>/dev/null || rm -f "$d/seen.$$"
+  # Saying "still here" is also the moment to clear out those who are not.
+  sessions_prune_maybe
+}
+
+# Three answers, not two, and the third is the one that matters.
+#
+#   alive    refreshed inside the window, so its reeve is still there
+#   dead     it heartbeat once and stopped, so its reeve is provably gone
+#   unknown  it never heartbeat at all
+#
+# `dead` is a proof and `unknown` is an absence, and only a proof may authorise
+# tearing somebody's errand down. Collapsing the two would make every session
+# that has not yet watched anything look gone, and its live errands would be
+# reaped out from under it. So an unknown session fails closed: never reaped,
+# reported instead, which is the same rule reeve-context follows for a figure
+# it cannot measure.
+#
+# Deliberately not a pid check. A pid is reused, and an unrelated process of
+# this user inheriting that number would read as alive forever.
+# Every claude session on this machine writes a record here, not only reeve
+# ones, because the statusline gauge that feeds it renders for all of them. Left
+# alone that grows without bound: one directory per session, forever.
+#
+# Two rules decide what may go, and the first is the one that matters.
+#
+# **Never prune a session that still owns a live errand.** `reeve-status
+# --orphans` finds abandoned work by asking whether its OWNER is gone, and only
+# a `dead` answer counts. A session with no record left answers `unknown`, which
+# --orphans excludes on purpose, so pruning one would not tidy its errands away:
+# it would make them invisible, still in flight, with nothing left to say who
+# was supposed to be watching them.
+#
+# **Keep the recent past.** A record is evidence about a session that has just
+# gone, and reeve-adopt refuses without it. The retention window is far longer
+# than the staleness one for that reason: stale means "not watching now", while
+# prunable means "long enough ago that nobody is going to ask".
+#
+# Set session-retain to 0 to keep every record forever.
+sessions_prune() {
+  local retain d sid owners keep now seen pruned=0
+  retain=$(config_get session-retain 604800)
+  case $retain in ''|*[!0-9]*) return 0 ;; esac
+  [ "$retain" -gt 0 ] || return 0
+  [ -d "$REEVE_HOME_D/state/sessions" ] || return 0
+  now=${REEVE_NOW:-$(date +%s)}
+
+  # Owners of every errand still in flight, read once rather than per session.
+  owners=$(ls "$REEVE_HOME_D/state"/*.meta 2>/dev/null | while read -r f; do
+    i=$(basename "$f" .meta)
+    [ -z "$(meta_get "$i" tornDown '')" ] || continue
+    meta_get "$i" session ''
+  done)
+
+  keep=$(reeve_session)
+  for d in "$REEVE_HOME_D"/state/sessions/*; do
+    [ -d "$d" ] || continue
+    sid=$(basename "$d")
+    # Never this session, whatever its record looks like.
+    [ "$sid" = "$keep" ] && continue
+    lines_has "$sid" "$owners" && continue
+    # An unreadable or absent mark falls back to the directory's own age, so a
+    # record that was created and never written is not immortal.
+    seen=''
+    [ -f "$d/seen" ] && seen=$(tr -dc '0-9' < "$d/seen" 2>/dev/null)
+    [ -n "$seen" ] || seen=$(stat -f %m "$d" 2>/dev/null || stat -c %Y "$d" 2>/dev/null || echo "$now")
+    [ $(( now - seen )) -gt "$retain" ] || continue
+    rm -rf "$d" 2>/dev/null && pruned=$((pruned + 1))
+  done
+  printf '%s\n' "$pruned"
+}
+
+# Pruning is bookkeeping, so it happens on its own rather than being something
+# to remember. Rate limited hard: the scan is cheap but it runs behind every
+# reeve-* call, and once an hour is plenty for a directory that grows by one
+# entry per session.
+sessions_prune_maybe() {
+  local mark age now
+  mark="$REEVE_HOME_D/state/sessions/.pruned"
+  [ -d "$REEVE_HOME_D/state/sessions" ] || return 0
+  now=${REEVE_NOW:-$(date +%s)}
+  if [ -f "$mark" ]; then
+    age=$(tr -dc '0-9' < "$mark" 2>/dev/null)
+    case $age in ''|*[!0-9]*) age=0 ;; esac
+    [ $(( now - age )) -ge "${REEVE_PRUNE_EVERY:-3600}" ] || return 0
+  fi
+  printf '%s\n' "$now" > "$mark" 2>/dev/null || return 0
+  sessions_prune >/dev/null
+}
+
+session_state() { # session_state <sid> -> alive | dead | unknown
+  local s=$1 f now seen
+  [ -n "$s" ] || { printf 'unknown\n'; return; }
+  f=$(session_dir "$s")/seen
+  [ -f "$f" ] || { printf 'unknown\n'; return; }
+  seen=$(tr -dc '0-9' < "$f" 2>/dev/null)
+  [ -n "$seen" ] || { printf 'unknown\n'; return; }
+  now=${REEVE_NOW:-$(date +%s)}
+  if [ $(( now - seen )) -le "$(config_get session-stale 900)" ]
+    then printf 'alive\n'
+    else printf 'dead\n'
+  fi
+}
 # --- output -----------------------------------------------------------------
 # Everything a script prints is read by the reeve, so keep it one fact per line.
 
@@ -411,6 +564,31 @@ holding_names() {
   sed -n 's/^[[:space:]]*-[[:space:]]*holding:[[:space:]]*\([^ |]*\).*/\1/p' "$f"
 }
 
+# Every holding registered under one manor. A manor is one project that may span
+# several repositories, and the registry has carried a manor: field per holding
+# from the start, so this reads a grouping that is already recorded rather than
+# inventing one.
+#
+# What it is for: a hand can reach its own worktree and one granted directory,
+# and nothing else. A scout sent to find out why the web app mishandles a
+# response from the API cannot open the API repository at all, and because it
+# stalls inside a tool call it never reports `blocked:` either. Its last line
+# stays `working:` and the watch reads it as healthy.
+manor_holdings() { # manor_holdings <manor>
+  local f m=$1; f=$(manors_file); [ -f "$f" ] || return 0
+  [ -n "$m" ] || return 0
+  # Field order in a holding line is fixed, so the manor is matched as a whole
+  # field between its delimiters. Matching it loosely would make manor `web`
+  # collect every holding of manor `web-admin`.
+  #
+  # The name is escaped first. It comes straight from `--manor` on
+  # reeve-survey --register, so it is liege-supplied text and not a pattern: an
+  # unescaped `/` closes the s/// command and sed fails, silently here because
+  # the caller drops stderr, so the hand simply gets no siblings at all.
+  local esc; esc=$(printf '%s' "$m" | sed 's/[][\\.*^$/&]/\\&/g')
+  sed -n "s/^[[:space:]]*-[[:space:]]*holding:[[:space:]]*\([^ |]*\)[[:space:]]*|[[:space:]]*manor:[[:space:]]*$esc[[:space:]]*|.*/\1/p" "$f"
+}
+
 resolve_holding_path() {
   # Accept a registered holding name, an absolute path, or a path relative to
   # the current directory. Always returns a real git toplevel, or fails loudly:
@@ -455,7 +633,7 @@ lock_release() { [ -n "${1:-}" ] && rm -rf "$1"; }
 
 home_ensure() {
   local h=$REEVE_HOME_D
-  mkdir -p "$h/errands" "$h/state" "$h/config" "$h/manors"
+  mkdir -p "$h/errands" "$h/state" "$h/state/sessions" "$h/config" "$h/manors"
   [ -f "$h/archive.md" ] || printf '%s\n\n%s\n' "# Archive" \
     "Retired knowledge. Append only, never loaded into context, never deleted." > "$h/archive.md"
   printf '%s\n' "$h"

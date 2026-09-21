@@ -8,6 +8,10 @@
 # reports them separately.
 
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/reeve-lib.sh"
+
+# This session is doing something, so it is demonstrably still here. What the
+# caretaker reads to tell a reeve that is gone from one that is merely quiet.
+session_touch
 BIN=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
 case ${1:-} in -h|--help) print_help "$0"; exit 0 ;; esac
@@ -25,8 +29,60 @@ else
   printf '  home git    no. Your learned memory has no history and no backup.\n'; WARN=$((WARN+1))
 fi
 
+# --- sessions ----------------------------------------------------------------
+# Several reeves share one home, and each watches only what it briefed. Running
+# more than one is only safe if you can see that you are, so this says who this
+# session is, who else is here, and what has been left behind by a session that
+# is gone.
+hdr "sessions"
+me=$(reeve_session)
+if [ -n "$me" ]; then
+  printf '  this one   %s\n' "$me"
+else
+  printf '  this one   no id. This harness exports none, so errands briefed here are\n'
+  printf '             unowned: visible to every reeve on this machine, and cleaned up\n'
+  printf '             by whichever one is watching. Set REEVE_SESSION to separate them.\n'
+  WARN=$((WARN+1))
+fi
+if [ -d "$REEVE_HOME_D/state/sessions" ]; then
+  live=0 others=''
+  for d in "$REEVE_HOME_D"/state/sessions/*; do
+    [ -d "$d" ] || continue
+    sid=$(basename "$d")
+    [ "$(session_state "$sid")" = alive ] || continue
+    live=$((live + 1))
+    [ "$sid" = "$me" ] || others="$others $sid"
+  done
+  printf '  live       %s session(s) sharing this home\n' "$live"
+  kept=$(ls -d "$REEVE_HOME_D"/state/sessions/*/ 2>/dev/null | wc -l | tr -d ' ')
+  retain=$(config_get session-retain 604800)
+  if [ "${retain:-0}" = 0 ]; then
+    printf '  records    %s kept, pruning disabled (config/session-retain is 0)\n' "$kept"
+  else
+    printf '  records    %s kept, pruned after %s day(s) idle and unowned\n' "$kept" "$(( retain / 86400 ))"
+  fi
+  [ -n "$others" ] && printf '  alongside %s\n' "$others"
+fi
+# Counted here rather than read out of reeve-status's output: that output is
+# prose for a human, and its "no orphaned errands" line starts with a letter
+# like every table row does, so counting rows by their shape counted the
+# reassurance as an orphan.
+orph=0
+for f in "$REEVE_HOME_D"/state/*.meta; do
+  [ -f "$f" ] || continue
+  i=$(basename "$f" .meta)
+  [ -z "$(meta_get "$i" tornDown '')" ] || continue
+  own=$(meta_get "$i" session '')
+  [ -n "$own" ] || continue
+  [ "$(session_state "$own")" = dead ] && orph=$((orph + 1))
+done
+if [ "$orph" -gt 0 ]; then
+  printf '  orphaned   %s errand(s) whose owner is gone. reeve-status --orphans, then reeve-adopt <id>\n' "$orph"
+  WARN=$((WARN+1))
+fi
+
 hdr "tools"
-for t in git herdr tmux jq gh; do
+for t in git herdr tmux jq gh python3; do
   if command -v "$t" >/dev/null 2>&1; then
     case $t in
       git)   v=$(git --version | awk '{print $3}') ;;
@@ -35,9 +91,9 @@ for t in git herdr tmux jq gh; do
       jq)    v=$(jq --version 2>/dev/null) ;;
       *)     v=$("$t" --version 2>/dev/null | head -1 | awk '{print $NF}') ;;
     esac
-    printf '  %-6s ok    %s\n' "$t" "$v"
+    printf '  %-7s ok    %s\n' "$t" "$v"
   else
-    printf '  %-6s MISSING\n' "$t"; WARN=$((WARN+1))
+    printf '  %-7s MISSING\n' "$t"; WARN=$((WARN+1))
   fi
 done
 

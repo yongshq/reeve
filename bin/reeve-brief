@@ -22,6 +22,10 @@
 
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/reeve-lib.sh"
 
+# This session is doing something, so it is demonstrably still here. What the
+# caretaker reads to tell a reeve that is gone from one that is merely quiet.
+session_touch
+
 case ${1:-} in -h|--help) print_help "$0"; exit 0 ;; esac
 id=${1:-}; holding=${2:-}
 shift 2 2>/dev/null || :
@@ -111,8 +115,20 @@ lines_has "$office" "$(office_names)" \
 office_file="$REEVE_ROOT_D/offices/$office.md"
 
 home_ensure >/dev/null
+
+# Held across the existence check and the meta_write at the bottom, because an
+# id is the only key an errand has and the namespace is the whole machine. Two
+# reeves briefing the same obvious id, `auth-fix` say, both passed the check
+# below and then both wrote state/auth-fix.meta: second write wins, and the
+# first errand's repo, branch and worktree are gone from the record while its
+# hand is still out there working. Checking and claiming have to be one step,
+# and this is what makes them one.
+ID_LOCK=$(lock_acquire ids) || exit 1
+trap 'lock_release "$ID_LOCK"' EXIT
+
 brief=$(brief_file "$id")
 [ -e "$brief" ] && die "brief already exists at $brief. a relaunch reuses it; delete the errand deliberately if you really mean to start over"
+[ -e "$(meta_file "$id")" ] && die "errand '$id' already has a record at $(meta_file "$id"). another session may have just taken that id; pick another"
 
 repo=$(resolve_holding_path "$holding") \
   || die "cannot resolve holding '$holding' to a git repository. register it with reeve-survey, or give an absolute path"
@@ -466,6 +482,7 @@ meta_write "$id" \
   "base=$base" \
   "writes=$writes" \
   "harness=$harness" \
+  "session=$(reeve_session)" \
   "created=$(today)" \
   ${ticket_meta+"${ticket_meta[@]}"}
 
