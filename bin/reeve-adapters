@@ -7,6 +7,11 @@
 # vendor neutral. An adapter is a thin wrapper that makes one harness discover
 # and load it. Generating them means an adapter cannot drift from its method,
 # and adding a harness is a row here rather than eight hand written files.
+#
+# The claude adapter is written to `skills/<name>/SKILL.md`, which is the one
+# path that serves both ways of finding it: this repo's own .claude/skills links
+# to the skill directory, and a plugin manifest at the repository root discovers
+# exactly that layout. One generated file, so the two can never drift apart.
 
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/reeve-lib.sh"
 
@@ -16,6 +21,7 @@ check=no
 
 # name|user-invocable|one-line description
 SKILLS="
+start|true|Become the reeve in this session: load the contract, take up the fleet. Run this first, from any directory.
 court|true|Recap where the household stands, then settle whatever is waiting on the liege, one question at a time.
 muster|true|Full accounting of every errand in flight, blocked ones first.
 errand|true|Send work out to a hand. Load before dispatching anything.
@@ -34,7 +40,7 @@ printf '%s\n' "$SKILLS" | while IFS='|' read -r name inv desc; do
   [ -n "$name" ] || continue
   method="$REEVE_ROOT_D/skills/$name/$name.md"
   [ -f "$method" ] || { warn "no method file for '$name' at $method"; continue; }
-  out="$REEVE_ROOT_D/skills/$name/adapters/claude/SKILL.md"
+  out="$REEVE_ROOT_D/skills/$name/SKILL.md"
   mkdir -p "$(dirname "$out")"
   tmp="$out.$$"
   {
@@ -52,13 +58,12 @@ printf '%s\n' "$SKILLS" | while IFS='|' read -r name inv desc; do
     else rm -f "$tmp"; printf 'DRIFT: %s is stale or missing\n' "$out"; fi
   else
     mv "$tmp" "$out"
-    # Project scoped discovery. These skills mean nothing outside a reeve
-    # session, so they live in this repo's own .claude/skills rather than in
-    # ~/.claude/skills where they would appear in every unrelated session on
-    # the machine. The link is relative and committed, so it travels with a
-    # clone and needs no install step.
+    # Project scoped discovery, for a session started in this clone. The link
+    # is relative and committed, so it travels with a clone and needs no install
+    # step. Installing the plugin is the other way in, for a session started
+    # anywhere else, and both land on this same SKILL.md.
     mkdir -p "$REEVE_ROOT_D/.claude/skills"
-    ln -sfn "../../skills/$name/adapters/claude" "$REEVE_ROOT_D/.claude/skills/$name"
+    ln -sfn "../../skills/$name" "$REEVE_ROOT_D/.claude/skills/$name"
     printf 'generated %s\n' "${out#"$REEVE_ROOT_D"/}"
   fi
 done

@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# Print the reeve's contract, so a session anywhere on the machine can load it.
+#
+# Usage: reeve-contract
+#
+# A clone is the whole install, and a session started INSIDE that clone picks up
+# the contract on its own: CLAUDE.md there is one line pointing at AGENTS.md and
+# the harness loads it. A session started anywhere else never sees it, which is
+# the whole reason a reeve used to mean "a session in that one directory".
+#
+# The plugin closes that, but not by loading the contract everywhere. A plugin
+# cannot contribute a persistent instruction file, and the mechanism that comes
+# closest, a SessionStart hook, fires in EVERY session on the machine. That is
+# exactly what install.sh refuses: reeve vocabulary in every unrelated project
+# the liege opens. So the contract stays opt-in and this is the opt in. The
+# `start` skill runs it, and a directory becomes a reeve only when asked.
+#
+# A script rather than a path written into a skill body. A plugin puts its bin/
+# on PATH, so a command needs to know nothing about where the plugin was
+# installed, which is the part that actually varies: a clone loaded with
+# --plugin-dir and one installed from a marketplace do not live in the same
+# place. Substituting a root into the markdown would work and would have to be
+# right about that; not needing the root cannot be wrong about it.
+
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/reeve-lib.sh"
+
+case ${1:-} in -h|--help) print_help "$0"; exit 0 ;; esac
+
+f="$REEVE_ROOT_D/AGENTS.md"
+[ -f "$f" ] || die "no contract at $f. This is not a reeve clone, or it is incomplete"
+cat "$f"

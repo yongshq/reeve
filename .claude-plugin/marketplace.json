@@ -1,0 +1,14 @@
+{
+  "name": "reeve",
+  "owner": {
+    "name": "yongshq"
+  },
+  "plugins": [
+    {
+      "name": "reeve",
+      "source": "./",
+      "description": "Talk to one agent. It manages the rest."
+    }
+  ],
+  "description": "The reeve agent distro: one agent that manages a household of worker agents."
+}

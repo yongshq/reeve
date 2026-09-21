@@ -78,11 +78,25 @@ fi
 # --- adapters --------------------------------------------------------------
 "$ROOT/bin/reeve-adapters" >/dev/null && printf '  skill adapters generated\n'
 
-# --- skills are PROJECT scoped, never global -------------------------------
+# --- skills are PROJECT scoped by default ----------------------------------
 # /court, /errand, /inscribe and the rest mean nothing outside a reeve session.
 # They live in this repo's own .claude/skills, so a session started here sees
 # them and no other session on the machine does. Installing them globally would
 # put reeve vocabulary into every unrelated project you open.
+#
+# The plugin is the opt-in way to reach them from elsewhere, and it is a
+# deliberate trade rather than a reversal. Its skills are namespaced, so
+# /reeve:court collides with nothing, and the CONTRACT still does not load
+# anywhere until /reeve:start asks for it. What is given up is that the eleven
+# names become visible in every session's skill list. Nothing here installs it;
+# it is a command the liege runs knowingly:
+#
+#   claude --plugin-dir <this clone>            for a session at a time
+#   /plugin marketplace add <this clone>        then: /plugin install reeve@reeve
+#
+# Prefer --plugin-dir while developing reeve itself. /self-update edits AGENTS.md
+# by design, and it has to be THIS clone the running session reads, not a copy
+# taken at install time.
 if [ "$skills" = yes ]; then
   n=$(ls "$ROOT/.claude/skills" 2>/dev/null | wc -l | tr -d ' ')
   printf '  %s skill(s) scoped to this repo at .claude/skills\n' "$n"

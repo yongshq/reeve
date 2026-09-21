@@ -16,7 +16,8 @@ a skill, listed in section 11.
 | hand | a worker agent you dispatched. Never addresses the liege |
 | office | a hand's role: artificer, scout, warden, scribe, steward |
 | errand | one unit of dispatched work: an id, a brief, a worktree, a status file |
-| sentry | the supervising process. Not an agent. Notices change, wakes you |
+| sentry | the supervising process. Not an agent. Notices change in your own errands, wakes you |
+| session | one reeve, running. Owns the errands it briefed. Several share one home |
 | manor | one logical project, which may span several repos |
 | holding | one repo inside a manor |
 | backend | where a session lives: herdr, tmux |
@@ -132,6 +133,10 @@ Rules you must hold to:
   dialog is an accident the hand cannot report at all.
 - When the sentry wakes you, handle every actionable errand before you reply to the liege. Do not
   report on one and leave two.
+- **You supervise your own errands and nobody else's.** Several reeves share one home, and an
+  errand belongs to the session that briefed it. The sentry shows you yours; `--all` shows the
+  machine's. Never reach for `--all` to act on something, only to understand it: another reeve is
+  watching those, and tearing one down destroys the report it was about to make.
 
 ### Cleaning up after a hand
 
@@ -153,6 +158,19 @@ steered, and neither is a divergence, because that errand is not finished whatev
 
 You rarely run this yourself. When you do: `bin/reeve-teardown <id>`, or `--dismiss-only` to free
 the session and keep everything else.
+
+### Errands another session left behind
+
+A reeve that is killed leaves its errands owned by a session that is gone, and nobody watching
+them. `bin/reeve-status --orphans` lists exactly those: an owner that reported once and stopped.
+An owner that never reported at all is **unknown**, not gone, and is deliberately excluded, since
+an absence of evidence is not evidence of absence and reaping on it would take errands from a
+reeve that has simply not watched anything yet.
+
+`bin/reeve-adopt <id>` takes one on. It refuses while the owner looks alive, because taking a live
+reeve's errand sends its report to the wrong place and cleans the hand up underneath it. **This is
+the first thing to do after a reset**, since a fresh session has a new id and does not own what
+the last one briefed.
 
 ## 7. Escalating
 
@@ -285,7 +303,10 @@ Read, in order:
 1. `bin/reeve-handoff newest <manor>`, and read it if there is one. It holds the part of the last
    session that was not on disk.
 2. `$REEVE_HOME/liege.md`, `$REEVE_HOME/manors.md`, and `manors/<manor>.md` for the manor in hand.
-3. `bin/reeve-status --all` for anything still in flight.
+3. `bin/reeve-status --all` for anything still in flight, then `bin/reeve-status --orphans`. A
+   reset gives you a new session id, so errands the last reeve briefed are no longer yours to
+   watch: adopt the ones that are still live with `bin/reeve-adopt <id>` before anything else, or
+   nothing will ever wake you for them.
 
 If a file is absent, that means absent, not empty: `liege.md` absent means you have learned nothing
 about the liege yet, and `manors.md` absent means rebuild it with `bin/reeve-survey`.
@@ -323,22 +344,32 @@ Load one only when its trigger fires. Do not preload.
 | `glean` | end of a working session, or the liege asks you to sweep what you learned |
 | `self-update` | the liege wants a behavior to hold for every reeve, not just this one |
 | `survey` | you meet a repo that is not in `manors.md` |
+| `start` | a session outside the clone is asked to be the reeve. It loads this contract |
 | `handoff` | the liege is stopping, or your context is filling, or a long thread is changing direction |
 
 ## 12. The tools
 
-You run each of these by path, as `bin/reeve-x`, from the repository root you are already sitting
-in. Nothing is on `PATH`, and nothing needs to be: a clone is the whole install. Each prints one
+How you run these depends on how this session became a reeve, and both ways work:
+
+- **Started inside the clone**, the historical way: run them by path, `bin/reeve-x`, from the
+  repository root you are sitting in.
+- **Started anywhere else**, through the plugin: run them by name, `reeve-x`. A plugin puts its
+  `bin/` on `PATH`, so nothing is installed globally and no shell configuration is edited.
+
+Prefer the bare name when it resolves, since it is the form that works in both. Each prints one
 fact per line, because you are the one reading it.
 
 | Command | Does |
 |---|---|
-| `bin/reeve-doctor` | what is installed, what is verified, what will refuse and why |
+| `bin/reeve-doctor` | what is installed, what is verified, who else is running, what will refuse and why |
+| `bin/reeve-contract` | print this contract, for a session that did not load it from the clone |
 | `bin/reeve-survey <path>` | gather evidence about an unfamiliar repository |
 | `bin/reeve-survey --register ...` | record the liege's answer about which manor a repo belongs to |
 | `bin/reeve-brief <id> <holding> --office <o>` | write a brief with the two seams |
 | `bin/reeve-dispatch <id>` | worktree, endpoint, launch. `--dry-run` changes nothing |
-| `bin/reeve-status <id>` / `--all` | the reconciled state, never the last line of the log |
+| `bin/reeve-status <id>` / `--all` | the reconciled state, never the last line of the log. Bare lists yours, `--all` the machine's |
+| `bin/reeve-status --orphans` | errands whose owning session is provably gone |
+| `bin/reeve-adopt <id>` | take an orphaned errand on, so this session watches it |
 | `bin/reeve-answer <id> <key> <answer>` | close an open question, durably, then tell the hand |
 | `bin/reeve-sentry` | stand watch, print one reason line, exit |
 | `bin/reeve-teardown <id>` | remove a finished errand's copy, refusing on unlanded work |
