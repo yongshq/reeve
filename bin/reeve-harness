@@ -90,11 +90,11 @@ harness_check() {
 }
 
 harness_render() {
-  local n=$1 brief=$2 model=${3:-} effort=${4:-} settings_path=${5:-}
+  local n=$1 brief=$2 model=${3:-} effort=${4:-} settings_path=${5:-} extra=${6:-}
   [ -n "$brief" ] || die "render needs an absolute brief path"
   case $brief in /*) ;; *) die "brief path must be absolute, got '$brief'" ;; esac
 
-  local bin launch mode pflag perm mflag eflag line prompt dirs sep settings mcp
+  local bin launch mode pflag perm mflag eflag line prompt dirs dflag d sep settings mcp
   bin=$(h_get "$n" bin "$n")
   launch=$(h_get "$n" launch '')
   [ -n "$launch" ] || die "harness '$n' declares no launch template"
@@ -127,8 +127,22 @@ harness_render() {
   # dead on the first read. Verified: claude on acceptEdits refuses a read
   # outside the working directory, so without this grant every hand hangs on a
   # permission prompt at its very first action.
-  dirs=$(h_get "$n" dirs_flag '')
-  [ -n "$dirs" ] && dirs=$(printf '%s' "$dirs" | sed "s|{dir}|$(dirname "$brief")|g")
+  #
+  # Repeatable, because a manor is one project that may span several
+  # repositories and a hand investigating one of them routinely has to read
+  # another. The template is rendered once per directory and the results joined,
+  # so a harness declares the shape of ONE grant and never has to know how many
+  # there will be. claude's own flag is variadic, which is why the `--`
+  # separator in the launch template is what keeps the positional prompt from
+  # being swallowed by the list.
+  dirs=''
+  dflag=$(h_get "$n" dirs_flag '')
+  if [ -n "$dflag" ]; then
+    for d in "$(dirname "$brief")" $extra; do
+      [ -n "$d" ] || continue
+      dirs="$dirs${dirs:+ }$(printf '%s' "$dflag" | sed "s|{dir}|$d|g")"
+    done
+  fi
 
   # Per-errand permissions, rendered by reeve-dispatch from the office's own
   # settings file. A harness that declares settings_flag but gets no path is a
@@ -199,7 +213,7 @@ EOS
 
 # --- cli --------------------------------------------------------------------
 cmd=${1:-}; shift 2>/dev/null || :
-sel='' office='' model='' effort='' settings_path=''
+sel='' office='' model='' effort='' settings_path='' extra_dirs=''
 args=()
 while [ $# -gt 0 ]; do
   case $1 in
@@ -208,6 +222,9 @@ while [ $# -gt 0 ]; do
     --model)   model=${2:-}; shift 2 ;;
     --effort)  effort=${2:-}; shift 2 ;;
     --settings) settings_path=${2:-}; shift 2 ;;
+    # Repeatable. One more directory the hand may reach, beyond its own copy and
+    # its errand directory.
+    --add-dir) extra_dirs="$extra_dirs${extra_dirs:+ }${2:-}"; shift 2 ;;
     *) args+=("$1"); shift ;;
   esac
 done
@@ -222,7 +239,7 @@ case $cmd in
   check)   n=${1:-$(harness_resolve "$sel" "$office")}; harness_check "$n" ;;
   render)
     n=${1:-}; [ -n "$n" ] || die "render needs a harness name"
-    harness_render "$n" "${2:-}" "$model" "$effort" "$settings_path" ;;
+    harness_render "$n" "${2:-}" "$model" "$effort" "$settings_path" "$extra_dirs" ;;
   list)
     printf '%-10s %-10s %-9s %s\n' HARNESS INSTALLED VERIFIED BIN
     for n in $(harness_known); do

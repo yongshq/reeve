@@ -193,6 +193,36 @@ else
   [ -n "$target" ] || die "backend '$backend' returned an empty target"
 fi
 
+# A sibling is a REFERENCE, so the grant is paired with a deny that keeps it one.
+# `--add-dir` grants read and write together and there is no read-only form, so
+# the write half is taken back by a path-scoped deny written into this errand's
+# own settings file below. Verified against the installed harness: deny is
+# evaluated before allow in every scope and overrides `defaultMode: acceptEdits`,
+# and `Edit(path)` is one of only two rules the harness actually consults, so
+# this is enforcement rather than an office-text request.
+#
+# Registered checkouts, never worktrees: a sibling is somewhere to read, not
+# somewhere this errand has any business working.
+sib_args=()
+manor=$(meta_get "$id" manor '')
+for sib in $(manor_holdings "$manor"); do
+  [ "$sib" = "$holding" ] && continue
+  sib_path=$(holding_field "$sib" path '') || continue
+  [ -n "$sib_path" ] && [ -d "$sib_path" ] || continue
+  # The launch line is one string the backend word-splits, so a path holding
+  # whitespace cannot survive the trip and would arrive as two broken
+  # arguments. Said out loud and skipped rather than rendered wrong: a hand
+  # would otherwise start believing it had a grant it does not have.
+  case $sib_path in
+    *[[:space:]]*)
+      warn "holding '$sib' sits at a path containing whitespace, so it cannot be granted: $sib_path"
+      continue ;;
+  esac
+  sib_args+=(--add-dir "$sib_path")
+done
+[ ${#sib_args[@]} -gt 0 ] \
+  && info "granting read access to $(( ${#sib_args[@]} / 2 )) other holding(s) in manor '$manor'"
+
 # Per-errand permissions, copied from the office's own declaration into the
 # errand directory. Copied rather than referenced so that changing an office
 # later cannot retroactively alter what an errand already in flight may do.
@@ -210,10 +240,80 @@ if [ -f "$office_settings" ]; then
 else
   warn "office '$office' declares no settings.json, the hand will run on harness defaults and may stall on a permission prompt"
   errand_settings=''
+  # The sibling grant and the deny that bounds it are one thing, so they travel
+  # together or not at all. With nowhere to write the deny, `--add-dir` would
+  # hand out read AND write into another holding's real checkout, which is hard
+  # rule 2 broken by an office that merely forgot a file.
+  if [ ${#sib_args[@]} -gt 0 ]; then
+    warn "  so the manor grant is withheld: there is nowhere to write the deny that keeps it read-only"
+    sib_args=()
+  fi
 fi
+
+# Take the write half of every sibling grant back, in this errand's own copy of
+# the office settings. Written here rather than declared in the office, because
+# the paths are not known until an errand names its manor.
+#
+# `//abs/path` with TWO leading slashes is the absolute form. One slash anchors
+# the pattern at the settings file's own directory instead, which would silently
+# match nothing and leave the grant unguarded. The rule is `Edit(...)`: the
+# harness consults `Edit(path)` and `Read(path)` and no others, and accepts a
+# `Write(path)` or `Glob(path)` rule while never once checking it.
+#
+# Bash is a separate matter and is not narrowed by this. It never was: a hand
+# has always been able to write anywhere a shell can reach, which is why
+# offices/README.md says a hand that writes where it should not is caught by
+# teardown rather than prevented. This closes the tool-shaped route that the
+# grant itself opens, and claims nothing beyond that.
+# Checked BEFORE anything is opened. This used to run after create_endpoint, so
+# a machine without python3 got a session nobody could reach: the die fired
+# before meta_set recorded the target, and an endpoint with no recorded target
+# cannot be found or killed by anything in the household.
+if [ ${#sib_args[@]} -gt 0 ] && [ -n "$errand_settings" ]; then
+  command -v python3 >/dev/null 2>&1 \
+    || die "the manor grant needs python3 to write its deny rules, and it is not on PATH. install it, or unregister the sibling holdings in manors.md"
+fi
+
+if [ -n "$errand_settings" ] && [ ${#sib_args[@]} -gt 0 ] && [ "$dry" = no ]; then
+  sib_only=()
+  for a in ${sib_args+"${sib_args[@]}"}; do
+    [ "$a" = "--add-dir" ] || sib_only+=("$a")
+  done
+  python3 - "$errand_settings" ${sib_only+"${sib_only[@]}"} <<'DENY' \
+    || die "could not write the sibling deny rules into $errand_settings"
+import json, sys, os
+path, dirs = sys.argv[1], sys.argv[2:]
+with open(path) as fh:
+    cfg = json.load(fh)
+perms = cfg.setdefault("permissions", {})
+deny = perms.setdefault("deny", [])
+for d in dirs:
+    # Two leading slashes is the absolute form. One would anchor the pattern at
+    # this settings file's own directory and match nothing.
+    rule = "Edit(//%s/**)" % os.path.abspath(d).lstrip("/")
+    if rule not in deny:
+        deny.append(rule)
+tmp = path + ".new"
+with open(tmp, "w") as fh:
+    json.dump(cfg, fh, indent=2)
+    fh.write("\n")
+os.replace(tmp, path)
+DENY
+fi
+
+# The rest of the manor, so a hand can read the repositories its own question
+# actually spans. A manor is one project that may span several repositories, and
+# until now a hand could reach its own copy and its errand directory and nothing
+# else. A scout asked why the web app mishandles a response from the API could
+# not open the API repository at all, and because it stalls INSIDE a tool call
+# it never appends `blocked:`: its last line stays `working:` and the watch
+# reads it as a healthy hand. That is the same silent class of stall the MCP
+# flags exist to close, arriving through a different door.
+#
 
 cmdline=$("$BIN/reeve-harness" render "$harness" "$brief" \
             ${errand_settings:+--settings "$errand_settings"} \
+            ${sib_args+"${sib_args[@]}"} \
             ${model:+--model "$model"} ${effort:+--effort "$effort"}) \
   || die "could not render a launch line for harness '$harness'"
 

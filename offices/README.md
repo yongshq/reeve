@@ -70,11 +70,37 @@ configuration, and `--no-chrome` drops Claude in Chrome, which is a built-in int
 supposed to produce. Three things narrow it, and none of them is the tool list:
 
 1. the hand's working directory is its own git worktree
-2. exactly one extra directory is granted, its errand directory
+2. the directories granted on top of it: its errand directory, and every other holding in its
+   manor
 3. `bin/reeve-teardown` refuses when a read-only errand's copy is dirty or its HEAD has moved
 
 So a scout that writes where it should not is caught, not prevented. If you need it prevented, add
 a `deny` entry rather than trusting the office text.
+
+### The manor grant, and the deny that bounds it
+
+A manor may span several repositories and a hand routinely has to READ one to understand another.
+Without that a hand stalls, and stalls in the worst way available: the refusal arrives inside a
+tool call, so it never appends `blocked:`, its last line stays `working:`, and the sentry reads it
+as a healthy hand thinking.
+
+`--add-dir` grants read and write together and the harness offers no read-only form, so the write
+half is taken back per errand. `bin/reeve-dispatch` writes an `Edit(//<path>/**)` deny into the
+errand's own copy of this office's settings, for each sibling holding it granted. Three details
+are load bearing, all three measured against the installed harness rather than assumed:
+
+- **Two leading slashes** is the absolute form. One slash anchors the pattern at the settings
+  file's own directory, so the rule would match nothing and the grant would be a plain read-write
+  handout.
+- **`Edit(...)`, never `Write(...)` or `Glob(...)`.** Only `Edit(path)` and `Read(path)` rules are
+  consulted. The others are accepted, never checked, and warned about at startup: a rule that
+  looks like protection and is none.
+- **`deny` beats `allow` and `defaultMode`**, in every scope, which is what makes this enforcement
+  rather than a preference.
+
+Bash is untouched by any of it, and always was. A hand has been able to write wherever a shell can
+reach since the first errand, which is exactly why point 3 above exists. This closes the
+tool-shaped route the grant itself opens, and claims nothing more.
 
 ## Folder trust
 
