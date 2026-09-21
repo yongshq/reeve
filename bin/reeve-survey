@@ -36,6 +36,11 @@ if [ "${1:-}" = "--register" ]; then
   [ -d "$path" ] || die "path does not exist: $path"
   path=$(cd "$path" && pwd)
   home_ensure >/dev/null
+  # manors.md is rewritten whole below, and several reeves share one home. Two
+  # registrations at once each read the file, each wrote its own copy back, and
+  # the second landing erased the first holding entirely.
+  MEM_LOCK=$(lock_acquire memory) || exit 1
+  trap 'lock_release "$MEM_LOCK"' EXIT
   f=$(manors_file)
   [ -f "$f" ] || printf '# Manors\n\nProjects the household knows. One block per manor, one line per repo.\nProposed by `bin/reeve-survey`, confirmed by the liege.\n' > "$f"
   if holding_line "$holding" >/dev/null 2>&1; then

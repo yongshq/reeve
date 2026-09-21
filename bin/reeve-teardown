@@ -126,6 +126,18 @@ done
 require_id "$id"
 [ -f "$(meta_file "$id")" ] || die "no errand '$id'"
 
+# One errand, one teardown at a time. A foreground watch and a caretaker can
+# both decide the same hand is finished in the same instant, and two concurrent
+# `git worktree remove` / `git branch -d` runs against one repository leave the
+# loser reading a git error that looks exactly like the landed-work guard
+# refusing. A refusal here has to mean what it says, so the two are serialised
+# and the second finds the work already done.
+# Exit 4, distinct from the 1 a refusal uses: not taking the lock decides
+# nothing about this errand, and a caller that cannot tell the two apart records
+# a decision that was never made.
+ERRAND_LOCK=$(lock_acquire "errand-$id" 15) || exit 4
+trap 'lock_release "$ERRAND_LOCK"' EXIT
+
 run() { if [ "$dry" = yes ]; then printf '  would run: %s\n' "$*"; else "$@"; fi; }
 dismiss=no; dismissed=no
 refuse() { printf 'reeve: REFUSED to tear down %s\n' "$id" >&2; printf '  %s\n' "$@" >&2; exit 1; }

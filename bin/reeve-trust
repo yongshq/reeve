@@ -78,6 +78,12 @@ PY
     ;;
 
   --grant)
+    # ~/.claude.json is read, edited and written back whole. Two grants at once
+    # each start from the same file, and the second to land drops the first
+    # repository's trust silently: the dispatch that depended on it then stalls
+    # at a dialog no permission setting can suppress.
+    TRUST_LOCK=$(lock_acquire trust) || exit 1
+    trap 'lock_release "$TRUST_LOCK"' EXIT
     bak="$CFG.reeve-backup.$(date +%Y%m%d%H%M%S)"
     cp "$CFG" "$bak" || die "could not back up $CFG"
     # Written via a temp file and rename so an interrupted write cannot leave

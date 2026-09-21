@@ -132,6 +132,11 @@ case $cmd in
     ;;
 
   add)
+    # This reads a memory file, edits it and writes the whole thing back. That is
+    # atomic per write and still loses data across two sessions: both start from
+    # the same content, and the second to land drops whatever the first added.
+    MEM_LOCK=$(lock_acquire memory) || exit 1
+    trap 'lock_release "$MEM_LOCK"' EXIT
     fact=${1:-}; [ -n "$fact" ] || die "nothing to add"
     case $tier in a|p|P) ;; *) die "tier must be a (aging), p (perishable) or P (pinned)" ;; esac
     f=$(scope_file "$scope")
@@ -174,6 +179,11 @@ case $cmd in
     ;;
 
   refresh)
+    # This reads a memory file, edits it and writes the whole thing back. That is
+    # atomic per write and still loses data across two sessions: both start from
+    # the same content, and the second to land drops whatever the first added.
+    MEM_LOCK=$(lock_acquire memory) || exit 1
+    trap 'lock_release "$MEM_LOCK"' EXIT
     match=${1:-}; [ -n "$match" ] || die "nothing to match"
     f=$(scope_file "$scope"); [ -f "$f" ] || die "no such memory file: $f"
     grep -qF -- "$match" "$f" || die "no entry matching '$match' in $(basename "$f")"
@@ -194,6 +204,11 @@ case $cmd in
     ;;
 
   strike)
+    # This reads a memory file, edits it and writes the whole thing back. That is
+    # atomic per write and still loses data across two sessions: both start from
+    # the same content, and the second to land drops whatever the first added.
+    MEM_LOCK=$(lock_acquire memory) || exit 1
+    trap 'lock_release "$MEM_LOCK"' EXIT
     match=${1:-}; [ -n "$match" ] || die "nothing to match"
     f=$(scope_file "$scope"); [ -f "$f" ] || die "no such memory file: $f"
     grep -qF -- "$match" "$f" || die "no entry matching '$match' in $(basename "$f")"
