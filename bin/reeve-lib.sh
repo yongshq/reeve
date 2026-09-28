@@ -52,6 +52,131 @@ meta_file()   { printf '%s/state/%s.meta\n' "$REEVE_HOME_D" "$1"; }
 config_file() { printf '%s/config/%s\n' "$REEVE_HOME_D" "$1"; }
 
 
+# --- process markers --------------------------------------------------------
+# Two files in state/, one shape, one line: `<pid> <epoch seconds> <poll>`.
+#
+#   .sentry.lock      a caretaker saying it is the cleaner for this home
+#   .sentry.watch-*   a foreground watch saying a reeve is watching this home
+#
+# Both exist to answer the same question from the other side, "is the process
+# that wrote this still there", so both answer it the same way. A pid alone
+# cannot: a process killed with -9 leaves its pid behind, pids are reused, and
+# an unrelated process of the same user inheriting that number reads as alive
+# under `kill -0` forever.
+#
+# So the writer refreshes its own timestamp every poll and a reader believes a
+# marker only while BOTH hold: the pid is alive, AND it was refreshed recently
+# enough that the process really is still polling. The poll interval travels
+# inside the marker because the reader has no other way to know the writer's.
+# The allowance is three intervals and five seconds: one iteration costs about
+# one interval, whether it spends it in the backend's native wait or in the
+# sleep that replaces it, so three is slack for a loaded machine rather than a
+# guess.
+#
+# These live here rather than in bin/reeve-sentry because the sentry is no
+# longer the only reader. bin/reeve-dispatch asks the same question to find out
+# whether anything at all will report the hand it just sent out, and a dispatch
+# that answered it with its own second copy of the staleness rule would drift
+# from the one the sentry enforces.
+lock_marker()  { printf '%s/state/.sentry.lock\n' "$REEVE_HOME_D"; }
+watch_marker() { printf '%s/state/.sentry.watch-%s\n' "$REEVE_HOME_D" "$1"; }
+
+marker_stamp() { # marker_stamp <file> <poll>   write or refresh, whole, atomic
+  local f=$1 p=${2:-15} tmp="$1.new.$$"
+  printf '%s %s %s\n' "$$" "$(date +%s)" "$p" > "$tmp" 2>/dev/null \
+    || { rm -f "$tmp"; return 1; }
+  mv "$tmp" "$f" 2>/dev/null || { rm -f "$tmp"; return 1; }
+  return 0
+}
+
+# The path is an argument, never `< "$f" 2>/dev/null`: redirections are applied
+# left to right, so the shell reports a missing file itself, on its own stderr,
+# before the redirection that was meant to hide it is in effect. A caretaker
+# that has to be silent cannot afford to say that, and it did.
+marker_read() { cat "$1" 2>/dev/null; }
+
+marker_mine() { case $(marker_read "$1") in "$$ "*) return 0 ;; esac; return 1; }
+
+marker_alive() { # marker_alive <marker contents>
+  local fields=${1:-} pid ts p now
+  set -- $fields
+  pid=${1:-}; ts=${2:-}; p=${3:-}
+  case $pid in ''|*[!0-9]*) return 1 ;; esac
+  case $ts  in ''|*[!0-9]*) return 1 ;; esac
+  case $p   in ''|*[!0-9]*) p=15 ;; esac
+  kill -0 "$pid" 2>/dev/null || return 1
+  now=$(date +%s)
+  [ $(( now - ts )) -le $(( p * 3 + 5 )) ]
+}
+
+# Is a caretaker holding this home right now.
+caretaker_live() { marker_alive "$(marker_read "$(lock_marker)")"; }
+
+# Is ANY session watching this home right now. Used for one question by the
+# sentry: an errand with no recorded owner cannot be judged by its owner's
+# liveness, so the blanket answer is the only safe one for those.
+watch_live() {
+  local f
+  for f in "$REEVE_HOME_D/state"/.sentry.watch-*; do
+    [ -f "$f" ] || continue
+    marker_alive "$(marker_read "$f")" && return 0
+  done
+  return 1
+}
+
+# --- pending wakes ----------------------------------------------------------
+# A reeve is woken by bin/reeve-sentry and by nothing else, so a reeve that
+# dispatches and then sits idle has nothing watching on its behalf at all. What
+# a dispatch leaves running is a caretaker, and a caretaker is silent by
+# contract: it cleans up after a finished hand and tells nobody, because it has
+# no reeve to tell. That is the whole of the missed wake. The one `done:` line
+# the household exists to deliver was seen only by the process that then freed
+# the hand's session and blanked its target, which put the errand out of reach
+# of every watch that might have started afterwards.
+#
+# So a caretaker hands the line over instead of consuming it. One file per
+# OWNING session, because the home is shared and a wake belongs to the reeve
+# that briefed the errand. Appended to by whoever cleans up, drained a line at a
+# time by the owner, and durable, because the whole point is a reeve that is not
+# looking yet.
+#
+# A reeve that resets does not need these: a new session has a new id, and the
+# contract already has it rebuild the entire fleet from the status files at
+# startup, which is the stronger recovery path and the reason nothing here has
+# to survive a change of owner.
+wake_file() { # wake_file <session>
+  printf '%s/state/sessions/%s/wake\n' "$REEVE_HOME_D" "$1"
+}
+
+wake_leave() { # wake_leave <session> <line>   no session, no wake: say nothing
+  local f
+  [ -n "${1:-}" ] || return 1
+  f=$(wake_file "$1")
+  mkdir -p "$(dirname "$f")" 2>/dev/null || return 1
+  printf '%s\n' "$2" >> "$f" 2>/dev/null
+}
+
+# Take the oldest pending line for this session and remove it. One line per
+# call, because the sentry's contract is exactly one reason line per exit: the
+# rest stay on disk and the next call takes the next.
+wake_take() { # wake_take [<session>]
+  local s f line tmp
+  s=${1:-$(reeve_session)}
+  [ -n "$s" ] || return 1
+  f=$(wake_file "$s")
+  [ -s "$f" ] || return 1
+  line=$(head -1 "$f" 2>/dev/null) || return 1
+  tmp="$f.$$"
+  # Take the line off the file before handing it back, and if that cannot be
+  # done, empty the file instead. Callers drain in a loop, so a rewrite that
+  # quietly failed would hand the same line back forever.
+  if ! { tail -n +2 "$f" > "$tmp" 2>/dev/null && mv "$tmp" "$f" 2>/dev/null; }; then
+    rm -f "$tmp"
+    : > "$f" 2>/dev/null || rm -f "$f"
+  fi
+  printf '%s\n' "$line"
+}
+
 # --- session identity -------------------------------------------------------
 # One home is shared by every reeve on this machine, so an errand id alone
 # cannot say who is watching it. A session owns the errands it briefed, and a

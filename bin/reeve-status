@@ -16,6 +16,12 @@
 # The status log is append only and every append is a wake event, not the
 # current state. Never read its last line and call that the state: that is what
 # this script exists to prevent.
+#
+# A listing also delivers any wake a caretaker took over while this reeve had
+# nothing watching, above the table and once only. bin/reeve-sentry is what
+# WAKES a reeve; this is what a reeve reads when it looks of its own accord, and
+# a reeve that dispatched and then sat idle does the second long before the
+# first.
 
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/reeve-lib.sh"
 
@@ -216,6 +222,19 @@ table_row() {
 }
 
 if [ "$all" = yes ] || [ -z "$id" ]; then
+  # Reports a caretaker took over while this reeve had nothing watching, drained
+  # before the table and never after: the errand each one is about has usually
+  # been cleaned up already, so the row it would appear in says nothing about
+  # the fact that nobody was ever told. Emptied as it is read, because a wake
+  # delivered twice is noise and this is the delivery.
+  #
+  # Here as well as in bin/reeve-sentry because the sentry is what wakes a reeve
+  # and this is what a reeve reads when it looks of its own accord. A reeve that
+  # dispatched and then sat idle does the second long before the first.
+  #
+  # --orphans too, deliberately: it is the command for finding work nobody is
+  # watching, which is exactly what a pending wake is.
+  while woke=$(wake_take); do printf '%s\n' "$woke"; done
   ids=$(errand_ids)
   if [ -z "$ids" ]; then
     if [ "$orphans" = yes ]; then info "no orphaned errands: every owner is alive or unaccounted for"

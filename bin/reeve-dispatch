@@ -15,8 +15,15 @@
 #
 # A successful launch also leaves a caretaker running (bin/reeve-sentry
 # --caretaker, detached, one per home), so a hand that finishes is cleaned up
-# even when no reeve session is alive. Set REEVE_NO_CARETAKER=1 to skip it,
+# even when no reeve session is alive, and the line it reported is left where
+# the reeve that briefed it will find it. Set REEVE_NO_CARETAKER=1 to skip it,
 # which you want while debugging a hand you do not want torn down.
+#
+# A caretaker is not a watch, though. Nothing reports a finished hand to a reeve
+# except bin/reeve-sentry run by that reeve, so this says NOTHING IS WATCHING,
+# out loud, when neither a caretaker nor a foreground watch is there. A dispatch
+# that reports a clean launch over a household with nobody watching is how a
+# hand came to work for an hour, finish, and tell no one.
 
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/reeve-lib.sh"
 BIN=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -364,8 +371,17 @@ touch "$(status_file "$id")"
 # changes nothing is kept by construction rather than by a condition somebody
 # has to remember. Never fatal either: a dispatch that worked is not a failure
 # because the cleaner did not come up.
+#
+# It is also half of what will ever report this hand. A caretaker cleans up
+# silently, but on the way it leaves the terminal line in the owning session's
+# wake file, which bin/reeve-sentry and bin/reeve-status deliver. So a dispatch
+# that leaves no caretaker AND no foreground watch leaves a hand that will
+# finish into silence, and that is checked and said out loud below rather than
+# assumed: reporting a clean dispatch over a household with nothing watching is
+# the exact shape of the bug this guard exists for.
 caretaker_log="$REEVE_HOME_D/state/sentry.log"
 caretaker_advice="Finished hands will keep their sessions until a reeve runs bin/reeve-sentry."
+caretaker_started=no
 if [ -n "${REEVE_NO_CARETAKER:-}" ]; then
   :
 elif [ ! -x "$BIN/reeve-sentry" ]; then
@@ -391,6 +407,22 @@ else
       ${REEVE_CARETAKER_POLL:+--poll "$REEVE_CARETAKER_POLL"} \
       >>"$caretaker_log" 2>&1 </dev/null &
   { disown; } 2>/dev/null || :
+  caretaker_started=yes
+fi
+
+# Did anything actually come up. Starting a process and never looking is how a
+# dispatch reported perfect success over a household where nothing was watching:
+# the launch line was printed, the caretaker was started, and the liege was told
+# it had all gone well. A live lock is the proof, and it is the right proof in
+# both directions, because a second caretaker exits 0 without creating anything
+# while the first one's lock stands.
+#
+# Bounded and short. Taking the lock is the first thing a caretaker does, so a
+# second is generous, and waiting longer than that would put a delay on every
+# dispatch to catch a case that is already lost.
+if [ "$caretaker_started" = yes ]; then
+  n=0
+  while [ "$n" -lt 20 ] && ! caretaker_live; do sleep 0.05; n=$((n + 1)); done
 fi
 
 info "dispatched $id"
@@ -400,3 +432,18 @@ info "  copy     $cwd"
 [ -n "$branch" ] && info "  branch   $branch (from $base)" || info "  branch   none, detached at $base"
 info "  running  $target"
 info "  status   $(status_file "$id")"
+
+# The last word, and loud, because a hand nobody will report is worse than a
+# hand that failed to launch: it looks exactly like a working one, forever. A
+# caretaker leaves the terminal line in this session's wake file and a
+# foreground watch reads the status file directly, so either one is a route
+# home. Neither is the failure.
+if caretaker_live; then
+  :
+elif watch_live; then
+  info "  watching a foreground sentry, no caretaker needed"
+else
+  warn "NOTHING IS WATCHING $id. It will finish, report into its status file, and tell nobody."
+  warn "  no caretaker holds $(lock_marker) and no foreground watch has published a marker."
+  warn "  start one now: bin/reeve-sentry"
+fi

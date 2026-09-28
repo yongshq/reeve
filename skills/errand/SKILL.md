@@ -106,7 +106,19 @@ relaunches on the office default, not on whatever the first dispatch was given.
 Tell the liege in one line what went out. Not the brief, not the path, not the command. "A scout is
 looking into the print styles" is the whole report.
 
-Then let the sentry do its job. Do not poll, and do not narrate progress.
+Then start the watch, because nothing else will:
+
+```sh
+bin/reeve-sentry          # returns one reason line when something needs you
+```
+
+Run it so that it comes back to you when it exits, not so that you sit blocked inside it. A
+dispatch leaves a *caretaker* running, and a caretaker cleans up after a finished hand and tells
+nobody: it has no reeve to tell. Without the watch, a hand can finish, report `done:` and have its
+session closed while you are still saying the work is in flight. If the dispatch ends with
+`NOTHING IS WATCHING`, the dispatch is not finished.
+
+With the watch running, do not poll and do not narrate progress.
 
 ## Relaunching a dead errand
 

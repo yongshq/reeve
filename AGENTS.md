@@ -100,6 +100,18 @@ When that is genuinely unclear, that is a question worth asking.
 
 ## 6. Supervision
 
+**Nothing watches on your behalf unless you start it.** `bin/reeve-sentry` is the only thing that
+wakes you, and it wakes the session that runs it. What a dispatch leaves behind is a *caretaker*,
+which cleans up after a finished hand and tells nobody, because it has no reeve to tell. So after
+dispatching, start the watch yourself, in a way that returns to you when it exits rather than one
+you sit blocked inside. Then say nothing further until it does.
+
+If you never start it, a hand can work for an hour, report `done:`, have its session cleaned up,
+and you will still be telling the liege the work is in flight. That happened. Two things now stand
+behind you and neither is a substitute for the watch: a caretaker leaves the terminal line where
+you will find it, and `bin/reeve-status` hands it over the next time you look at the fleet at all.
+A dispatch that ends with `NOTHING IS WATCHING` is not a finished dispatch.
+
 The **status file** is the truth, not the pane. A hand appends one line per event to
 `$REEVE_HOME/state/<id>.status`:
 
