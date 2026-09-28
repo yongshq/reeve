@@ -61,7 +61,10 @@ errand() {
   # No worktree path: whether teardown removes a COPY is its own question, and
   # tests/teardown-landed.test.bash owns it. What is asserted here is who is
   # allowed to set teardown in motion at all.
-  printf 'target=stub:1\nbackend=stub\noffice=scout\nrepo=\nworktree=\nbranch=\nbase=main\nwrites=no\nsession=%s\n' \
+  # dispatched= as every real errand carries it. It is what keeps an errand in
+  # flight once its target has been blanked, so an errand seeded without it
+  # would be asking a second question about legacy records.
+  printf 'target=stub:1\nbackend=stub\noffice=scout\nrepo=\nworktree=\nbranch=\nbase=main\nwrites=no\ndispatched=2026-09-28T20:25:26\nsession=%s\n' \
     "$owner" > "$REEVE_HOME/state/$id.meta"
   : > "$REEVE_HOME/errands/$id/status"
   local line
@@ -191,8 +194,17 @@ eq "6 one that reported and stopped is cleaned up" "$(care dead-owned)" yes
 errand never-owned sess-silent "working: x" "done: y"
 eq "6 an owner that never reported is cleaned up too" "$(care never-owned)" yes
 
+# An errand nobody owns is the one it must NOT finish. There is no spool to
+# leave the report in, so removing the copy would write tornDown=, drop it out
+# of live_errands, and leave that `done:` line in a status file no watch would
+# ever look at again: the reviewed bug intact, for every home whose harness
+# exports no session id. The idle session still goes, because that costs
+# nothing and the errand stays in flight either way.
 errand un-owned '' "working: x" "done: y"
-eq "6 and so is an errand nobody owns" "$(care un-owned)" yes
+eq "6 an errand nobody owns is not finished off"      "$(care un-owned)" no
+eq "6 but its idle session is freed all the same"     "$(meta_of un-owned target)" ''
+eq "6 and it is still there for the first reeve that watches" \
+   "$(REEVE_SESSION=passerby "$ROOT/bin/reeve-sentry" --once --no-reap 2>&1 | grep -c 'un-owned is done')" 1
 
 echo "--- 7. session records are pruned, but never one still answering for work ---"
 # The statusline gauge writes a record for EVERY claude session on the machine,

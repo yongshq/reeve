@@ -18,16 +18,19 @@
 # actionable needs a reeve by definition, cleaning up after a finished hand does
 # not, because bin/reeve-teardown owns the safety rules and they are mechanical.
 # So a caretaker polls and cleans and says nothing at all: it never prints a
-# reason line, never exits 0 on an actionable change, and never touches the wake
-# cursors, because those exist to de-duplicate reports and it makes none.
+# reason line, never exits 0 on an actionable change, and never WRITES a wake
+# cursor, because those record what has been reported and it reports nothing.
 #
 # Silence is not the same as consuming the report, and that distinction was
 # missing. Freeing a finished hand's session is the moment its terminal line
 # stops being discoverable anywhere but its own status file, so before doing it
-# a caretaker leaves that line in the OWNING session's wake file, which this
+# a caretaker leaves that line in the OWNING session's wake spool, which this
 # script and bin/reeve-status deliver the next time that reeve runs either. Not
 # a reason line and not a report: a note left for the one process that is
-# allowed to make one.
+# allowed to make one. It reads that errand's cursor to decide whether the note
+# is still owed, and where it cannot leave one at all it frees the session and
+# stops there, keeping the copy and the errand's place in flight, because a hand
+# torn down unreported is the whole defect this exists to close.
 #
 # bin/reeve-dispatch starts one, which is what makes a finished hand get cleaned
 # up even when no reeve session is alive. One per home, enforced by a lock; a
@@ -228,7 +231,8 @@ else
   trap 'watch_drop; exit 129' HUP
 fi
 
-cursor_file() { printf '%s/state/.cursor-%s\n' "$REEVE_HOME_D" "$1"; }
+# cursor_file is in bin/reeve-lib.sh: delivering a wake marks the errand
+# reported as well, so the sentry is no longer its only writer.
 # Alongside the cursor, and for the same reason: what this errand looked like
 # last time, so a condition that is only interesting once is only reported once.
 attn_file() { printf '%s/state/.attn-%s\n' "$REEVE_HOME_D" "$1"; }
@@ -266,7 +270,7 @@ reap_one() {
   REAP_UNDECIDED=no
   [ "$reap" = yes ] || { say '\n'; return; }
   wt=$(meta_get "$i" worktree '')
-  "$BIN/reeve-teardown" "$i" >/dev/null 2>&1; rc=$?
+  "$BIN/reeve-teardown" "$i" ${2:+"$2"} >/dev/null 2>&1; rc=$?
   [ "$rc" = 4 ] && REAP_UNDECIDED=yes
   if [ -n "$wt" ] && [ -d "$wt" ]; then
     local br ahead
@@ -368,8 +372,10 @@ live_errands() {
 # something to keep polling over. The cursor is the household's record of what
 # has been reported, so this asks only whether the wake was delivered.
 #
-# Foreground only. A caretaker makes no reports and so reads no cursors, and it
-# has its own answer to the same question in `tended`.
+# A caretaker still makes no reports, and WRITES no cursor. It reads this one,
+# for the single question below: whether a report is still owed. It did not, and
+# so it re-announced an errand the reeve had reported long ago, once per
+# caretaker process, for as long as the branch went unlanded.
 #
 # This is the lifetime that keying in-flight off `target=` used to give a watch
 # by accident, restored deliberately: it ends the watch once it has said its
@@ -380,6 +386,24 @@ reported_done() { # reported_done <id>
   seen=$(cat "$(cursor_file "$i")" 2>/dev/null | tr -d '[:space:]')
   [ -n "$seen" ] || return 1
   [ "$(status_lines "$(status_file "$i")")" = "$seen" ]
+}
+
+# Does this errand still owe its owner a wake. Two ways it does not, and they
+# are two different facts:
+#
+#   a wake was already left for it   `woke=` in its record, written by whichever
+#                                    caretaker left it, durable and home wide
+#   the owner already reported it    its cursor covers the whole log, so the
+#                                    reeve has said this out loud already
+#
+# Either one alone is enough, and without them a false wake is the result. Both
+# were measured: three successive caretakers left three identical lines about
+# one errand the watch had already reported, and every dispatch starts a
+# caretaker. A false alarm is worse than no guard at all, which is what the
+# errand that built this channel was told in the first place.
+wake_owed() { # wake_owed <id>
+  [ -z "$(meta_get "$1" woke '')" ] || return 1
+  ! reported_done "$1"
 }
 
 # How many lines this errand's log holds right now. grep -c pads its answer on
@@ -415,33 +439,68 @@ check_one() {
 
   # A caretaker asks two questions and no others: is this hand finished and safe
   # to clean up, and is the reeve watching this home right now, in which case the
-  # answer is nothing this tick whatever the first one said. Not the cursor,
-  # because a cursor de-duplicates REPORTS and this mode makes none, and reading
-  # the cleanup off one would mean a caretaker started after the `done:` line was
-  # written never cleans it up. Not the attention probe either: a hand stalled at
-  # a dialog is never reaped by either mode, and only the reeve can answer it.
-  # And never a return 0, because an actionable event is the reeve's business,
-  # not this process's.
+  # answer is nothing this tick whatever the first one said. The CLEANUP is never
+  # read off a cursor: a caretaker started after the `done:` line was written
+  # would then never clean it up. Whether a wake is still owed is a third
+  # question, asked separately in wake_owed, and the cursor is evidence for that
+  # one. Not the attention probe either: a hand stalled at a dialog is never
+  # reaped by either mode, and only the reeve can answer it. And never a
+  # return 0, because an actionable event is the reeve's business, not this
+  # process's.
   if [ "$caretaker" = yes ]; then
     if reap_allowed "$i" && reapable "$st" "$div"; then
-      # Hand the report over before destroying the evidence for it. Freeing the
-      # hand's session and blanking its target is the moment this line stops
-      # being discoverable by anything: the pane is gone and, until the
-      # in-flight rule above was corrected, so was the errand. A caretaker has
-      # no reeve to tell, but it knows which one briefed this errand, and a
-      # line left in that session's wake file is delivered by the next
-      # bin/reeve-sentry or bin/reeve-status that reeve runs. Silent as ever on
-      # stdout: leaving a note is not printing a reason line.
-      #
-      # Only on the reap path. That is the one place the report is destroyed
-      # rather than delayed; an errand this caretaker may not touch keeps its
-      # session, its status file and its place in the watch, and its owner's own
-      # watch will report it with a cursor to de-duplicate against. Leaving a
-      # note for that one every poll would be the noise the cursors exist to
-      # prevent.
-      wake_leave "$(meta_get "$i" session '')" \
-        "$(printf 'signal: %s is %s and its session was cleaned up with no reeve watching - %s' \
-             "$i" "$st" "$(status_field "$i" last)")"
+      if wake_owed "$i"; then
+        # Hand the report over before destroying the evidence for it. Freeing
+        # the hand's session and blanking its target is the moment this line
+        # stops being discoverable by anything: the pane is gone and, until the
+        # in-flight rule above was corrected, so was the errand. A caretaker has
+        # no reeve to tell, but it knows which one briefed this errand, and a
+        # line left in that session's spool is delivered by the next
+        # bin/reeve-sentry or bin/reeve-status that reeve runs. Silent as ever
+        # on stdout: leaving a note is not printing a reason line.
+        #
+        # Only on the reap path. That is the one place the report is destroyed
+        # rather than delayed; an errand this caretaker may not touch keeps its
+        # session, its status file and its place in the watch, and its owner's
+        # own watch will report it with a cursor to de-duplicate against.
+        #
+        # A wake it could not leave stops the REMOVAL. An errand whose record
+        # names no session, which is every errand of a harness that exports no
+        # session id, has nowhere for the line to go, and the old code ignored
+        # the refusal and tore the hand down regardless: the report then existed
+        # in its status file and nowhere any watch would look, which is the
+        # reviewed bug intact for those homes.
+        #
+        # So it takes the half of the cleanup that costs nothing and leaves the
+        # half that destroys the report. Freeing an idle session loses nothing
+        # while `dispatched=` is there to hold the errand in live_errands
+        # without the target: every watch on this home still finds it, and the
+        # first reeve that actually watches reports it and then tears it down
+        # properly. Deliberately NOT the blanket refusal the review asked for,
+        # which would have left an idle pane per hand on every home that has no
+        # session ids at all, a supported configuration.
+        #
+        # Without that stamp, on an errand briefed before it existed, blanking
+        # the target IS what drops it out of every watch, so then nothing is
+        # touched at all. The rule underneath both is one rule: never make an
+        # unreported errand harder to find.
+        if wake_leave "$(meta_get "$i" session '')" \
+             "$(printf 'signal: %s is %s and its session was cleaned up with no reeve watching - %s' \
+                  "$i" "$st" "$(status_field "$i" last)")" \
+             "$i" "$now"; then
+          # Once per errand, for the whole home and not for this process. The
+          # only thing that used to stop a second caretaker re-announcing a
+          # finished errand was tornDown=, which the landed-work guard never
+          # writes over an unlanded branch, so every later dispatch started a
+          # caretaker that left the same line again, its text false by then.
+          meta_set "$i" woke "$(date +%Y-%m-%dT%H:%M:%S)"
+        else
+          [ -n "$(meta_get "$i" dispatched '')" ] && reap_one "$i" --dismiss-only
+          tended="$tended$i
+"
+          return 1
+        fi
+      fi
       reap_one "$i"
       # Tended once. A teardown that refused has said all it is going to say,
       # and retrying it every poll would hammer git over a decision that is now
@@ -601,7 +660,12 @@ while :; do
     # is delivered before anything else and before the nothing-in-flight exit,
     # because the errand it is about has usually been cleaned up already and so
     # is not in flight by any reading. One line per exit, like every other wake.
-    if woke=$(wake_take); then printf '%s\n' "$woke"; exit 0; fi
+    #
+    # wake_deliver writes that line itself rather than handing it back to be
+    # printed here, which is what lets the spool entry survive a write that does
+    # not land. It also marks the errand reported, so the next tick does not say
+    # the same thing again off live_errands.
+    if wake_deliver; then exit 0; fi
   fi
 
   ids=$(live_errands)

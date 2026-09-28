@@ -57,5 +57,16 @@ if [ "$force" != yes ]; then
 fi
 
 meta_set "$id" session "$mine"
+
+# A wake is addressed to a session, so rewriting the owner leaves any pending
+# one in a spool belonging to the reeve this errand was just taken from: by the
+# rule adoption is allowed under, a reeve that is provably gone. Nothing would
+# ever have read it. For a torn-down scout that line is the only report there
+# ever was.
+moved=$(wake_move "$own" "$mine" "$id") || moved=0
+case $moved in ''|*[!0-9]*) moved=0 ;; esac
+
 info "errand '$id' adopted${own:+, from session $own}"
 info "  this session now watches it and is the one that will clean up after it"
+[ "$moved" -gt 0 ] && info "  $moved pending notification(s) came with it"
+exit 0

@@ -11,9 +11,11 @@
 # leaves a caretaker running, and these cases pin what that caretaker must be:
 #
 #   1. silent. It never prints a reason line and never exits 0 on an actionable
-#      change, because it has nobody to tell. It also never reads or writes the
-#      wake cursors, which de-duplicate reports it does not make: a caretaker
-#      started after a `done:` line was written must still clean that hand up.
+#      change, because it has nobody to tell. It never WRITES a wake cursor
+#      either, because a cursor records a report and it makes none. It does read
+#      them, for one question only, whether the owning reeve still has to be
+#      told: the cleanup itself is never read off one, or a caretaker started
+#      after a `done:` line was written would never clean that hand up.
 #   2. safe. The never-reap rules are the sentry's own, reused rather than
 #      rewritten: a `blocked:` hand can still be steered, and a hand that
 #      reported done with a question never answered is not finished.
@@ -123,11 +125,19 @@ settings_flag = "--settings {settings}"
 prompt_mode = "argv"
 HARNESS
 
+# ERRAND_OWNER is the session a seeded errand was briefed by, empty by default
+# because an unowned errand is what every watch here can see without pinning a
+# session first. A case that wants the copy REMOVED has to name an owner: a
+# caretaker will not remove what it could not report, and an unowned errand has
+# nowhere to leave the report. The name must never be this suite's own session,
+# which is alive throughout and stops a caretaker on the ownership gate before
+# the case gets to whatever it was asking about.
+ERRAND_OWNER=''
 errand() { # errand <id> <writes> <status line>...
   local id=$1 writes=$2; shift 2
   mkdir -p "$REEVE_HOME/state" "$REEVE_HOME/errands/$id"
-  printf 'target=stub:1\nbackend=stub\noffice=artificer\nrepo=\nworktree=\nbranch=\nbase=main\nwrites=%s\n' \
-    "$writes" > "$REEVE_HOME/state/$id.meta"
+  printf 'target=stub:1\nbackend=stub\noffice=artificer\nrepo=\nworktree=\nbranch=\nbase=main\nsession=%s\nwrites=%s\n' \
+    "$ERRAND_OWNER" "$writes" > "$REEVE_HOME/state/$id.meta"
   : > "$REEVE_HOME/errands/$id/status"
   local line
   for line in "$@"; do printf '%s\n' "$line" >> "$REEVE_HOME/errands/$id/status"; done
@@ -175,13 +185,20 @@ eq  "1 and its session was freed"                "$(killed stub:1)" yes
 eq  "1 a blocked hand is not reaped"             "$(reaped stuck)" no
 eq  "1 nor one with an open decision"            "$(reaped asking)" no
 eq  "1 nor one still working"                    "$(reaped busy)" no
-eq  "1 and no cursor was read or written"        "$(cursors)" "$before_cursors"
+eq  "1 and no cursor was written"                "$(cursors)" "$before_cursors"
 
 # The other terminal state, and the divergence that looks like one. `failed:` is
 # finished and is cleaned up; `done:` with a question still open is not finished
 # whatever it says, and is left exactly where it is.
+#
+# Owned, unlike the four above, and by a session that has never reported. These
+# two are seeded after the watch has been and gone, so no cursor covers them and
+# the report is still owed: without somewhere to leave it the caretaker would
+# free the session and stop there, which is the rule section 7 is about.
+ERRAND_OWNER=gone
 errand broke     no "working: building" "failed: the build cannot be made to pass"
 errand diverged  no "needs-decision [key=shape]: one table or two?" "done: landed it anyway"
+ERRAND_OWNER=''
 OUT=$("$ROOT/bin/reeve-sentry" --caretaker --once --poll 1 2>&1); RC=$?
 eq  "1 a failed hand is cleaned up"              "$(reaped broke)" yes
 eq  "1 a divergence is not"                      "$(reaped diverged)" no
@@ -191,6 +208,9 @@ echo "--- 2. the lock: one per home, and neither a dead nor a forgotten one hold
 export REEVE_HOME="$SCRATCH/home2"
 LOCK="$REEVE_HOME/state/.sentry.lock"
 mkdir -p "$REEVE_HOME/state"
+# Every case here asks whether the lock let a caretaker work, and reads the
+# answer off a completed teardown, so each errand needs an owner to report to.
+ERRAND_OWNER=gone
 errand pending no "working: going"
 marker "$$" 0 > "$LOCK"                   # this test process: alive, and current
 OUT=$("$ROOT/bin/reeve-sentry" --caretaker --once --poll 1 2>&1); RC=$?
@@ -437,6 +457,10 @@ echo "--- 4. the watch and the caretaker, at the same time, on one home ---"
 # which is the losing case pinned down instead of waited for. The watch is
 # already established before any of it, so what varies is only how far behind
 # the line the cleaner arrives.
+# Unowned, deliberately. The standby marker is this section's whole subject, and
+# an owner the watch is running as would answer reap_allowed before standby was
+# ever consulted.
+ERRAND_OWNER=''
 kept=0; ended=0; noise=''; n=0
 for off in 0 0.125 0.25 0.375 0.5 0.625 0.75 0.875; do
   n=$((n + 1))
@@ -490,6 +514,10 @@ eq  "5 and takes the marker with it when it stops" \
 # session is routinely killed outright, and a marker that outlived its process
 # must never be able to disable cleanup for a home permanently. That would be a
 # worse failure than the race it closes.
+# Owned from here on: each of these reads its answer off a completed teardown.
+# `watched` above stays unowned, because the watch that publishes the marker has
+# to be able to see it.
+ERRAND_OWNER=gone
 watched_reap() { # watched_reap <id> <marker line>   -> yes|no
   errand "$1" no "working: going"
   printf 'done: finished\n' >> "$REEVE_HOME/errands/$1/status"
@@ -543,6 +571,7 @@ echo "--- 6. a line that lands while the log is being read ---"
 # cursor path, is that gap exactly.
 export REEVE_HOME="$SCRATCH/home7"
 mkdir -p "$REEVE_HOME/state"
+ERRAND_OWNER=''
 errand midread no "working: going"
 REAL_CAT=$(command -v cat)
 FAKEBIN="$SCRATCH/fakebin"; mkdir -p "$FAKEBIN"

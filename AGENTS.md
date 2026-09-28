@@ -108,8 +108,21 @@ you sit blocked inside. Then say nothing further until it does.
 
 If you never start it, a hand can work for an hour, report `done:`, have its session cleaned up,
 and you will still be telling the liege the work is in flight. That happened. Two things now stand
-behind you and neither is a substitute for the watch: a caretaker leaves the terminal line where
-you will find it, and `bin/reeve-status` hands it over the next time you look at the fleet at all.
+behind you and neither is a substitute for the watch: a caretaker leaves the terminal line for the
+session that briefed the errand, and either `bin/reeve-sentry` or `bin/reeve-status` hands it over
+the next time you run one. What that does and does not promise, exactly, because the last version
+of this paragraph promised more than the code did:
+
+- it is kept until it has actually been printed, so a listing you trim or grep costs you nothing
+- a second reader cannot take it twice or destroy the rest
+- it follows the errand if another session adopts it with `bin/reeve-adopt`
+- a command asking some other question never spends one, so `bin/reeve-handoff new` copies pending
+  lines into the handoff instead, which is what makes them survive your reset
+- the one case with no answer: an errand whose record names no session, which is every errand on a
+  harness that exports no session id. There is no session to leave a line for, so nothing is left,
+  and instead the caretaker stops short of finishing the cleanup. The errand keeps its copy and
+  stays in flight, where the next watch on that home reports it.
+
 A dispatch that ends with `NOTHING IS WATCHING` is not a finished dispatch.
 
 The **status file** is the truth, not the pane. A hand appends one line per event to
@@ -162,7 +175,7 @@ safety conditions:
 | | When | What it costs |
 |---|---|---|
 | **free the session** | as soon as a terminal state is reported with nothing open | nothing. The status file and any report are already on disk |
-| **remove the copy** | only when the branch holds nothing the base does not | commits, if done too early. So it refuses instead |
+| **remove the copy** | only when the branch holds nothing the base does not, and the report has somewhere to go | commits, if done too early. So it refuses instead |
 
 So a scout disappears completely, while an artificer loses only its idle session and keeps its
 copy and branch until the liege decides. A `blocked:` hand is never reaped, because it may still be
@@ -379,7 +392,7 @@ fact per line, because you are the one reading it.
 | `bin/reeve-survey --register ...` | record the liege's answer about which manor a repo belongs to |
 | `bin/reeve-brief <id> <holding> --office <o>` | write a brief with the two seams |
 | `bin/reeve-dispatch <id>` | worktree, endpoint, launch. `--dry-run` changes nothing |
-| `bin/reeve-status <id>` / `--all` | the reconciled state, never the last line of the log. Bare lists yours, `--all` the machine's |
+| `bin/reeve-status <id>` / `--all` | the reconciled state, never the last line of the log. Bare lists yours, `--all` the machine's. A listing also delivers anything a caretaker left you, so a script asking a different question passes `--no-wake` |
 | `bin/reeve-status --orphans` | errands whose owning session is provably gone |
 | `bin/reeve-adopt <id>` | take an orphaned errand on, so this session watches it |
 | `bin/reeve-answer <id> <key> <answer>` | close an open question, durably, then tell the hand |

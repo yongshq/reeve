@@ -97,7 +97,18 @@ HARNESS
 export REEVE_ROOT="$STUB"
 
 meta_of() { grep -m1 "^$2=" "$REEVE_HOME/state/$1.meta" 2>/dev/null | sed "s/^$2=//"; }
-wake_of() { cat "$REEVE_HOME/state/sessions/$1/wake" 2>/dev/null; }
+# The spool is a directory, one file per wake, and each file is key=value lines
+# with the line itself under `say`. These two read and write it the way the
+# household does, without sourcing the library: a test that shares the code
+# under test cannot see a change of shape.
+wake_of()    { cat "$REEVE_HOME/state/sessions/$1"/wake/* 2>/dev/null | sed -n 's/^say=//p'; }
+wake_count() { ls -1 "$REEVE_HOME/state/sessions/$1"/wake 2>/dev/null | grep -c . ; }
+wake_plant() { # wake_plant <session> <errand> <log lines> <line>
+  local d="$REEVE_HOME/state/sessions/$1/wake"
+  mkdir -p "$d"
+  printf 'errand=%s\nlines=%s\nsay=%s\n' "$2" "$3" "$4" \
+    > "$d/$(date +%s).$$.$(ls -1 "$d" 2>/dev/null | grep -c .)"
+}
 # The owner walked away from its terminal for longer than the staleness window,
 # which is all "idle" looks like from outside: the liveness mark is refreshed by
 # reeve commands and statusline renders, and a reeve waiting on a hand runs
@@ -212,19 +223,17 @@ echo "--- 3. a wake belongs to the session that briefed the errand ---"
 # reeve is worse than one that waits: the reeve it was meant for never learns
 # its hand finished, and the one that took it reports an errand it does not own.
 export REEVE_HOME="$SCRATCH/home3"
-mkdir -p "$REEVE_HOME/state/sessions/alice"
-printf 'signal: theirs is done and its session was cleaned up with no reeve watching - branch ready\n' \
-  > "$REEVE_HOME/state/sessions/alice/wake"
+mkdir -p "$REEVE_HOME/state"
+wake_plant alice theirs 2 \
+  'signal: theirs is done and its session was cleaned up with no reeve watching - branch ready'
 
 REEVE_SESSION=bob OUT=$(REEVE_SESSION=bob "$ROOT/bin/reeve-status" 2>&1) || :
 nas "3 another reeve does not take it" "$OUT" "theirs is done"
-eq  "3 and it is still waiting for its own" \
-    "$([ -s "$REEVE_HOME/state/sessions/alice/wake" ] && echo waiting || echo gone)" waiting
+eq  "3 and it is still waiting for its own" "$(wake_count alice)" 1
 
 OUT=$(REEVE_SESSION=alice "$ROOT/bin/reeve-status" 2>&1) || :
 has "3 the reeve that briefed it is told when it next looks at the fleet" "$OUT" "theirs is done"
-eq  "3 and told once"                                                     \
-    "$([ -s "$REEVE_HOME/state/sessions/alice/wake" ] && echo waiting || echo gone)" gone
+eq  "3 and told once"                                                     "$(wake_count alice)" 0
 
 echo "--- 4. a dispatch that leaves nobody watching says so ---"
 # The shape of the whole bug in one line: a hand goes out, nothing is watching,

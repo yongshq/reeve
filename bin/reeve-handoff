@@ -49,6 +49,34 @@ live_ids() {
   done
 }
 
+# Anything a caretaker left for this session that has not been delivered yet.
+#
+# Read, never taken, and that is the whole point. `reeve-status --all` used to
+# be called below without --no-wake, which DRAINED the spool, and the filter
+# then kept only rows whose first field was ERRAND or a live errand id, so every
+# signal was dropped on the floor: it appeared nowhere in the document and was
+# gone from the spool. The worst possible moment for it, too, because a handoff
+# is written when the reeve is about to be reset and the next session has a new
+# id, so nothing would ever have read that spool again.
+#
+# So the lines stay where they are, for the watch that is still entitled to
+# them, and they are copied in here as well, because a reset is exactly when a
+# session's own spool stops being reachable.
+undelivered() {
+  local lines n line
+  lines=$(wake_peek 2>/dev/null) || lines=''
+  n=$(printf '%s' "$lines" | grep -c . 2>/dev/null) || n=0
+  n=$(printf '%s' "$n" | tr -d '[:space:]'); n=${n:-0}
+  [ "$n" -gt 0 ] || return 0
+  printf '%s notification(s) about finished hands have not reached this session yet.\n' "$n"
+  printf 'They are copied here because a reset gives the next session a new id, which cannot\n'
+  printf 'read this one spool:\n\n'
+  printf '%s\n' "$lines" | while IFS= read -r line; do
+    [ -n "$line" ] && printf '  %s\n' "$line"
+  done
+  printf '\n'
+}
+
 # The `## In flight` block, whole. The rows come from `reeve-status --all`
 # verbatim, header included, so this file never learns to render an errand on
 # its own: it only drops the rows live_ids did not name.
@@ -60,19 +88,21 @@ in_flight() {
 
   if [ "$n" -eq 0 ]; then
     printf 'Nothing still live at the time of writing. `bin/reeve-status --all` is the live truth.\n\n'
+    undelivered
     return 0
   fi
 
   printf '%s errand(s) still live at the time of writing. Finished and cleaned up ones are\n' "$n"
   printf 'left out: they rebuild from disk, and `bin/reeve-status --all` is the live truth for\n'
   printf 'all of them.\n\n'
-  table=$("$BIN/reeve-status" --all 2>/dev/null) || table=''
+  table=$("$BIN/reeve-status" --all --no-wake 2>/dev/null) || table=''
   printf '```\n'
   printf '%s\n' "$table" | while IFS= read -r line; do
     first=${line%% *}
     if [ "$first" = ERRAND ] || lines_has "$first" "$ids"; then printf '%s\n' "$line"; fi
   done
   printf '```\n\n'
+  undelivered
 }
 
 cmd=${1:-}; manor=${2:-}

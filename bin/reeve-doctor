@@ -152,7 +152,11 @@ if [ "$WARN" -gt 0 ] && command -v claude >/dev/null 2>&1; then
 fi
 
 hdr "errands"
-"$BIN/reeve-status" --all 2>/dev/null | sed 's/^/  /'
+# --no-wake, because this is a command run to ask a different question. Without
+# it a pending signal was consumed here and printed indented inside the fleet
+# block, where it read as part of the errand table rather than as the one thing
+# nobody had been told.
+"$BIN/reeve-status" --all --no-wake 2>/dev/null | sed 's/^/  /'
 
 hdr "verdict"
 if [ "$WARN" -eq 0 ]; then

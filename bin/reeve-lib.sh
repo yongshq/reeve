@@ -144,38 +144,207 @@ watch_live() {
 # contract already has it rebuild the entire fleet from the status files at
 # startup, which is the stronger recovery path and the reason nothing here has
 # to survive a change of owner.
-wake_file() { # wake_file <session>
+#
+# A SPOOL, one file per wake, not one file per session holding a line each.
+# The file-per-session shape this replaces was read with head, rewritten with
+# tail and moved into place, and every one of those three steps is a window:
+# measured on the shape it replaces, 200 appends against one draining reader
+# lost 54, and two readers over 60 queued lines delivered one line each, twice,
+# and destroyed the other 59. A reader that never rewrites a file a writer may
+# be appending to has no such window, and two readers cannot collide over a
+# file that only one of them can rename.
+#
+# The whole channel therefore holds to two rules, and the second is the one
+# that was missing:
+#
+#   a writer only ever CREATES a file, under a name nobody else can take
+#   a reader only ever REMOVES one, and only after its line reached stdout
+#
+# Delivery that has not happened yet is a file still on disk, so a reader that
+# dies mid-delivery, at a closed pipe or under a kill, costs one poll of latency
+# rather than the line.
+#
+# Inside the owning session's directory rather than beside it, so the one rule
+# that collects a session's records (sessions_prune, which never touches a
+# session that still owns a live errand) covers the spool with no second rule to
+# keep in step with the first.
+wake_dir() { # wake_dir <session>
   printf '%s/state/sessions/%s/wake\n' "$REEVE_HOME_D" "$1"
 }
 
-wake_leave() { # wake_leave <session> <line>   no session, no wake: say nothing
-  local f
+# One spool entry: three key=value lines, `say` last and never more than one
+# line, because the reeve reads exactly one line per wake.
+#
+#   errand=<id>     which errand this is about, so delivery can mark it reported
+#   lines=<count>   how much of that errand's log the line accounts for
+#   say=<the line>  the wake itself, verbatim
+#
+# Names are `<epoch seconds>.<pid>.<sequence>`, zero padded so a plain glob
+# sorts them, and the sequence is found by trying the next one until `ln`
+# succeeds. `ln` is the atomic primitive for the same reason the caretaker's
+# lock uses it: it fails if the name is taken, so two writers can never agree on
+# one name, and macOS ships no flock. Within one second two writers are ordered
+# by pid rather than by arrival, which is a known and harmless imprecision:
+# order is a courtesy here, delivery is not.
+wake_leave() { # wake_leave <session> <line> [<errand>] [<log lines>]
+  local d tmp n name
   [ -n "${1:-}" ] || return 1
-  f=$(wake_file "$1")
-  mkdir -p "$(dirname "$f")" 2>/dev/null || return 1
-  printf '%s\n' "$2" >> "$f" 2>/dev/null
+  d=$(wake_dir "$1")
+  mkdir -p "$d" 2>/dev/null || return 1
+  tmp="$d/.new.$$.${RANDOM:-0}"
+  { printf 'errand=%s\n' "${3:-}"
+    printf 'lines=%s\n'  "${4:-}"
+    printf 'say=%s\n'    "$2"
+  } > "$tmp" 2>/dev/null || { rm -f "$tmp"; return 1; }
+  # WAKE_SEQ carries the last name this process took, so a caretaker leaving
+  # several lines in one second walks forward instead of rescanning from zero
+  # each time. Only ever a hint: the loop is what guarantees the name.
+  n=${WAKE_SEQ:-0}
+  while :; do
+    name=$(printf '%s.%s.%05d' "$(date +%s)" "$$" "$n")
+    ln "$tmp" "$d/$name" 2>/dev/null && break
+    n=$((n + 1))
+    [ "$n" -lt 100000 ] || { rm -f "$tmp"; return 1; }
+  done
+  WAKE_SEQ=$((n + 1))
+  rm -f "$tmp"
+  return 0
 }
 
-# Take the oldest pending line for this session and remove it. One line per
-# call, because the sentry's contract is exactly one reason line per exit: the
-# rest stay on disk and the next call takes the next.
-wake_take() { # wake_take [<session>]
-  local s f line tmp
-  s=${1:-$(reeve_session)}
-  [ -n "$s" ] || return 1
-  f=$(wake_file "$s")
-  [ -s "$f" ] || return 1
-  line=$(head -1 "$f" 2>/dev/null) || return 1
-  tmp="$f.$$"
-  # Take the line off the file before handing it back, and if that cannot be
-  # done, empty the file instead. Callers drain in a loop, so a rewrite that
-  # quietly failed would hand the same line back forever.
-  if ! { tail -n +2 "$f" > "$tmp" 2>/dev/null && mv "$tmp" "$f" 2>/dev/null; }; then
-    rm -f "$tmp"
-    : > "$f" 2>/dev/null || rm -f "$f"
-  fi
-  printf '%s\n' "$line"
+# Everything in this session's spool that is free to be delivered, oldest first.
+#
+# A reader claims an entry by renaming it to `<name>.claimed.<its pid>`, which
+# is what stops two readers delivering one line twice: the rename succeeds for
+# exactly one of them. A claim is not a lock, though, and must never outlive the
+# process holding it, so a claim whose pid is gone is free again. That is the
+# same judgement the markers above make about a stale process, made the same
+# way, and it is what makes an interrupted delivery cost latency rather than the
+# line.
+wake_pending() { # wake_pending [<session>]
+  local s d f b pid
+  s=${1:-$(reeve_session)}; [ -n "$s" ] || return 1
+  d=$(wake_dir "$s"); [ -d "$d" ] || return 1
+  for f in "$d"/*; do
+    [ -f "$f" ] || continue
+    b=${f##*/}
+    case $b in
+      *.claimed.*)
+        pid=${b##*.claimed.}
+        case $pid in ''|*[!0-9]*) continue ;; esac
+        # Somebody is delivering it right now. Leave it to them.
+        kill -0 "$pid" 2>/dev/null && continue
+        ;;
+    esac
+    printf '%s\n' "$f"
+  done
 }
+
+wake_field() { # wake_field <spool file> <key>
+  local line key=$2
+  [ -f "$1" ] || return 1
+  while IFS= read -r line; do
+    case $line in "$key="*) printf '%s\n' "${line#"$key="}"; return 0 ;; esac
+  done < "$1"
+  return 1
+}
+
+wake_claim() { # wake_claim <spool file>   prints the claimed path
+  local f=$1 c
+  c="${f%%.claimed.*}.claimed.$$"
+  if [ "$f" != "$c" ]; then mv "$f" "$c" 2>/dev/null || return 1; fi
+  printf '%s\n' "$c"
+}
+
+wake_release() { # wake_release <claimed path>   hand it back undelivered
+  local c=$1 f
+  f=${c%%.claimed.*}
+  [ "$c" = "$f" ] && return 0
+  mv "$c" "$f" 2>/dev/null || return 1
+}
+
+# Deliver the oldest pending wake for this session: one line, on stdout, then
+# the file goes.
+#
+# In that order, and the order is the fix. The shape this replaces cleared the
+# line and then handed it back, so `reeve-status --all | head -1` printed one
+# signal, destroyed the next on the write that failed, and left the third:
+# measured, three in, one delivered, one gone. Writing first means a write that
+# fails leaves the entry exactly where it was, and a reader killed mid-line
+# leaves a claim its own death frees.
+#
+# Delivering also advances the errand's cursor, so the wake IS the report rather
+# than a second copy of one. Without it the reeve wakes twice for one finished
+# hand: once for the line the caretaker left and again on the next watch, off
+# the errand still standing in live_errands with no cursor against it. Never
+# backwards, because a cursor already further along was written by a watch that
+# read more of the log than this line accounts for.
+wake_deliver() { # wake_deliver [<session>]
+  local s f c say id n cur
+  s=${1:-$(reeve_session)}; [ -n "$s" ] || return 1
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    c=$(wake_claim "$f") || continue
+    say=$(wake_field "$c" say)
+    printf '%s\n' "$say" || { wake_release "$c"; return 1; }
+    id=$(wake_field "$c" errand); n=$(wake_field "$c" lines)
+    case $id in ''|*[!a-z0-9-]*) id='' ;; esac
+    case $n  in ''|*[!0-9]*)     n=''  ;; esac
+    if [ -n "$id" ] && [ -n "$n" ]; then
+      cur=$(cat "$(cursor_file "$id")" 2>/dev/null | tr -d '[:space:]')
+      case $cur in ''|*[!0-9]*) cur=0 ;; esac
+      if [ "$n" -gt "$cur" ]; then printf '%s\n' "$n" > "$(cursor_file "$id")" 2>/dev/null || :; fi
+    fi
+    rm -f "$c"
+    return 0
+  done <<WAKE_DELIVER_EOF
+$(wake_pending "$s")
+WAKE_DELIVER_EOF
+  return 1
+}
+
+# The pending lines without taking any of them, for a caller that is answering
+# some other question. Anything that reads the fleet programmatically goes
+# through this or through `reeve-status --no-wake`: a wake consumed by a command
+# run to ask something else is a wake nobody ever sees.
+wake_peek() { # wake_peek [<session>]
+  local s f
+  s=${1:-$(reeve_session)}; [ -n "$s" ] || return 1
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    wake_field "$f" say
+  done <<WAKE_PEEK_EOF
+$(wake_pending "$s")
+WAKE_PEEK_EOF
+}
+
+# Carry one errand's pending wakes to a new owner, and print how many moved.
+#
+# Adoption rewrites `session=` and the wake is addressed to a session, so
+# without this the line stays in a mailbox belonging to a reeve that is, by the
+# rule adoption is allowed under, provably gone. Copy first and remove second,
+# deliberately: interrupted between the two the line is delivered twice, and a
+# duplicate is noise where a loss is the whole defect.
+wake_move() { # wake_move <from session> <to session> <errand>
+  local from=${1:-} to=${2:-} id=${3:-} f moved=0
+  [ -n "$from" ] && [ -n "$to" ] && [ -n "$id" ] || { printf '0\n'; return 1; }
+  [ "$from" = "$to" ] && { printf '0\n'; return 0; }
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    [ "$(wake_field "$f" errand)" = "$id" ] || continue
+    wake_leave "$to" "$(wake_field "$f" say)" "$id" "$(wake_field "$f" lines)" || continue
+    rm -f "$f"
+    moved=$((moved + 1))
+  done <<WAKE_MOVE_EOF
+$(wake_pending "$from")
+WAKE_MOVE_EOF
+  printf '%s\n' "$moved"
+}
+
+# What the household has already reported about an errand, as a count of status
+# log lines. Here rather than in bin/reeve-sentry because the sentry is no
+# longer the only writer: delivering a wake marks the errand reported too, and
+# two copies of one path would drift the way the marker rules would have.
+cursor_file() { printf '%s/state/.cursor-%s\n' "$REEVE_HOME_D" "$1"; }
 
 # --- session identity -------------------------------------------------------
 # One home is shared by every reeve on this machine, so an errand id alone
