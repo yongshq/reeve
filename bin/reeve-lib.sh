@@ -83,7 +83,11 @@ watch_marker() { printf '%s/state/.sentry.watch-%s\n' "$REEVE_HOME_D" "$1"; }
 
 marker_stamp() { # marker_stamp <file> <poll>   write or refresh, whole, atomic
   local f=$1 p=${2:-15} tmp="$1.new.$$"
-  printf '%s %s %s\n' "$$" "$(date +%s)" "$p" > "$tmp" 2>/dev/null \
+  # `2>/dev/null` BEFORE the redirection it is there to silence, for the reason
+  # marker_read gives below: they are applied left to right, so a failing
+  # `> "$tmp"` on an unwritable home is reported by the shell on whatever stderr
+  # is at that moment, and written the other way round that is the real one.
+  printf '%s %s %s\n' "$$" "$(date +%s)" "$p" 2>/dev/null > "$tmp" \
     || { rm -f "$tmp"; return 1; }
   mv "$tmp" "$f" 2>/dev/null || { rm -f "$tmp"; return 1; }
   return 0
@@ -192,10 +196,16 @@ wake_leave() { # wake_leave <session> <line> [<errand>] [<log lines>]
   d=$(wake_dir "$1")
   mkdir -p "$d" 2>/dev/null || return 1
   tmp="$d/.new.$$.${RANDOM:-0}"
+  # The redirections are in this order for the reason marker_read gives: the
+  # shell applies them left to right and reports a failing `> "$tmp"` itself,
+  # on the stderr in force at that point. Written `> "$tmp" 2>/dev/null` this
+  # leaked `Permission denied` out of a caretaker, into state/sentry.log, and out
+  # of reeve-adopt onto the liege's terminal, which is the exact defect the note
+  # a hundred lines above documents as fixed.
   { printf 'errand=%s\n' "${3:-}"
     printf 'lines=%s\n'  "${4:-}"
     printf 'say=%s\n'    "$2"
-  } > "$tmp" 2>/dev/null || { rm -f "$tmp"; return 1; }
+  } 2>/dev/null > "$tmp" || { rm -f "$tmp"; return 1; }
   # WAKE_SEQ carries the last name this process took, so a caretaker leaving
   # several lines in one second walks forward instead of rescanning from zero
   # each time. Only ever a hint: the loop is what guarantees the name.
@@ -213,15 +223,24 @@ wake_leave() { # wake_leave <session> <line> [<errand>] [<log lines>]
 
 # Everything in this session's spool that is free to be delivered, oldest first.
 #
-# A reader claims an entry by renaming it to `<name>.claimed.<its pid>`, which
-# is what stops two readers delivering one line twice: the rename succeeds for
-# exactly one of them. A claim is not a lock, though, and must never outlive the
-# process holding it, so a claim whose pid is gone is free again. That is the
-# same judgement the markers above make about a stale process, made the same
-# way, and it is what makes an interrupted delivery cost latency rather than the
-# line.
+# A reader claims an entry by renaming it to `<name>.claimed.<its pid>.<epoch>`,
+# which is what stops two readers delivering one line twice: the rename succeeds
+# for exactly one of them. A claim is not a lock, though, and must never outlive
+# the process holding it, so a claim whose holder is gone is free again.
+#
+# Gone is decided by marker_alive, the function, not by a second copy of its
+# rule: the pid alive AND the claim young enough that the process really can
+# still be delivering. `kill -0` alone said the first half only, and pids are
+# reused, so an unrelated process inheriting the number hid the line for its
+# whole life. Orphaned claims are not rare enough to wave away either: a listing
+# trimmed with `head` leaves exactly one every time, because the reader dies at
+# the closed pipe between the rename and the `rm`.
+#
+# Hence the timestamp in the name. A claim with none, which is every claim a
+# reeve of an earlier version left behind, reads as expired and is retried: a
+# duplicate is noise where silence is the defect this channel exists to remove.
 wake_pending() { # wake_pending [<session>]
-  local s d f b pid
+  local s d f b claim pid ts
   s=${1:-$(reeve_session)}; [ -n "$s" ] || return 1
   d=$(wake_dir "$s"); [ -d "$d" ] || return 1
   for f in "$d"/*; do
@@ -229,10 +248,11 @@ wake_pending() { # wake_pending [<session>]
     b=${f##*/}
     case $b in
       *.claimed.*)
-        pid=${b##*.claimed.}
-        case $pid in ''|*[!0-9]*) continue ;; esac
+        claim=${b##*.claimed.}
+        pid=${claim%%.*}; ts=${claim#*.}
+        [ "$ts" = "$claim" ] && ts=''
         # Somebody is delivering it right now. Leave it to them.
-        kill -0 "$pid" 2>/dev/null && continue
+        marker_alive "$pid $ts" && continue
         ;;
     esac
     printf '%s\n' "$f"
@@ -250,7 +270,7 @@ wake_field() { # wake_field <spool file> <key>
 
 wake_claim() { # wake_claim <spool file>   prints the claimed path
   local f=$1 c
-  c="${f%%.claimed.*}.claimed.$$"
+  c="${f%%.claimed.*}.claimed.$$.$(date +%s)"
   if [ "$f" != "$c" ]; then mv "$f" "$c" 2>/dev/null || return 1; fi
   printf '%s\n' "$c"
 }
@@ -272,34 +292,76 @@ wake_release() { # wake_release <claimed path>   hand it back undelivered
 # fails leaves the entry exactly where it was, and a reader killed mid-line
 # leaves a claim its own death frees.
 #
-# Delivering also advances the errand's cursor, so the wake IS the report rather
-# than a second copy of one. Without it the reeve wakes twice for one finished
-# hand: once for the line the caretaker left and again on the next watch, off
-# the errand still standing in live_errands with no cursor against it. Never
-# backwards, because a cursor already further along was written by a watch that
-# read more of the log than this line accounts for.
+# Delivering also marks the ERRAND reported, so the wake IS the report rather
+# than a second copy of one. Without that the reeve wakes twice for one finished
+# hand: once for the line the caretaker left and again on the next watch, off the
+# errand still standing in live_errands with nothing recorded against it.
+#
+# Through wake_reported, and never by writing the errand's cursor. A cursor is
+# how far a watch has READ that errand's log, and a delivery reads none of it:
+# advancing it here marked every earlier line reported too, and, worse, made the
+# errand invisible to every later watch on the strength of a `printf` that
+# succeeded. A `printf` into a pipe succeeds whatever the far end does with it,
+# so `reeve-status --all | grep something-else` swallowed the line and silenced
+# the errand permanently. What stops that is above this function, in the reader:
+# see bin/reeve-status, which delivers a listing's lines on stderr so a filter on
+# the listing cannot eat them.
+#
+# Three results, because two of them used to be one: 0 a line was delivered, 1
+# the spool held nothing, 2 it held something that could not be delivered. An
+# unwritable spool used to report as an empty one, and a reeve was told nothing
+# is in flight while its own records said otherwise.
 wake_deliver() { # wake_deliver [<session>]
-  local s f c say id n cur
+  local s f c say saw=no
   s=${1:-$(reeve_session)}; [ -n "$s" ] || return 1
   while IFS= read -r f; do
     [ -n "$f" ] || continue
+    saw=yes
     c=$(wake_claim "$f") || continue
-    say=$(wake_field "$c" say)
-    printf '%s\n' "$say" || { wake_release "$c"; return 1; }
-    id=$(wake_field "$c" errand); n=$(wake_field "$c" lines)
-    case $id in ''|*[!a-z0-9-]*) id='' ;; esac
-    case $n  in ''|*[!0-9]*)     n=''  ;; esac
-    if [ -n "$id" ] && [ -n "$n" ]; then
-      cur=$(cat "$(cursor_file "$id")" 2>/dev/null | tr -d '[:space:]')
-      case $cur in ''|*[!0-9]*) cur=0 ;; esac
-      if [ "$n" -gt "$cur" ]; then printf '%s\n' "$n" > "$(cursor_file "$id")" 2>/dev/null || :; fi
+    # No `say=` at all is not a wake, it is a corrupt or foreign file. Delivered,
+    # it printed an empty line and consumed the entry, which reaches the reeve as
+    # an actionable wake with no reason in it. Set aside under a dot name instead,
+    # where the glob cannot see it and a human still can.
+    if ! say=$(wake_field "$c" say); then
+      mv "$c" "${c%/*}/.unreadable.${c##*/}" 2>/dev/null || rm -f "$c"
+      continue
     fi
+    printf '%s\n' "$say" || { wake_release "$c"; return 2; }
+    wake_reported "$(wake_field "$c" errand)" "$(wake_field "$c" lines)"
     rm -f "$c"
     return 0
   done <<WAKE_DELIVER_EOF
 $(wake_pending "$s")
 WAKE_DELIVER_EOF
+  [ "$saw" = no ] || return 2
   return 1
+}
+
+# One event is one report: record that this errand's log has been reported, as a
+# count of status lines, in the errand's own record.
+#
+# Beside the cursor and not in it, because they are two different facts about the
+# same question. The cursor says a watch read this much of the log and said so;
+# `delivered=` says the caretaker's line about it was handed over and taken.
+# bin/reeve-sentry's reported_done asks both, and either alone is enough.
+#
+# Never backwards, for the same reason the cursor is never moved backwards: a
+# stamp already further along accounted for more of the log than this line does,
+# and letting a stale wake drop it puts the errand back in live_errands to be
+# reported a second time, which is the duplicate this stamp exists to prevent.
+#
+# Only ever onto a record that exists. A wake naming an errand this home has no
+# record of, which is what a foreign or long-superseded spool entry looks like,
+# is delivered and then forgotten rather than given a record of its own.
+wake_reported() { # wake_reported <errand> <lines>
+  local id=${1:-} n=${2:-} cur
+  case $id in ''|*[!a-z0-9-]*) return 0 ;; esac
+  case $n  in ''|*[!0-9]*)     return 0 ;; esac
+  [ -f "$(meta_file "$id")" ] || return 0
+  cur=$(meta_get "$id" delivered 0 | tr -d '[:space:]')
+  case $cur in ''|*[!0-9]*) cur=0 ;; esac
+  [ "$n" -gt "$cur" ] || return 0
+  meta_set "$id" delivered "$n"
 }
 
 # The pending lines without taking any of them, for a caller that is answering
@@ -340,10 +402,10 @@ WAKE_MOVE_EOF
   printf '%s\n' "$moved"
 }
 
-# What the household has already reported about an errand, as a count of status
-# log lines. Here rather than in bin/reeve-sentry because the sentry is no
-# longer the only writer: delivering a wake marks the errand reported too, and
-# two copies of one path would drift the way the marker rules would have.
+# How much of an errand's status log a WATCH has read and reported, as a count of
+# lines. bin/reeve-sentry is its only writer. Here rather than there because
+# wake_reported above records the other half of the same question, a report that
+# came through the spool instead, and the two answers belong next to each other.
 cursor_file() { printf '%s/state/.cursor-%s\n' "$REEVE_HOME_D" "$1"; }
 
 # --- session identity -------------------------------------------------------
@@ -394,7 +456,7 @@ session_touch() {
   # `reeve-doctor` stop saying "run install.sh" on a machine that never has.
   [ -d "$REEVE_HOME_D/state" ] || return 0
   d=$(session_dir "$s"); mkdir -p "$d" 2>/dev/null || return 0
-  printf '%s\n' "$(date +%s)" > "$d/seen.$$" 2>/dev/null || return 0
+  printf '%s\n' "$(date +%s)" 2>/dev/null > "$d/seen.$$" || return 0
   mv -f "$d/seen.$$" "$d/seen" 2>/dev/null || rm -f "$d/seen.$$"
   # Saying "still here" is also the moment to clear out those who are not.
   sessions_prune_maybe
@@ -481,7 +543,7 @@ sessions_prune_maybe() {
     case $age in ''|*[!0-9]*) age=0 ;; esac
     [ $(( now - age )) -ge "${REEVE_PRUNE_EVERY:-3600}" ] || return 0
   fi
-  printf '%s\n' "$now" > "$mark" 2>/dev/null || return 0
+  printf '%s\n' "$now" 2>/dev/null > "$mark" || return 0
   sessions_prune >/dev/null
 }
 

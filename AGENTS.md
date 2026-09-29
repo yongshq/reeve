@@ -109,19 +109,40 @@ you sit blocked inside. Then say nothing further until it does.
 If you never start it, a hand can work for an hour, report `done:`, have its session cleaned up,
 and you will still be telling the liege the work is in flight. That happened. Two things now stand
 behind you and neither is a substitute for the watch: a caretaker leaves the terminal line for the
-session that briefed the errand, and either `bin/reeve-sentry` or `bin/reeve-status` hands it over
-the next time you run one. What that does and does not promise, exactly, because the last version
-of this paragraph promised more than the code did:
+session that briefed the errand, and either `bin/reeve-sentry` or a whole-fleet listing
+(`bin/reeve-status` bare, `--all` or `--orphans`) hands it over the next time you run one. What that
+does and does not promise, exactly, because the last two versions of this paragraph promised more
+than the code did:
 
-- it is kept until it has actually been printed, so a listing you trim or grep costs you nothing
-- a second reader cannot take it twice or destroy the rest
+- it is kept until its line has actually been written, so a trimmed listing costs you nothing
+- a listing writes those lines on STDERR, so one you grep costs you nothing either: a filter takes
+  the table, the line goes past it. That is the half a successful `printf` into a `grep` used to
+  lose outright, and it is why the promise covers both halves
+- a watch is the other reader, and there the single line it prints IS the report, which is what a
+  watch is run for
+- delivering marks that errand reported, so one event stays one report. It is recorded against the
+  errand, never as a cursor: a cursor says how much of a log a watch has read, and a delivery reads
+  none of it
+- a second reader cannot take it twice or destroy the rest, and a claim on one expires rather than
+  lasting as long as the reader's pid number
 - it follows the errand if another session adopts it with `bin/reeve-adopt`
 - a command asking some other question never spends one, so `bin/reeve-handoff new` copies pending
-  lines into the handoff instead, which is what makes them survive your reset
-- the one case with no answer: an errand whose record names no session, which is every errand on a
-  harness that exports no session id. There is no session to leave a line for, so nothing is left,
-  and instead the caretaker stops short of finishing the cleanup. The errand keeps its copy and
-  stays in flight, where the next watch on that home reports it.
+  lines into the handoff instead, which is what makes them survive your reset. `bin/reeve-status
+  <id>`, the single-errand form, never delivers either
+- a spool holding something it cannot give up says so, as a line of its own, instead of reading as
+  an empty one and leaving you told that nothing is in flight
+
+Three cases still have no answer, and all three are yours to know rather than to be surprised by:
+
+- an errand whose record names no session, which is every errand on a harness that exports no
+  session id. There is no session to leave a line for, so nothing is left, and instead the caretaker
+  stops short of finishing the cleanup. The errand keeps its copy and stays in flight, where the
+  next watch on that home reports it.
+- a reader that throws the line away after it has arrived: `2>/dev/null` or `2>&1 |` over a listing,
+  or a filter over the watch's own one line. The errand is marked reported and nothing says it again,
+  so never silence the stderr of a household command.
+- an undelivered line in the spool of a session `sessions_prune` collects once it is past
+  `session-retain`. Legitimate under that rule, and still a line that ends unread.
 
 A dispatch that ends with `NOTHING IS WATCHING` is not a finished dispatch.
 
@@ -392,7 +413,7 @@ fact per line, because you are the one reading it.
 | `bin/reeve-survey --register ...` | record the liege's answer about which manor a repo belongs to |
 | `bin/reeve-brief <id> <holding> --office <o>` | write a brief with the two seams |
 | `bin/reeve-dispatch <id>` | worktree, endpoint, launch. `--dry-run` changes nothing |
-| `bin/reeve-status <id>` / `--all` | the reconciled state, never the last line of the log. Bare lists yours, `--all` the machine's. A listing also delivers anything a caretaker left you, so a script asking a different question passes `--no-wake` |
+| `bin/reeve-status <id>` / `--all` | the reconciled state, never the last line of the log. Bare lists yours, `--all` the machine's. A listing also delivers anything a caretaker left you, on stderr so a filter over the table cannot eat it, and a script asking a different question passes `--no-wake` |
 | `bin/reeve-status --orphans` | errands whose owning session is provably gone |
 | `bin/reeve-adopt <id>` | take an orphaned errand on, so this session watches it |
 | `bin/reeve-answer <id> <key> <answer>` | close an open question, durably, then tell the hand |

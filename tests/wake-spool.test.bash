@@ -149,22 +149,45 @@ dis2=$(sort -u "$SCRATCH/got2" | grep -c . 2>/dev/null || echo 0)
 eq "1 two concurrent readers over $M lines: all delivered" "$dis2" "$M"
 eq "1 and each exactly once"                               "$got2" "$M"
 
-echo "--- 2. a line is removed after it is written, never before ---"
-# Measured on the shape this replaces: three pending signals, `reeve-status
-# --all | head -1` prints the first, destroys the second on the write that fails
-# and leaves the third. A reeve that trims or greps a listing lost whatever was
-# in flight at that moment, and so did a sentry killed between the two steps.
+echo "--- 2. a listing cannot lose a line to what the reeve does with its stdout ---"
+# Two ways a listing costs the reeve a signal, and one order of operations only
+# answers the first. A TRIM is a write that FAILS: measured on the shape this
+# replaces, `reeve-status --all | head -1` printed the first signal, destroyed the
+# second on the failed write and left the third, which writing before removing
+# settles. A FILTER is a write that SUCCEEDS into something that throws the line
+# away: `| grep` for anything else consumed all three and returned 0, and since
+# delivering marks the errand reported, that was the report, permanently and
+# silently. AGENTS.md promises both cases cost nothing.
+#
+# So a listing hands its lines over on stderr, outside the stream the reeve is
+# filtering, and both cases come out the same way.
 export REEVE_HOME="$SCRATCH/home2"
 export REEVE_SESSION=trimmer
 mkdir -p "$REEVE_HOME/state"
 errand alive trimmer "working: going"
 for i in 1 2 3; do leave trimmer "signal: pending-$i" alive; done
-shown=$("$ROOT/bin/reeve-status" --all 2>/dev/null | head -1 | grep -c .)
-eq "2 a trimmed listing prints one line"      "$shown" 1
-eq "2 and destroys none of the rest"          "$(count trimmer)" 2
-OUT=$("$ROOT/bin/reeve-status" --all 2>/dev/null)
-eq "2 which the next full listing delivers"   "$(printf '%s' "$OUT" | grep -c 'signal: pending-')" 2
-eq "2 leaving the spool empty"                "$(count trimmer)" 0
+ERRF="$SCRATCH/err.trim"
+shown=$("$ROOT/bin/reeve-status" --all 2>"$ERRF" | head -1 | grep -c .)
+eq "2 a trimmed listing still prints its table" "$shown" 1
+eq "2 and hands over every pending line"        "$(grep -c 'signal: pending-' "$ERRF")" 3
+eq "2 leaving the spool empty"                  "$(count trimmer)" 0
+
+# The filter, over an errand that has finished, which is the case the loss is
+# permanent for: the reeve greps a listing, the line is gone, the errand is
+# marked reported and every later watch says nothing is in flight.
+export REEVE_HOME="$SCRATCH/home2b"
+export REEVE_SESSION=filter
+mkdir -p "$REEVE_HOME/state"
+errand gone filter "working: going" "done: report written"
+leave filter 'signal: gone is done and its session was cleaned up with no reeve watching - report written' gone 2
+ERRF="$SCRATCH/err.grep"
+"$ROOT/bin/reeve-status" --all 2>"$ERRF" | grep '^kept' >/dev/null
+has "2 a filtered listing still tells the reeve" "$(cat "$ERRF")" "gone is done"
+eq  "2 and spends the line, having said it"      "$(count filter)" 0
+eq  "2 marking the errand reported"              "$(meta_of gone delivered)" 2
+OUT=$("$ROOT/bin/reeve-sentry" --once --no-reap 2>&1); RC=$?
+eq  "2 so the watch behind it adds nothing"      "$RC" 3
+nas "2 and says it once in all"                  "$OUT" "gone is done"
 
 echo "--- 3. a command asking a different question must not eat one ---"
 # reeve-handoff called reeve-status --all for its table, which drained the
@@ -232,9 +255,13 @@ eq "4 and is cleaned up all the same" \
 echo "--- 5. one event is one report ---"
 # The wake and the in-flight path both used to fire for one finished hand: the
 # watch printed the wake and exited, and the next watch found the errand still
-# standing in live_errands with no cursor against it and said the same thing
-# again. reeve-status calls a wake delivered twice noise; delivering one now
+# standing in live_errands with nothing recorded against it and said the same
+# thing again. reeve-status calls a wake delivered twice noise; delivering one now
 # marks the errand reported, which is what makes that true.
+#
+# In the errand's own record, not by moving its cursor. The cursor is how far a
+# watch has READ the log, a delivery reads none of it, and writing one from there
+# is what made a swallowed line silence the errand for good.
 export REEVE_HOME="$SCRATCH/home5"
 export REEVE_SESSION=owner
 mkdir -p "$REEVE_HOME/state"
@@ -243,10 +270,51 @@ leave owner 'signal: twice is done and its session was cleaned up with no reeve 
 OUT=$("$ROOT/bin/reeve-sentry" --once --no-reap 2>&1); RC=$?
 eq  "5 the first watch delivers the wake"   "$RC" 0
 has "5 saying which errand it was about"    "$OUT" "twice is done"
-eq  "5 and marks the errand reported"       "$(cat "$REEVE_HOME/state/.cursor-twice" 2>/dev/null)" 2
+eq  "5 and marks the errand reported"       "$(meta_of twice delivered)" 2
+eq  "5 without claiming to have read its log" \
+    "$([ -e "$REEVE_HOME/state/.cursor-twice" ] && echo present || echo absent)" absent
 OUT=$("$ROOT/bin/reeve-sentry" --once --no-reap 2>&1); RC=$?
 eq  "5 the next watch has nothing to add"   "$RC" 3
 nas "5 and does not report it again"        "$OUT" "twice is done"
+
+# The half of that the suite could not see: the stamp only ever moves forward.
+# A wake left when the log was shorter, delivered after the errand has been
+# reported in full, used to be able to walk the record backwards, put the errand
+# back into live_errands and have one event reported a second time.
+export REEVE_HOME="$SCRATCH/home5c"
+mkdir -p "$REEVE_HOME/state"
+errand stale owner "working: one" "working: two" "working: three" \
+       "needs-decision [key=k]: which" "resolved [key=k]: that one" "done: branch ready"
+leave owner 'signal: stale is done and its session was cleaned up with no reeve watching - branch ready' stale 6
+OUT=$("$ROOT/bin/reeve-sentry" --once --no-reap 2>&1)
+has "5 the wake for the whole log is delivered" "$OUT" "stale is done"
+eq  "5 and stamps the whole log"                "$(meta_of stale delivered)" 6
+leave owner 'signal: stale is done and its session was cleaned up with no reeve watching - branch ready' stale 2
+OUT=$("$ROOT/bin/reeve-sentry" --once --no-reap 2>&1)
+eq  "5 a wake from further back does not unreport it" "$(meta_of stale delivered)" 6
+OUT=$("$ROOT/bin/reeve-sentry" --once --no-reap 2>&1); RC=$?
+eq  "5 so the watch behind that one is quiet too"     "$RC" 3
+nas "5 with the event still reported just once"       "$OUT" "stale is done"
+
+# And the other invisible guard: the stamp goes in after the line has actually
+# been written, never before. Above the write, an errand whose line reached
+# nobody is marked reported and is never reported again. A closed stdout is what
+# a dead reader looks like from inside the writer.
+export REEVE_HOME="$SCRATCH/home5d"
+mkdir -p "$REEVE_HOME/state"
+errand unheard owner "working: going" "done: branch ready"
+leave owner 'signal: unheard is done and its session was cleaned up with no reeve watching - branch ready' unheard 2
+# Only the last line is the rc: a write to a closed fd 1 fails, which is the
+# thing under test, but bash keeps the bytes in the stream's buffer and flushes
+# them wherever fd 1 points next, so they arrive here behind the answer. The
+# entry, the stamp and the next watch are what say where the line really got to.
+rc=$(REEVE_SESSION=owner bash -c '. "$0"/bin/reeve-lib.sh
+  wake_deliver >&- 2>/dev/null; printf "%s\n" "$?"' "$ROOT" | tail -1)
+eq  "5 a write that does not land is not a delivery" "$rc" 2
+eq  "5 the line is still there to be delivered"      "$(count owner)" 1
+eq  "5 and nothing is marked reported"               "$(meta_of unheard delivered)" ''
+OUT=$("$ROOT/bin/reeve-sentry" --once --no-reap 2>&1)
+has "5 so the next watch delivers it after all"      "$OUT" "unheard is done"
 
 # A wake with nothing in flight behind it is still delivered, and by the sentry
 # rather than only by reeve-status: the errand it is about has usually been
@@ -303,6 +371,73 @@ eq  "8 the errand's own wake comes with it"       "$(count heir)" 1
 has "8 and it is the right one"                   "$(lines heir)" "handed is done"
 eq  "8 another errand's wake is left where it is" "$(count dead-owner)" 1
 has "8 and the adoption says so"                  "$OUT" "pending notification"
+
+echo "--- 9. a file in the spool that is not a wake is not delivered as one ---"
+# `say=$(wake_field ...)` fails to empty, `printf ''` succeeds, and the entry is
+# consumed: for bin/reeve-sentry that is exit 0, an actionable wake, with no
+# reason line, against a contract of exactly one line per exit. Only a corrupt or
+# foreign file reaches this, and the answer is to set it aside rather than to
+# report nothing and call it delivered.
+export REEVE_HOME="$SCRATCH/home9"
+export REEVE_SESSION=corrupt
+mkdir -p "$REEVE_HOME/state" "$(spool corrupt)"
+printf 'garbage with no keys\n' > "$(spool corrupt)/1000000000.1.00000"
+leave corrupt 'signal: real is done and its session was cleaned up with no reeve watching - answered' real 1
+OUT=$("$ROOT/bin/reeve-sentry" --once 2>&1); RC=$?
+eq  "9 the watch still wakes, for the line that is one" "$RC" 0
+has "9 and has something to say when it does"           "$OUT" "real is done"
+eq  "9 the unreadable file is set aside, not destroyed" \
+    "$(ls -a "$(spool corrupt)" | grep -c '^\.unreadable\.')" 1
+eq  "9 and is out of the spool's way"                   "$(count corrupt)" 0
+
+echo "--- 10. a spool that will not give its line up says so ---"
+# `wake_deliver` returned 1 both for "nothing pending" and for "could not claim",
+# so an unwritable spool read as an empty one: the line sat there, wake_peek could
+# still see it, and the watch told the reeve nothing was in flight.
+export REEVE_HOME="$SCRATCH/home10"
+export REEVE_SESSION=stuck
+mkdir -p "$REEVE_HOME/state"
+errand held stuck "working: going"
+leave stuck 'signal: held is done and its session was cleaned up with no reeve watching - answered' held 2
+chmod a-w "$(spool stuck)"
+OUT=$("$ROOT/bin/reeve-sentry" --once 2>&1); RC=$?
+# The same spool from the writing side. A caretaker that cannot leave its line
+# fails closed and says nothing: `> "$tmp" 2>/dev/null` let the shell report the
+# failed redirection itself, before the thing meant to hide it was in effect, so
+# `Permission denied` reached state/sentry.log and, through wake_move, the
+# liege's own terminal during reeve-adopt.
+noise=$(REEVE_SESSION=stuck bash -c '. "$0"/bin/reeve-lib.sh
+  wake_leave stuck "signal: no room" held 2 2>&1 >/dev/null; printf ""' "$ROOT")
+chmod u+w "$(spool stuck)"
+eq  "10 a spool it cannot write to is silent, not noisy"       "$noise" ''
+eq  "10 the watch wakes rather than reporting an empty spool" "$RC" 0
+has "10 and says what is in the way"                          "$OUT" "cannot be delivered"
+eq  "10 with the line still there to deliver"                 "$(count stuck)" 1
+
+echo "--- 11. a claim expires, it is not a lease on a pid's whole life ---"
+# A claim was freed by `kill -0` alone, which is not the judgement marker_alive
+# makes about a stale process: that one wants the pid alive AND a stamp recent
+# enough that it can still be doing the work. Pids are reused, and orphaned claims
+# are ordinary rather than rare, because a trimmed listing leaves one every time
+# the reader dies at the closed pipe between the rename and the rm. So an
+# unrelated process inheriting the number hid the line for its whole life.
+export REEVE_HOME="$SCRATCH/home11"
+export REEVE_SESSION=claimed
+mkdir -p "$REEVE_HOME/state"
+sleep 300 & LIVE=$!
+leave claimed 'signal: orphan is done and its session was cleaned up with no reeve watching - answered' orphan 1
+f=$(ls "$(spool claimed)"/* | head -1)
+mv "$f" "$f.claimed.$LIVE"
+has "11 a claim with no stamp is expired, whoever holds the pid" "$(drain claimed)" "orphan is done"
+
+leave claimed 'signal: second is done and its session was cleaned up with no reeve watching - answered' second 1
+f=$(ls "$(spool claimed)"/* | head -1)
+mv "$f" "$f.claimed.$LIVE.$(date +%s)"
+eq  "11 a fresh claim by a living reader is left to it" "$(drain claimed)" ''
+g=$(ls "$(spool claimed)"/*.claimed.* | head -1)
+mv "$g" "${g%.*}.$(( $(date +%s) - 300 ))"
+has "11 and the same claim is free once it goes stale"  "$(drain claimed)" "second is done"
+kill "$LIVE" 2>/dev/null; wait "$LIVE" 2>/dev/null
 
 printf '\npassed=%s failed=%s\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

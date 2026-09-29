@@ -19,10 +19,12 @@
 # this script exists to prevent.
 #
 # A listing also delivers any wake a caretaker took over while this reeve had
-# nothing watching, above the table and once only. bin/reeve-sentry is what
-# WAKES a reeve; this is what a reeve reads when it looks of its own accord, and
-# a reeve that dispatched and then sat idle does the second long before the
-# first.
+# nothing watching, above the table, once only, and on STDERR: the table is this
+# command's answer and a reeve filters it, while a notification is not part of
+# that answer and must not be inside the stream being filtered. bin/reeve-sentry
+# is what WAKES a reeve; this is what a reeve reads when it looks of its own
+# accord, and a reeve that dispatched and then sat idle does the second long
+# before the first.
 #
 # That delivery is for a reeve reading its own fleet, so anything that runs this
 # to answer some OTHER question passes --no-wake. Without it a wake is consumed
@@ -231,14 +233,25 @@ table_row() {
 }
 
 if [ "$all" = yes ] || [ -z "$id" ]; then
-  # Reports a caretaker took over while this reeve had nothing watching, drained
-  # before the table and never after: the errand each one is about has usually
-  # been cleaned up already, so the row it would appear in says nothing about
-  # the fact that nobody was ever told. Each one is removed once its line has
-  # actually reached stdout and never before, which is the difference between a
+  # Reports a caretaker took over while this reeve had nothing watching, handed
+  # over before the table and never after: the errand each one is about has
+  # usually been cleaned up already, so the row it would appear in says nothing
+  # about the fact that nobody was ever told. Each one is removed once its line
+  # has actually been written and never before, which is the difference between a
   # trimmed listing costing a signal and costing nothing: `reeve-status --all |
   # head -1` used to print the first, destroy the second on the write that
   # failed, and leave the third.
+  #
+  # ON STDERR, which is the half of that promise the order of the two steps
+  # cannot keep. A trim is a write that fails and the entry survives it, but a
+  # filter is a write that SUCCEEDS into something that discards the line:
+  # `reeve-status --all | grep '^kept'` consumed all three and the reeve saw
+  # none, and because delivering marks the errand reported that was the whole
+  # report, permanently. The table is this command's answer and a filter is the
+  # reeve's business; a notification is not part of that answer and does not
+  # belong in the stream being filtered. Out here it reaches the terminal whatever
+  # the pipeline does with stdout. `2>&1` or `2>/dev/null` still spends it, and
+  # AGENTS.md says so.
   #
   # Here as well as in bin/reeve-sentry because the sentry is what wakes a reeve
   # and this is what a reeve reads when it looks of its own accord. A reeve that
@@ -246,7 +259,13 @@ if [ "$all" = yes ] || [ -z "$id" ]; then
   #
   # --orphans too, deliberately: it is the command for finding work nobody is
   # watching, which is exactly what a pending wake is.
-  [ "$nowake" = yes ] || while wake_deliver; do :; done
+  if [ "$nowake" != yes ]; then
+    wrc=0
+    while :; do wake_deliver >&2 || { wrc=$?; break; }; done
+    # An unwritable spool used to be indistinguishable from an empty one, so a
+    # listing showed no notifications and said nothing about why.
+    [ "$wrc" = 2 ] && warn "a pending notification cannot be delivered, check $(wake_dir "$(reeve_session)")"
+  fi
   ids=$(errand_ids)
   if [ -z "$ids" ]; then
     if [ "$orphans" = yes ]; then info "no orphaned errands: every owner is alive or unaccounted for"

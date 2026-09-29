@@ -152,7 +152,11 @@ LOCK_F=$(lock_marker)
 lock_take() {
   mkdir -p "$REEVE_HOME_D/state" 2>/dev/null || return 1
   local mine="$LOCK_F.new.$$" held
-  printf '%s %s %s\n' "$$" "$(date +%s)" "$poll" > "$mine" 2>/dev/null || return 1
+  # Redirections in this order, as everywhere the household writes silently: they
+  # apply left to right, so `> "$mine" 2>/dev/null` lets the shell report its own
+  # failure to create the file before the thing meant to hide it is in effect,
+  # and a caretaker's stderr is state/sentry.log.
+  printf '%s %s %s\n' "$$" "$(date +%s)" "$poll" 2>/dev/null > "$mine" || return 1
   if ln "$mine" "$LOCK_F" 2>/dev/null; then rm -f "$mine"; return 0; fi
   held=$(marker_read "$LOCK_F")
   if marker_alive "$held"; then rm -f "$mine"; return 1; fi
@@ -231,8 +235,9 @@ else
   trap 'watch_drop; exit 129' HUP
 fi
 
-# cursor_file is in bin/reeve-lib.sh: delivering a wake marks the errand
-# reported as well, so the sentry is no longer its only writer.
+# cursor_file is in bin/reeve-lib.sh, beside wake_reported, which records the
+# other way this errand's log gets reported. This process is the cursor's only
+# writer.
 # Alongside the cursor, and for the same reason: what this errand looked like
 # last time, so a condition that is only interesting once is only reported once.
 attn_file() { printf '%s/state/.attn-%s\n' "$REEVE_HOME_D" "$1"; }
@@ -369,10 +374,20 @@ live_errands() {
 # A terminal errand whose whole log has already been reported is no longer work
 # in flight for a WATCH, whatever is still on disk: an artificer keeps its copy
 # and branch until the liege lands them, and that wait is the liege's, not
-# something to keep polling over. The cursor is the household's record of what
-# has been reported, so this asks only whether the wake was delivered.
+# something to keep polling over.
 #
-# A caretaker still makes no reports, and WRITES no cursor. It reads this one,
+# Two records answer that, and they are two different facts:
+#
+#   its cursor covers the log      a watch read it and said so, here in check_one
+#   `delivered=` covers the log    the caretaker's line about it was handed to
+#                                  this session's spool and taken from there
+#
+# Either alone is enough, and a delivery writes only the second. The first is a
+# READ position and a delivery reads no log: written from there it marked every
+# earlier line reported too, and it silenced the errand for good on a `printf`
+# whose far end may have been a `grep` that threw the line away.
+#
+# A caretaker still makes no reports, and WRITES neither record. It reads them,
 # for the single question below: whether a report is still owed. It did not, and
 # so it re-announced an errand the reeve had reported long ago, once per
 # caretaker process, for as long as the branch went unlanded.
@@ -381,11 +396,14 @@ live_errands() {
 # by accident, restored deliberately: it ends the watch once it has said its
 # piece, instead of ending it the moment a cleanup blanked a field.
 reported_done() { # reported_done <id>
-  local i=$1 st seen
+  local i=$1 total seen
   case $(status_field "$i" state) in done|failed) ;; *) return 1 ;; esac
+  total=$(status_lines "$(status_file "$i")")
   seen=$(cat "$(cursor_file "$i")" 2>/dev/null | tr -d '[:space:]')
-  [ -n "$seen" ] || return 1
-  [ "$(status_lines "$(status_file "$i")")" = "$seen" ]
+  case $seen in ''|*[!0-9]*) ;; *) [ "$seen" = "$total" ] && return 0 ;; esac
+  seen=$(meta_get "$i" delivered '' | tr -d '[:space:]')
+  case $seen in ''|*[!0-9]*) return 1 ;; esac
+  [ "$seen" = "$total" ]
 }
 
 # Does this errand still owe its owner a wake. Two ways it does not, and they
@@ -665,7 +683,22 @@ while :; do
     # printed here, which is what lets the spool entry survive a write that does
     # not land. It also marks the errand reported, so the next tick does not say
     # the same thing again off live_errands.
-    if wake_deliver; then exit 0; fi
+    #
+    # On stdout, unlike the same delivery in bin/reeve-status: a watch prints one
+    # line and that line is the report, so there is no listing around it for a
+    # filter to keep and nothing for one to throw away.
+    #
+    # A spool that holds something it will not give up is the third answer, and
+    # it is the reeve's business rather than this loop's: said out loud once, here,
+    # instead of falling through to "nothing in flight" while the records say
+    # otherwise.
+    wake_deliver; wrc=$?
+    [ "$wrc" = 0 ] && exit 0
+    if [ "$wrc" = 2 ]; then
+      printf 'stale: a pending notification cannot be delivered, check %s\n' \
+        "$(wake_dir "$(reeve_session)")"
+      exit 0
+    fi
   fi
 
   ids=$(live_errands)
