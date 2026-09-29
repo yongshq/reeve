@@ -235,9 +235,9 @@ else
   trap 'watch_drop; exit 129' HUP
 fi
 
-# cursor_file is in bin/reeve-lib.sh, beside wake_reported, which records the
+# cursor_file is in bin/reeve-lib.sh, beside delivered_file, which records the
 # other way this errand's log gets reported. This process is the cursor's only
-# writer.
+# writer, and wake_reported is that file's only writer.
 # Alongside the cursor, and for the same reason: what this errand looked like
 # last time, so a condition that is only interesting once is only reported once.
 attn_file() { printf '%s/state/.attn-%s\n' "$REEVE_HOME_D" "$1"; }
@@ -379,7 +379,7 @@ live_errands() {
 # Two records answer that, and they are two different facts:
 #
 #   its cursor covers the log      a watch read it and said so, here in check_one
-#   `delivered=` covers the log    the caretaker's line about it was handed to
+#   its delivered file covers it   the caretaker's line about it was handed to
 #                                  this session's spool and taken from there
 #
 # Either alone is enough, and a delivery writes only the second. The first is a
@@ -401,8 +401,9 @@ reported_done() { # reported_done <id>
   total=$(status_lines "$(status_file "$i")")
   seen=$(cat "$(cursor_file "$i")" 2>/dev/null | tr -d '[:space:]')
   case $seen in ''|*[!0-9]*) ;; *) [ "$seen" = "$total" ] && return 0 ;; esac
-  seen=$(meta_get "$i" delivered '' | tr -d '[:space:]')
-  case $seen in ''|*[!0-9]*) return 1 ;; esac
+  # delivered_get is the one reader of that file, and it answers absent,
+  # unreadable and malformed the same way: nothing reported here.
+  seen=$(delivered_get "$i") || return 1
   [ "$seen" = "$total" ]
 }
 

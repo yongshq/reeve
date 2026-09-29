@@ -90,6 +90,20 @@ lines()   {
   elif [ -f "$d" ]; then cat "$d" 2>/dev/null; fi
 }
 meta_of() { grep -m1 "^$2=" "$REEVE_HOME/state/$1.meta" 2>/dev/null | sed "s/^$2=//"; }
+# How much of an errand's log has been delivered, read from disk rather than
+# through the library, for the same reason as the two above: a suite that asks
+# the code under test where it keeps a thing cannot notice it keeping it in the
+# wrong place. Both shapes on purpose, so this suite still says something when it
+# is run against the commit that kept the count in the shared record.
+delivered_of() { # delivered_of <errand>
+  local v
+  v=$(cat "$REEVE_HOME/state/.delivered-$1" 2>/dev/null | tr -d '[:space:]')
+  [ -n "$v" ] || v=$(meta_of "$1" delivered)
+  printf '%s' "$v"
+}
+# Anything left lying beside it: a half written count, or a temp file a rename
+# should have consumed.
+delivered_debris() { ( cd "$REEVE_HOME/state" 2>/dev/null && ls -a | grep -c "^\.delivered-$1\." ) 2>/dev/null; }
 errand()  { # errand <id> <owner> <status line>...
   local id=$1 owner=$2; shift 2
   mkdir -p "$REEVE_HOME/state" "$REEVE_HOME/errands/$id"
@@ -184,7 +198,7 @@ ERRF="$SCRATCH/err.grep"
 "$ROOT/bin/reeve-status" --all 2>"$ERRF" | grep '^kept' >/dev/null
 has "2 a filtered listing still tells the reeve" "$(cat "$ERRF")" "gone is done"
 eq  "2 and spends the line, having said it"      "$(count filter)" 0
-eq  "2 marking the errand reported"              "$(meta_of gone delivered)" 2
+eq  "2 marking the errand reported"              "$(delivered_of gone)" 2
 OUT=$("$ROOT/bin/reeve-sentry" --once --no-reap 2>&1); RC=$?
 eq  "2 so the watch behind it adds nothing"      "$RC" 3
 nas "2 and says it once in all"                  "$OUT" "gone is done"
@@ -259,9 +273,15 @@ echo "--- 5. one event is one report ---"
 # thing again. reeve-status calls a wake delivered twice noise; delivering one now
 # marks the errand reported, which is what makes that true.
 #
-# In the errand's own record, not by moving its cursor. The cursor is how far a
-# watch has READ the log, a delivery reads none of it, and writing one from there
-# is what made a swallowed line silence the errand for good.
+# In a file of the errand's own, not by moving its cursor. The cursor is how far
+# a watch has READ the log, a delivery reads none of it, and writing one from
+# there is what made a swallowed line silence the errand for good.
+#
+# Nor in the errand's shared record, which is where it went first. meta_set is
+# read modify write over the whole record, so a delivery stamped there loses to
+# whichever of the caretaker's `woke=` and the teardown's `tornDown=` renames
+# last: 97 stamps of 200 overlapped pairs, measured, and every one of them an
+# errand back in live_errands to be reported twice. Case 12 is that end to end.
 export REEVE_HOME="$SCRATCH/home5"
 export REEVE_SESSION=owner
 mkdir -p "$REEVE_HOME/state"
@@ -270,7 +290,9 @@ leave owner 'signal: twice is done and its session was cleaned up with no reeve 
 OUT=$("$ROOT/bin/reeve-sentry" --once --no-reap 2>&1); RC=$?
 eq  "5 the first watch delivers the wake"   "$RC" 0
 has "5 saying which errand it was about"    "$OUT" "twice is done"
-eq  "5 and marks the errand reported"       "$(meta_of twice delivered)" 2
+eq  "5 and marks the errand reported"       "$(delivered_of twice)" 2
+eq  "5 in a file only this writes"          "$(meta_of twice delivered)" ''
+eq  "5 written whole, with nothing left beside it" "$(delivered_debris twice)" 0
 eq  "5 without claiming to have read its log" \
     "$([ -e "$REEVE_HOME/state/.cursor-twice" ] && echo present || echo absent)" absent
 OUT=$("$ROOT/bin/reeve-sentry" --once --no-reap 2>&1); RC=$?
@@ -288,10 +310,10 @@ errand stale owner "working: one" "working: two" "working: three" \
 leave owner 'signal: stale is done and its session was cleaned up with no reeve watching - branch ready' stale 6
 OUT=$("$ROOT/bin/reeve-sentry" --once --no-reap 2>&1)
 has "5 the wake for the whole log is delivered" "$OUT" "stale is done"
-eq  "5 and stamps the whole log"                "$(meta_of stale delivered)" 6
+eq  "5 and stamps the whole log"                "$(delivered_of stale)" 6
 leave owner 'signal: stale is done and its session was cleaned up with no reeve watching - branch ready' stale 2
 OUT=$("$ROOT/bin/reeve-sentry" --once --no-reap 2>&1)
-eq  "5 a wake from further back does not unreport it" "$(meta_of stale delivered)" 6
+eq  "5 a wake from further back does not unreport it" "$(delivered_of stale)" 6
 OUT=$("$ROOT/bin/reeve-sentry" --once --no-reap 2>&1); RC=$?
 eq  "5 so the watch behind that one is quiet too"     "$RC" 3
 nas "5 with the event still reported just once"       "$OUT" "stale is done"
@@ -312,7 +334,7 @@ rc=$(REEVE_SESSION=owner bash -c '. "$0"/bin/reeve-lib.sh
   wake_deliver >&- 2>/dev/null; printf "%s\n" "$?"' "$ROOT" | tail -1)
 eq  "5 a write that does not land is not a delivery" "$rc" 2
 eq  "5 the line is still there to be delivered"      "$(count owner)" 1
-eq  "5 and nothing is marked reported"               "$(meta_of unheard delivered)" ''
+eq  "5 and nothing is marked reported"               "$(delivered_of unheard)" ''
 OUT=$("$ROOT/bin/reeve-sentry" --once --no-reap 2>&1)
 has "5 so the next watch delivers it after all"      "$OUT" "unheard is done"
 
@@ -438,6 +460,64 @@ g=$(ls "$(spool claimed)"/*.claimed.* | head -1)
 mv "$g" "${g%.*}.$(( $(date +%s) - 300 ))"
 has "11 and the same claim is free once it goes stale"  "$(drain claimed)" "second is done"
 kill "$LIVE" 2>/dev/null; wait "$LIVE" 2>/dev/null
+
+echo "--- 12. another writer on the record cannot unreport a delivered line ---"
+# The delivery stamp spent one commit inside the errand's shared record, where
+# meta_set reads the whole file, drops one key, appends and renames the result
+# over the top. Any writer holding a copy read before the delivery puts that copy
+# back, and the stamp inside it is gone: measured over 200 fully overlapped
+# pairs, `woke=` lost 103 and the stamp 97, `tornDown=` 98 against 102, every
+# pair losing one of the two. The cost is not a lost write, it is the report said
+# twice, because an errand with no stamp is an errand back in live_errands.
+#
+# Reproduced here as what a lost update leaves on disk rather than by racing for
+# one: the record exactly as a caretaker read it before the delivery, with the
+# field that caretaker went on to write. A race would pass on a slow machine and
+# fail on a fast one, which is no test at all.
+export REEVE_HOME="$SCRATCH/home12"
+export REEVE_SESSION=owner
+mkdir -p "$REEVE_HOME/state"
+errand overlap owner "working: going" "done: branch ready"
+leave owner 'signal: overlap is done and its session was cleaned up with no reeve watching - branch ready' overlap 2
+before=$(cat "$REEVE_HOME/state/overlap.meta")
+OUT=$("$ROOT/bin/reeve-sentry" --once --no-reap 2>&1); RC=$?
+eq  "12 the wake is delivered"                     "$RC" 0
+has "12 and names the errand"                      "$OUT" "overlap is done"
+printf '%s\nwoke=2026-09-28T20:26:00\n' "$before" > "$REEVE_HOME/state/overlap.meta"
+eq  "12 a concurrent record write leaves the stamp alone" "$(delivered_of overlap)" 2
+OUT=$("$ROOT/bin/reeve-sentry" --once --no-reap 2>&1); RC=$?
+eq  "12 so the watch behind it has nothing to add" "$RC" 3
+nas "12 and one event is still one report"         "$OUT" "overlap is done"
+
+echo "--- 13. a home that cannot record a delivery still delivers it ---"
+# Recording it used to go through meta_set, whose redirections are unguarded on
+# purpose: its message is the only sign some homes give that they have gone read
+# only. That is fine everywhere it was already called from, and wrong here, where
+# the stream it lands in is the notification channel itself. Measured on the
+# commit before this one: `reeve-status --all` put the report on stderr and then
+# three shell errors after it, two failed redirections and an mv with nothing to
+# move, and left the errand unstamped anyway.
+#
+# So the write is guarded and the failure is said once, in the household's own
+# voice. The line is written before any of this, so what a read only home costs
+# is the memory of having reported, which is a duplicate later, never the report.
+export REEVE_HOME="$SCRATCH/home13"
+export REEVE_SESSION=readonly
+mkdir -p "$REEVE_HOME/state"
+errand frozen readonly "working: going" "done: report written"
+leave readonly 'signal: frozen is done and its session was cleaned up with no reeve watching - report written' frozen 2
+ERRF="$SCRATCH/err.frozen"
+chmod a-w "$REEVE_HOME/state"
+"$ROOT/bin/reeve-status" --all >/dev/null 2>"$ERRF"
+NOISE=$(cat "$ERRF")
+OUT2=$(REEVE_SESSION=readonly "$ROOT/bin/reeve-sentry" --once --no-reap 2>&1)
+chmod u+w "$REEVE_HOME/state"
+has "13 the report still reaches the reeve"        "$NOISE" "frozen is done"
+nas "13 with no shell error in the channel"        "$NOISE" "Permission denied"
+nas "13 and nothing about a file that is not there" "$NOISE" "No such file or directory"
+has "13 the home saying plainly what it could not do" "$NOISE" "could not record it"
+eq  "13 and no half written count left behind"     "$(delivered_debris frozen)" 0
+has "13 so the cost is the report repeated, not lost" "$OUT2" "frozen is done"
 
 printf '\npassed=%s failed=%s\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

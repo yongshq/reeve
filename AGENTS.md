@@ -120,9 +120,11 @@ than the code did:
   lose outright, and it is why the promise covers both halves
 - a watch is the other reader, and there the single line it prints IS the report, which is what a
   watch is run for
-- delivering marks that errand reported, so one event stays one report. It is recorded against the
-  errand, never as a cursor: a cursor says how much of a log a watch has read, and a delivery reads
-  none of it
+- delivering marks that errand reported, so one event stays one report. It is recorded in a file of
+  the errand's own, written by nothing else, and never as a cursor: a cursor says how much of a log
+  a watch has read, and a delivery reads none of it. A delivery that cannot be recorded, which is a
+  home that has gone read only, costs you a duplicate and never the line: the line is written first
+  and the failure to record it is said out loud
 - a second reader cannot take it twice or destroy the rest, and a claim on one expires rather than
   lasting as long as the reader's pid number
 - it follows the errand if another session adopts it with `bin/reeve-adopt`

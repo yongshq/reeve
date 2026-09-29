@@ -338,12 +338,12 @@ WAKE_DELIVER_EOF
 }
 
 # One event is one report: record that this errand's log has been reported, as a
-# count of status lines, in the errand's own record.
+# count of status lines, in the errand's delivered file.
 #
 # Beside the cursor and not in it, because they are two different facts about the
 # same question. The cursor says a watch read this much of the log and said so;
-# `delivered=` says the caretaker's line about it was handed over and taken.
-# bin/reeve-sentry's reported_done asks both, and either alone is enough.
+# the delivered count says the caretaker's line about it was handed over and
+# taken. bin/reeve-sentry's reported_done asks both, and either alone is enough.
 #
 # Never backwards, for the same reason the cursor is never moved backwards: a
 # stamp already further along accounted for more of the log than this line does,
@@ -353,15 +353,21 @@ WAKE_DELIVER_EOF
 # Only ever onto a record that exists. A wake naming an errand this home has no
 # record of, which is what a foreign or long-superseded spool entry looks like,
 # is delivered and then forgotten rather than given a record of its own.
+#
+# A failure to record is said out loud, once, in the household's own voice. The
+# line itself is already out, so what is lost is the memory of having said it,
+# which costs a duplicate report later and never the report: see delivered_set
+# for why that is the only outcome, and AGENTS.md for the promise it qualifies.
 wake_reported() { # wake_reported <errand> <lines>
   local id=${1:-} n=${2:-} cur
   case $id in ''|*[!a-z0-9-]*) return 0 ;; esac
   case $n  in ''|*[!0-9]*)     return 0 ;; esac
   [ -f "$(meta_file "$id")" ] || return 0
-  cur=$(meta_get "$id" delivered 0 | tr -d '[:space:]')
-  case $cur in ''|*[!0-9]*) cur=0 ;; esac
+  cur=$(delivered_get "$id") || cur=0
   [ "$n" -gt "$cur" ] || return 0
-  meta_set "$id" delivered "$n"
+  delivered_set "$id" "$n" && return 0
+  warn "delivered the wake for $id but could not record it in $(delivered_file "$id"), so it may be reported again"
+  return 1
 }
 
 # The pending lines without taking any of them, for a caller that is answering
@@ -407,6 +413,56 @@ WAKE_MOVE_EOF
 # wake_reported above records the other half of the same question, a report that
 # came through the spool instead, and the two answers belong next to each other.
 cursor_file() { printf '%s/state/.cursor-%s\n' "$REEVE_HOME_D" "$1"; }
+
+# That other half, as a file of its own beside the cursor: how much of the log
+# was handed over as a caretaker's line and taken, as a count of lines.
+#
+# Its own file because it has its own writer, and that is the whole point. It
+# lived in the errand's record for one commit, and meta_set is read modify write:
+# it reads the record, drops one key, appends the new value and renames the
+# result over the top. Every other field's writer does the same, so a reader
+# stamping a delivery inside a caretaker's `woke=` or a teardown's `tornDown=`
+# loses its update to whichever rename lands last. Measured over 200 fully
+# overlapped pairs, on the commit this replaces: against `woke=` the stamp went
+# 97 times and `woke=` itself 103, against `tornDown=` 102 against 98. Every
+# single pair lost one or the other, and a lost stamp is an errand back in
+# live_errands and reported to the reeve a second time. One file, one writer, and
+# there is no update to lose: the same rig reads 0 lost on either side here.
+#
+# Absent means absent, never delivered. Every errand briefed before this file
+# existed has none, and reads exactly as it always did: nothing reported, so the
+# next watch reports it.
+delivered_file() { printf '%s/state/.delivered-%s\n' "$REEVE_HOME_D" "$1"; }
+
+# Prints the count, or nothing and rc 1 when there is none to read. A file that
+# is missing, unreadable, empty or not a number is all one answer, the same
+# answer an errand from before this file gives: not delivered.
+delivered_get() { # delivered_get <errand>
+  local v
+  v=$(cat "$(delivered_file "$1")" 2>/dev/null | tr -d '[:space:]')
+  case $v in ''|*[!0-9]*) return 1 ;; esac
+  printf '%s\n' "$v"
+}
+
+# Written whole, through a temp file and a rename, the way wake_leave writes a
+# spool entry: a reader arriving mid-write sees the old count or the new one and
+# never half of either.
+#
+# Both redirections guarded, and `2>/dev/null` FIRST, because the shell applies
+# them left to right and reports a failing `> "$tmp"` itself on whatever stderr
+# is in force at that point. Unguarded here, an unwritable home put three shell
+# error lines into the stream a listing delivers its notifications on: two from
+# the redirections and one from the mv that then had nothing to move. That stream
+# is the channel, and contaminating it is not how a home reports being read only.
+# meta_set's own unguarded message is left exactly as it is, deliberately: it is
+# the only sign some homes give, and it is not written into this channel.
+delivered_set() { # delivered_set <errand> <count>
+  local f tmp
+  f=$(delivered_file "$1"); tmp="$f.$$"
+  mkdir -p "$(dirname "$f")" 2>/dev/null || return 1
+  printf '%s\n' "$2" 2>/dev/null > "$tmp" || { rm -f "$tmp" 2>/dev/null; return 1; }
+  mv "$tmp" "$f" 2>/dev/null || { rm -f "$tmp" 2>/dev/null; return 1; }
+}
 
 # --- session identity -------------------------------------------------------
 # One home is shared by every reeve on this machine, so an errand id alone
