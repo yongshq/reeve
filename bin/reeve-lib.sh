@@ -891,15 +891,28 @@ STATUS_FIELD_EOF
 # capture that fails or a harness that words its errors differently falls back
 # to time alone, which is the later answer, never the wrong one.
 #
-# Either threshold set to 0 turns its half off. A value that is not a whole
-# number turns it off too, rather than reading as zero seconds and firing on
-# every poll: fail closed, the same way an unreadable backend does.
+# Either threshold set to 0 turns its half off, and only its half. A value that
+# is not a whole number turns its half off too, rather than reading as zero
+# seconds and firing on every poll: fail closed, the same way an unreadable
+# backend does. Closed is also silent, so stale_config_warn says so, and both
+# the sentry and the listing run it.
 
 stale_after() { # stale_after <config key> <default>   prints seconds, or rc 1 when off
   local v; v=$(config_get "$1" "$2")
   case $v in ''|*[!0-9]*) return 1 ;; esac
   [ "$v" -gt 0 ] || return 1
   printf '%s\n' "$v"
+}
+
+# One stderr line per threshold that is set to something other than a whole
+# number. Zero is a choice and is not remarked on.
+stale_config_warn() {
+  case $(config_get hand-stale 0) in
+    ''|*[!0-9]*) warn "config/hand-stale is not a whole number of seconds, so the staleness check on time alone is off" ;;
+  esac
+  case $(config_get hand-stale-error 0) in
+    ''|*[!0-9]*) warn "config/hand-stale-error is not a whole number of seconds, so the shorter staleness check after an API error is off" ;;
+  esac
 }
 
 # Seconds since the status file last changed. The file's own mtime, because an
@@ -937,8 +950,11 @@ stale_probe() {
   [ "$st" = working ] || return 1
   [ "$attn" = settled ] || return 1
   [ -n "$tgt" ] || return 1
-  quiet=$(stale_after hand-stale 7200) || return 1
+  # Each half on its own value: a bad hand-stale once switched the error path
+  # off with it, although that path's own threshold was fine.
+  quiet=$(stale_after hand-stale 7200) || quiet=''
   err=$(stale_after hand-stale-error 600) || err=''
+  [ -n "$quiet$err" ] || return 1
   age=$(status_silence "$id") || return 1
   if [ -n "$err" ] && [ "$age" -ge "$err" ]; then
     text=$("$bin/reeve-backend" call capture "$tgt" 200 --backend "$bk" 2>/dev/null) || text=''
@@ -946,8 +962,25 @@ stale_probe() {
       printf '%s error\n' "$age"; return 0
     fi
   fi
-  [ "$age" -ge "$quiet" ] || return 1
+  [ -n "$quiet" ] && [ "$age" -ge "$quiet" ] || return 1
   printf '%s quiet\n' "$age"
+}
+
+# stale_unseen <id> <state> <attention>
+#
+# The case stale_probe cannot judge and should not pass over in silence: a
+# `working` hand silent past `hand-stale` whose attention reads `unknown`. That
+# is every hand on a backend or harness that cannot tell idle from busy, tmux
+# without herdr among them, where `settled` never comes and the check above can
+# never fire. Prints the silence in seconds when that is the case, so the caller
+# can say the check is blind here rather than let it read as quiet.
+stale_unseen() {
+  local quiet age
+  [ "$2" = working ] && [ "$3" = unknown ] || return 1
+  quiet=$(stale_after hand-stale 7200) || return 1
+  age=$(status_silence "$1") || return 1
+  [ "$age" -ge "$quiet" ] || return 1
+  printf '%s\n' "$age"
 }
 
 # How long, for a human. The long form for a reason line, the short one for a

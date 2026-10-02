@@ -52,15 +52,10 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-# A threshold that is not a number turns the staleness check off rather than
-# firing on every row, which is the safe direction and also a silent one, so the
-# command a reeve reads of its own accord says so. Zero is a choice and is not
-# remarked on.
-for k in hand-stale hand-stale-error; do
-  case $(config_get "$k" 0) in
-    ''|*[!0-9]*) warn "config/$k is not a whole number of seconds, so that staleness check is off" ;;
-  esac
-done
+# A threshold that is not a number turns its half of the staleness check off
+# rather than firing on every row, which is the safe direction and also a silent
+# one, so the command a reeve reads of its own accord says so.
+stale_config_warn
 
 errand_ids() {
   local mine own; mine=$(reeve_session)

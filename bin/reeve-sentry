@@ -95,6 +95,12 @@ done
 # below is a no-op rather than something written to a log nobody opens.
 say() { [ "$caretaker" = yes ] && return 0; printf "$@"; }
 
+# A bad staleness threshold turns its half of that check off, and the sentry is
+# the only thing that would have woken the reeve for it, so the sentry says so
+# itself rather than leaving it to a listing the reeve may never run. On stderr,
+# so the one reason line on stdout stays one line.
+[ "$caretaker" = yes ] || stale_config_warn
+
 # --- markers: who holds this home -------------------------------------------
 # Two files in state/, one shape, one line: `<pid> <epoch seconds> <poll>`.
 #
@@ -243,6 +249,10 @@ fi
 attn_file() { printf '%s/state/.attn-%s\n' "$REEVE_HOME_D" "$1"; }
 # And for the same reason, which silence was already reported stale.
 stale_file() { printf '%s/state/.stale-%s\n' "$REEVE_HOME_D" "$1"; }
+
+# Errands this process has already said it cannot judge for staleness, one id
+# per line, so a long watch says it once rather than every poll.
+unseen=''
 
 # How long a session must sit waiting before it is worth a wake. A hand between
 # tool calls can read as not-working for an instant, and a wake for that would be
@@ -440,7 +450,7 @@ status_lines() {
 # Absorb or escalate. One errand, one verdict.
 check_one() {
   local i=$1 f seen now again new st open div bk tgt live
-  local attn af since woke nowsec last sf stale mark how
+  local attn af since woke nowsec last sf stale mark how sl sm
 
   # Counted BEFORE the verdict is read, and again after. The cursor is what says
   # a line has been dealt with, so advancing it past a line the verdict did not
@@ -628,17 +638,37 @@ check_one() {
   # has said nothing for longer than any turn should take. stale_probe in
   # bin/reeve-lib.sh owns which signals make that, and why.
   #
-  # One silence, one wake. The latch is the status file itself: what it looked
-  # like when this was reported, as its line count and mtime. Any append changes
-  # both, so a hand that speaks again and then falls silent again is a second
-  # wake, while the same silence on the next poll, or the next watch, is not.
-  # Keyed off the file rather than off whether the probe still says stale, so a
-  # backend that reads `unknown` for one poll cannot clear it and buy a repeat.
+  # One silence, one wake. The latch is one file, `<since> <lines> <mtime>
+  # <woke>`: when this silence was first seen stale, what the status file looked
+  # like then, as its line count and mtime, and whether it has been reported.
+  #
+  # Two things re-arm it. An append changes the line count and mtime, so a hand
+  # that speaks again and then falls silent again is a second wake. And the
+  # session seen `working` deletes the file outright, because that is what a
+  # steer looks like from here: the reeve tells a dead turn to carry on, the hand
+  # works without writing a line, and dies again. Keyed off the file alone, that
+  # second death was never reported, so the remedy the contract prescribes
+  # could only ever be used once. `unknown` re-arms nothing, so a backend that
+  # blinks for one poll cannot buy a repeat.
+  #
+  # And a dwell, the attention probe's own, for the reason it has one: a hand
+  # between tool calls can read `settled` for an instant. The first stale reading
+  # only starts the clock, and any `working` reading in between stops it.
   sf=$(stale_file "$i")
+  [ "$attn" = working ] && rm -f "$sf"
   if [ "$live" = alive ] && stale=$(stale_probe "$i" "$st" "$attn" "$tgt" "$bk" "$BIN"); then
     mark="$now $(stat -f %m "$f" 2>/dev/null || stat -c %Y "$f" 2>/dev/null)"
-    [ "$(cat "$sf" 2>/dev/null)" = "$mark" ] && return 1
-    printf '%s\n' "$mark" > "$sf"
+    since=''; sl=''; sm=''; woke=no
+    [ -f "$sf" ] && read -r since sl sm woke < "$sf"
+    nowsec=$(attn_now)
+    case ${since:-} in ''|*[!0-9]*) sl='' ;; esac
+    if [ "$sl $sm" != "$mark" ]; then
+      since=$nowsec; woke=no
+      printf '%s %s no\n' "$since" "$mark" > "$sf"
+    fi
+    [ "${woke:-no}" = yes ] && return 1
+    [ $(( nowsec - since )) -ge "$attn_dwell" ] || return 1
+    printf '%s %s yes\n' "$since" "$mark" > "$sf"
     last=$(status_field "$i" last)
     case ${stale#* } in
       error) how='idle after an API error' ;;
@@ -647,9 +677,23 @@ check_one() {
     # Reported and nothing more. Never reaped, never prodded: whether a paused
     # hand is resumed, re-sent or abandoned is the reeve's call, and the session
     # is still holding whatever context it had.
-    printf 'stale: %s has been silent for %s with its session %s, last said %s\n' \
+    #
+    # `idle:`, not `stale:`, which the case above already uses for a session
+    # that is gone. The two want different things done, so one line has to say
+    # which it is.
+    printf 'idle: %s has been silent for %s with its session %s, last said %s\n' \
       "$i" "$(silence_say "${stale%% *}")" "$how" "${last:-nothing}"
     return 0
+  fi
+
+  # The one case the probe is blind to, said rather than left to read as quiet:
+  # a backend or harness that cannot tell idle from busy never reads `settled`,
+  # so the wake above can never come for this hand. Stderr, once per watch.
+  if [ "$live" = alive ] && ! lines_has "$i" "$unseen" \
+     && stale=$(stale_unseen "$i" "$st" "$attn"); then
+    unseen="$unseen$i
+"
+    warn "$i has been silent for $(silence_say "$stale") but its session reads unknown on backend $bk, so it cannot be judged stale and no idle wake will come for it"
   fi
   return 1
 }

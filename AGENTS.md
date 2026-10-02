@@ -183,9 +183,16 @@ Rules you must hold to:
   API error, sits alive at its prompt with `working:` as its last word and nothing to say it
   stopped. The sentry calls that `stale` once its status file has been silent past
   `config/hand-stale` (default two hours) with its session idle, or past `config/hand-stale-error`
-  (default ten minutes) when the pane also shows the API error that ended the turn. It is a wake,
-  once per silence, and it is only ever reported: never reaped, never prodded. A `blocked:` hand
-  is not checked, because it already woke you. `bin/reeve-status` shows it in its process column.
+  (default ten minutes) when the pane also shows the API error that ended the turn. The wake
+  waits for the session to read idle for the same 90 seconds a `waiting` one must. Its line opens
+  `idle:`, where a session that is gone opens `stale:`, and it is only ever reported: never
+  reaped, never prodded. Once per silence, re-armed when the hand writes a line or its session is
+  seen working again, so a steered hand that dies a second time wakes you a second time. A `blocked:` hand is not checked, because it already woke you. `bin/reeve-status` shows it
+  in its process column. Two limits. A backend or harness that cannot tell idle from busy, tmux
+  without herdr among them, never reads idle, so the check cannot fire there: the sentry says so
+  on stderr, once per watch, for a hand silent past `config/hand-stale`. And a threshold set to
+  anything but a whole number of seconds turns its half of the check off, which the sentry and
+  the listing both say on stderr.
 - When the sentry wakes you, handle every actionable errand before you reply to the liege. Do not
   report on one and leave two.
 - **You supervise your own errands and nobody else's.** Several reeves share one home, and an
@@ -238,6 +245,9 @@ Escalate when, and only when:
 - An errand finished. Report it.
 - The sentry said an errand is `waiting`. Nobody can answer that but the liege, in the session
   itself, so say where it is running and what it last reported.
+- The sentry said an errand is `idle`. Look at the session first. If its turn died, steer it
+  back to its brief in its own session, then tell the liege what the silence cost. Never reap it:
+  the session is still holding the work, and steering is what recovers it.
 - Something breached a hard rule, or a teardown refused.
 
 Do not escalate progress. "The artificer is at 60 percent" is noise. Silence means work is
@@ -426,7 +436,7 @@ fact per line, because you are the one reading it.
 | `bin/reeve-status --orphans` | errands whose owning session is provably gone |
 | `bin/reeve-adopt <id>` | take an orphaned errand on, so this session watches it |
 | `bin/reeve-answer <id> <key> <answer>` | close an open question, durably, then tell the hand |
-| `bin/reeve-sentry` | stand watch, print one reason line, exit. A hand idle and silent past its threshold is one of them |
+| `bin/reeve-sentry` | stand watch, print one reason line, exit. A hand idle and silent past its threshold is one of them, opening `idle:` |
 | `bin/reeve-teardown <id>` | remove a finished errand's copy, refusing on unlanded work |
 | `bin/reeve-memory` | the mechanics behind `/inscribe`, `/strike`, `/recall`, `/glean` |
 | `bin/reeve-handoff new <manor>` | scaffold a handoff, with the factual parts already filled in |

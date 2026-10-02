@@ -14,6 +14,11 @@
 #   6. one silence is one wake, and a new silence after speaking is a second
 #   7. the dead turn marker shortens the wait, and only on real evidence
 #   8. it reports and never acts
+#   9. a steer re-arms it: working again, then idle again without a line, wakes
+#  10. a bad hand-stale leaves the error wait working, and says so on the watch
+#  11. a momentary settled reading mid turn is not a wake: the dwell
+#  12. a gone session and an idle one open with different words
+#  13. a session that cannot say whether it is idle is said to be unjudgeable
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 
 PASS=0; FAIL=0
@@ -37,11 +42,11 @@ export REEVE_ROOT="$SCRATCH/root"
 export REEVE_HOME="$SCRATCH/home"
 mkdir -p "$REEVE_ROOT/backends" "$REEVE_HOME/state" "$REEVE_HOME/config" "$REEVE_HOME/errands/hung"
 
-export STUB_ATTN="$SCRATCH/attn" STUB_PANE="$SCRATCH/pane" STUB_ACTS="$SCRATCH/acts"
+export STUB_ATTN="$SCRATCH/attn" STUB_PANE="$SCRATCH/pane" STUB_ACTS="$SCRATCH/acts" STUB_LIVE="$SCRATCH/live"
 cat > "$REEVE_ROOT/backends/stub.sh" <<'STUB'
 reeve_backend_stub_available()        { return 0; }
 reeve_backend_stub_describe()         { echo stub; }
-reeve_backend_stub_agent_state()      { echo alive; }
+reeve_backend_stub_agent_state()      { cat "$STUB_LIVE" 2>/dev/null || echo alive; }
 reeve_backend_stub_attention_state()  { cat "$STUB_ATTN"; }
 reeve_backend_stub_capture()          { cat "$STUB_PANE" 2>/dev/null; }
 reeve_backend_stub_wait_change()      { return 2; }
@@ -58,6 +63,8 @@ printf 'target=s|s:p1\nbackend=stub\noffice=artificer\nrepo=\nworktree=\nbranch=
 # the case says and never a second older.
 NOW=$(date +%s)
 export REEVE_NOW=$NOW
+# No dwell, so one watch is one sample, except in case 11 which is about it.
+export REEVE_ATTN_DWELL=0
 
 # backdate <seconds ago>   set the status file's mtime, BSD date first, then GNU
 backdate() {
@@ -84,7 +91,7 @@ say 'working: rewriting the parser'
 backdate 7300
 sentry
 ck_eq  "1 a silent idle working hand wakes the sentry"   "$RC" 0
-ck_has "1 it names the errand and the silence"            "$OUT" "stale: hung has been silent for 2h 1m"
+ck_has "1 it names the errand and the silence"            "$OUT" "idle: hung has been silent for 2h 1m"
 ck_has "1 it says the session is idle"                    "$OUT" "with its session idle at its prompt"
 ck_has "1 and quotes what it last said"                   "$OUT" "last said rewriting the parser"
 ck_eq  "1 one line, like every other reason"              "$(printf '%s\n' "$OUT" | grep -c .)" 1
@@ -118,7 +125,7 @@ for a in working waiting unknown; do
   printf '%s\n' "$a" > "$STUB_ATTN"
   rm -f "$REEVE_HOME/state/.attn-hung"
   sentry
-  ck_not "4 a session reading $a is never stale"          "$OUT" "has been silent"
+  ck_not "4 a session reading $a is never stale"          "$OUT" "idle:"
   ck_not "4 nor in the listing when $a"                    "$(row)" "stale"
 done
 printf 'settled\n' > "$STUB_ATTN"
@@ -214,6 +221,101 @@ ck_eq  "8 a reaping watch still only reports"             "$RC" 0
 ck_eq  "8 nothing was sent, killed or launched"           "$(cat "$STUB_ACTS")" ""
 ck_eq  "8 and nothing was torn down"                      "$(grep -c '^tornDown=' "$META")" 0
 ck_eq  "8 the hand still owns its log"                    "$(cat "$STATUS")" "working: rewriting the parser"
+
+# --- 9. a steer re-arms it -------------------------------------------------
+# Last night's recovery: the reeve told a dead turn to carry on, the hand worked
+# without writing a line, and died again. The status file never changed, and
+# the second death has to be a second wake all the same.
+say 'working: rewriting the parser'
+backdate 86400
+sentry
+ck_eq  "9 the first death wakes"                          "$RC" 0
+sentry
+ck_eq  "9 and is said once"                               "$RC" 4
+printf 'working\n' > "$STUB_ATTN"; sentry
+ck_eq  "9 the steered turn is quiet while it works"       "$RC" 4
+ck_eq  "9 and working re-arms the latch"                  "$([ -f "$REEVE_HOME/state/.stale-hung" ] && echo kept || echo gone)" gone
+printf 'settled\n' > "$STUB_ATTN"; sentry
+ck_eq  "9 the second death wakes again, with no new line" "$RC" 0
+ck_has "9 the same errand, the same silence"              "$OUT" "idle: hung has been silent for 24h 0m"
+sentry
+ck_eq  "9 and that one is said once too"                  "$RC" 4
+
+# --- 10. a bad hand-stale is not a bad hand-stale-error --------------------
+cat > "$STUB_PANE" <<'PANE'
+  ⎿  API Error: Can't reach the API server (ENOTFOUND)
+  ❯
+PANE
+for v in abc 7200s ''; do
+  say 'working: rewriting the parser'
+  backdate 700
+  printf '%s\n' "$v" > "$REEVE_HOME/config/hand-stale"
+  sentry
+  ck_eq  "10 hand-stale [$v]: the error wait still fires"  "$RC" 0
+  ck_has "10 hand-stale [$v]: as an API error"             "$OUT" "idle after an API error"
+  ck_has "10 hand-stale [$v]: and the watch says why"      "$OUT" "config/hand-stale is not a whole number"
+  ck_eq  "10 hand-stale [$v]: on stderr, one stdout line"  \
+    "$(say 'working: rewriting the parser'; backdate 700; "$ROOT/bin/reeve-sentry" --once --no-reap 2>/dev/null | grep -c .)" 1
+done
+: > "$STUB_PANE"
+say 'working: rewriting the parser'
+backdate 864000
+sentry
+ck_eq  "10 without an error pane, still closed"           "$RC" 4
+ck_has "10 and the quiet watch says the check is off"     "$OUT" "the staleness check on time alone is off"
+printf 'nope\n' > "$REEVE_HOME/config/hand-stale-error"
+rm -f "$REEVE_HOME/config/hand-stale"
+sentry
+ck_eq  "10 a bad error wait leaves time alone working"    "$RC" 0
+ck_has "10 and is said too"                               "$OUT" "config/hand-stale-error is not a whole number"
+rm -f "$REEVE_HOME/config/hand-stale-error"
+
+# --- 11. the dwell ---------------------------------------------------------
+# A hand between tool calls can read settled for an instant. The first stale
+# reading starts a clock; a working one stops it.
+dsentry() { OUT=$(REEVE_ATTN_DWELL=90 REEVE_ATTN_NOW=$1 "$ROOT/bin/reeve-sentry" --once --no-reap 2>&1); RC=$?; }
+say 'working: rewriting the parser'
+backdate 86400
+dsentry "$NOW"
+ck_eq  "11 one settled reading is not a wake"             "$RC" 4
+printf 'working\n' > "$STUB_ATTN"; dsentry $(( NOW + 30 ))
+ck_eq  "11 the turn was still going"                      "$RC" 4
+printf 'settled\n' > "$STUB_ATTN"; dsentry $(( NOW + 100 ))
+ck_eq  "11 the clock restarted, so still no wake"         "$RC" 4
+dsentry $(( NOW + 150 ))
+ck_eq  "11 nor inside the dwell"                          "$RC" 4
+dsentry $(( NOW + 190 ))
+ck_eq  "11 settled past the dwell is the wake"            "$RC" 0
+ck_has "11 and it is the idle line"                       "$OUT" "idle: hung"
+
+# --- 12. two conditions, two prefixes --------------------------------------
+say 'working: rewriting the parser'
+backdate 86400
+printf 'dead\n' > "$STUB_LIVE"
+sentry
+ck_eq  "12 a gone session opens with stale:"              "${OUT%%:*}" stale
+ck_has "12 and says it left no result"                    "$OUT" "left no result"
+rm -f "$STUB_LIVE"
+say 'working: rewriting the parser'
+backdate 86400
+sentry
+ck_eq  "12 an idle living one opens with idle:"           "${OUT%%:*}" idle
+
+# --- 13. a session that cannot say ------------------------------------------
+# tmux without herdr reads unknown, never settled, so the wake cannot come. The
+# watch says so instead of reading as quiet.
+printf 'unknown\n' > "$STUB_ATTN"
+say 'working: rewriting the parser'
+backdate 86400
+sentry
+ck_eq  "13 unknown is still not a wake"                   "$RC" 4
+ck_has "13 but the watch says it cannot judge it"         "$OUT" "hung has been silent for 24h 0m but its session reads unknown"
+ck_eq  "13 on stderr, so stdout stays one line"           \
+  "$("$ROOT/bin/reeve-sentry" --once --no-reap 2>/dev/null | grep -c .)" 1
+backdate 600
+sentry
+ck_not "13 inside the threshold there is nothing to say"  "$OUT" "reads unknown"
+printf 'settled\n' > "$STUB_ATTN"
 
 echo
 echo "passed=$PASS failed=$FAIL"
