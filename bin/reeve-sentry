@@ -241,6 +241,8 @@ fi
 # Alongside the cursor, and for the same reason: what this errand looked like
 # last time, so a condition that is only interesting once is only reported once.
 attn_file() { printf '%s/state/.attn-%s\n' "$REEVE_HOME_D" "$1"; }
+# And for the same reason, which silence was already reported stale.
+stale_file() { printf '%s/state/.stale-%s\n' "$REEVE_HOME_D" "$1"; }
 
 # How long a session must sit waiting before it is worth a wake. A hand between
 # tool calls can read as not-working for an instant, and a wake for that would be
@@ -438,7 +440,7 @@ status_lines() {
 # Absorb or escalate. One errand, one verdict.
 check_one() {
   local i=$1 f seen now again new st open div bk tgt live
-  local attn af since woke nowsec last
+  local attn af since woke nowsec last sf stale mark how
 
   # Counted BEFORE the verdict is read, and again after. The cursor is what says
   # a line has been dealt with, so advancing it past a line the verdict did not
@@ -621,6 +623,34 @@ check_one() {
       printf 'stale: %s left no result and its session is %s, last reported %s\n' "$i" "$live" "$st"
       return 0 ;;
   esac
+
+  # The converse of the case above: a hand still there, idle at its prompt, that
+  # has said nothing for longer than any turn should take. stale_probe in
+  # bin/reeve-lib.sh owns which signals make that, and why.
+  #
+  # One silence, one wake. The latch is the status file itself: what it looked
+  # like when this was reported, as its line count and mtime. Any append changes
+  # both, so a hand that speaks again and then falls silent again is a second
+  # wake, while the same silence on the next poll, or the next watch, is not.
+  # Keyed off the file rather than off whether the probe still says stale, so a
+  # backend that reads `unknown` for one poll cannot clear it and buy a repeat.
+  sf=$(stale_file "$i")
+  if [ "$live" = alive ] && stale=$(stale_probe "$i" "$st" "$attn" "$tgt" "$bk" "$BIN"); then
+    mark="$now $(stat -f %m "$f" 2>/dev/null || stat -c %Y "$f" 2>/dev/null)"
+    [ "$(cat "$sf" 2>/dev/null)" = "$mark" ] && return 1
+    printf '%s\n' "$mark" > "$sf"
+    last=$(status_field "$i" last)
+    case ${stale#* } in
+      error) how='idle after an API error' ;;
+      *)     how='idle at its prompt' ;;
+    esac
+    # Reported and nothing more. Never reaped, never prodded: whether a paused
+    # hand is resumed, re-sent or abandoned is the reeve's call, and the session
+    # is still holding whatever context it had.
+    printf 'stale: %s has been silent for %s with its session %s, last said %s\n' \
+      "$i" "$(silence_say "${stale%% *}")" "$how" "${last:-nothing}"
+    return 0
+  fi
   return 1
 }
 

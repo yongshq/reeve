@@ -179,6 +179,13 @@ Rules you must hold to:
 
   A `needs-decision` is a hand deliberately asking, and that path is unaffected; a permission
   dialog is an accident the hand cannot report at all.
+- **Idle and quiet is not progress either.** A hand whose turn died, on a dropped connection or an
+  API error, sits alive at its prompt with `working:` as its last word and nothing to say it
+  stopped. The sentry calls that `stale` once its status file has been silent past
+  `config/hand-stale` (default two hours) with its session idle, or past `config/hand-stale-error`
+  (default ten minutes) when the pane also shows the API error that ended the turn. It is a wake,
+  once per silence, and it is only ever reported: never reaped, never prodded. A `blocked:` hand
+  is not checked, because it already woke you. `bin/reeve-status` shows it in its process column.
 - When the sentry wakes you, handle every actionable errand before you reply to the liege. Do not
   report on one and leave two.
 - **You supervise your own errands and nobody else's.** Several reeves share one home, and an
@@ -415,11 +422,11 @@ fact per line, because you are the one reading it.
 | `bin/reeve-survey --register ...` | record the liege's answer about which manor a repo belongs to |
 | `bin/reeve-brief <id> <holding> --office <o>` | write a brief with the two seams |
 | `bin/reeve-dispatch <id>` | worktree, endpoint, launch. `--dry-run` changes nothing |
-| `bin/reeve-status <id>` / `--all` | the reconciled state, never the last line of the log. Bare lists yours, `--all` the machine's. A listing also delivers anything a caretaker left you, on stderr so a filter over the table cannot eat it, and a script asking a different question passes `--no-wake` |
+| `bin/reeve-status <id>` / `--all` | the reconciled state, never the last line of the log, and `stale` in the process column for a hand idle and silent past its threshold. Bare lists yours, `--all` the machine's. A listing also delivers anything a caretaker left you, on stderr so a filter over the table cannot eat it, and a script asking a different question passes `--no-wake` |
 | `bin/reeve-status --orphans` | errands whose owning session is provably gone |
 | `bin/reeve-adopt <id>` | take an orphaned errand on, so this session watches it |
 | `bin/reeve-answer <id> <key> <answer>` | close an open question, durably, then tell the hand |
-| `bin/reeve-sentry` | stand watch, print one reason line, exit |
+| `bin/reeve-sentry` | stand watch, print one reason line, exit. A hand idle and silent past its threshold is one of them |
 | `bin/reeve-teardown <id>` | remove a finished errand's copy, refusing on unlanded work |
 | `bin/reeve-memory` | the mechanics behind `/inscribe`, `/strike`, `/recall`, `/glean` |
 | `bin/reeve-handoff new <manor>` | scaffold a handoff, with the factual parts already filled in |

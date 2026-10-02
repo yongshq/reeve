@@ -52,6 +52,16 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+# A threshold that is not a number turns the staleness check off rather than
+# firing on every row, which is the safe direction and also a silent one, so the
+# command a reeve reads of its own accord says so. Zero is a choice and is not
+# remarked on.
+for k in hand-stale hand-stale-error; do
+  case $(config_get "$k" 0) in
+    ''|*[!0-9]*) warn "config/$k is not a whole number of seconds, so that staleness check is off" ;;
+  esac
+done
+
 errand_ids() {
   local mine own; mine=$(reeve_session)
   ls "$REEVE_HOME_D/state"/*.meta 2>/dev/null | while read -r f; do
@@ -102,8 +112,8 @@ ticket_label() {  # ticket_label <key> <id>...   the header line for one group
   else                     printf 'ticket %s\n' "${shown:-$key}"; fi
 }
 
-live_state() {
-  local i=$1 tgt bk st attn
+live_state() { # live_state <id> [long]
+  local i=$1 tgt bk st attn stale
   tgt=$(meta_get "$i" target '')
   # `target=` is emptied when a session is freed, so on its own it cannot tell a
   # dispatch that ended from one that never happened: both look identical here,
@@ -126,6 +136,22 @@ live_state() {
   # or unreadable one there is nothing to be waiting.
   if [ "$st" = alive ]; then
     attn=$("$BIN/reeve-backend" call attention_state "$tgt" --backend "$bk" 2>/dev/null) || attn=unknown
+    # A third fact, and the one the other two hid for twenty two hours: settled
+    # with `working:` as the last word, long past any real turn, is not a hand
+    # between steps. stale_probe in bin/reeve-lib.sh owns the rule. The table
+    # cell takes the place of `settled`, which stale already implies, because the
+    # column is sixteen wide; the single errand form keeps both and says why.
+    if stale=$(stale_probe "$i" "$(status_field "$i" state)" "${attn:-unknown}" "$tgt" "$bk" "$BIN"); then
+      if [ "${2:-}" = long ]; then
+        case ${stale#* } in
+          error) printf '%s/%s, stale: silent %s after an API error\n' "$st" "$attn" "$(silence_say "${stale%% *}")" ;;
+          *)     printf '%s/%s, stale: silent %s\n' "$st" "$attn" "$(silence_say "${stale%% *}")" ;;
+        esac
+      else
+        printf '%s/stale %s\n' "$st" "$(silence_short "${stale%% *}")"
+      fi
+      return
+    fi
     printf '%s/%s\n' "$st" "${attn:-unknown}"
   else
     printf '%s\n' "$st"
@@ -187,7 +213,7 @@ one() {
   local br; br=$(meta_get "$i" branch '')
   printf 'branch    %s\n' "${br:-none, detached at $(meta_show "$i" base)}"
   printf 'reported  %s\n' "$st"
-  printf 'process   %s\n' "$(live_state "$i")"
+  printf 'process   %s\n' "$(live_state "$i" long)"
   [ -n "$last" ] && printf 'last said %s\n' "$last"
 
   if [ "${open:-0}" -gt 0 ]; then

@@ -856,6 +856,116 @@ STATUS_FIELD_EOF
   return 0
 }
 
+# --- staleness --------------------------------------------------------------
+# A hand whose last word was `working:` and whose session sits idle at its
+# prompt, while its status file has not grown for longer than a threshold, is
+# STALE. Measured, because nothing else separated a hand thinking hard for forty
+# minutes from one whose turn died the night before: three hands ended their
+# turns on `API Error: Can't reach the API server (ENOTFOUND)` when the network
+# dropped, sat alive and idle with `working:` as their last line, and every tool
+# here read that as progress for twenty two hours.
+#
+# Three signals, all required, and a fourth that only shortens the wait:
+#
+#   reported state is `working`    done, failed and an open decision explain the
+#                                  silence. So does `blocked`: the hand said it
+#                                  is waiting on the reeve, the reeve was woken
+#                                  for it, and a second wake about the same stall
+#                                  adds nothing, the rule the attention probe in
+#                                  bin/reeve-sentry already follows
+#   attention is `settled`         idle at its own composer. `working` is a turn
+#                                  in progress however long, `waiting` is the
+#                                  attention probe's own wake, and `unknown` is a
+#                                  backend that cannot say, never a licence
+#   silent past `hand-stale`       seconds since the status file last changed,
+#                                  default two hours, three times the longest
+#                                  legitimate turn seen so far
+#   the pane shows a dead turn     claude's own `API Error:` line near the bottom
+#                                  of an idle pane. The turn is provably over, so
+#                                  the long wait that protects a long turn is not
+#                                  needed: `hand-stale-error` applies instead,
+#                                  default ten minutes
+#
+# The marker is cheap and only ever moves the verdict earlier on evidence: the
+# pane is read only for an errand that already passed the first two, and a
+# capture that fails or a harness that words its errors differently falls back
+# to time alone, which is the later answer, never the wrong one.
+#
+# Either threshold set to 0 turns its half off. A value that is not a whole
+# number turns it off too, rather than reading as zero seconds and firing on
+# every poll: fail closed, the same way an unreadable backend does.
+
+stale_after() { # stale_after <config key> <default>   prints seconds, or rc 1 when off
+  local v; v=$(config_get "$1" "$2")
+  case $v in ''|*[!0-9]*) return 1 ;; esac
+  [ "$v" -gt 0 ] || return 1
+  printf '%s\n' "$v"
+}
+
+# Seconds since the status file last changed. The file's own mtime, because an
+# append is the only thing that changes it, and it needs no record of our own.
+status_silence() { # status_silence <id>
+  local f m now
+  f=$(status_file "$1"); [ -f "$f" ] || return 1
+  m=$(stat -f %m "$f" 2>/dev/null || stat -c %Y "$f" 2>/dev/null) || return 1
+  case $m in ''|*[!0-9]*) return 1 ;; esac
+  now=${REEVE_NOW:-$(date +%s)}
+  [ "$now" -ge "$m" ] || { printf '0\n'; return 0; }
+  printf '%s\n' $(( now - m ))
+}
+
+# Captured pane text in, yes or no out. Only the bottom of the pane is read,
+# and only a line that STARTS with the error, after claude's tree glyph and
+# indent: a hand writing about API errors puts the words mid sentence, and an
+# old error far up the scrollback is a turn that recovered.
+turn_died_from_text() {
+  local t
+  t=$(printf '%s\n' "$1" | tail -n 30)
+  grep -qE '^[^[:alnum:]]*API Error:' <<<"$t" && return 0
+  return 1
+}
+
+# stale_probe <id> <state> <attention> <target> <backend> <bin dir>
+#
+# Prints `<silent seconds> <error|quiet>` and returns 0 when the errand is
+# stale, prints nothing and returns 1 otherwise. Reads and reports, and never
+# acts: what to do with a stale hand is the reeve's decision, and a tool that
+# tidied one away could destroy work that is only paused. The bin dir is the
+# caller's, so a test that stubs reeve-backend beside its caller is honoured.
+stale_probe() {
+  local id=$1 st=$2 attn=$3 tgt=$4 bk=$5 bin=$6 quiet err age text
+  [ "$st" = working ] || return 1
+  [ "$attn" = settled ] || return 1
+  [ -n "$tgt" ] || return 1
+  quiet=$(stale_after hand-stale 7200) || return 1
+  err=$(stale_after hand-stale-error 600) || err=''
+  age=$(status_silence "$id") || return 1
+  if [ -n "$err" ] && [ "$age" -ge "$err" ]; then
+    text=$("$bin/reeve-backend" call capture "$tgt" 200 --backend "$bk" 2>/dev/null) || text=''
+    if [ -n "$text" ] && turn_died_from_text "$text"; then
+      printf '%s error\n' "$age"; return 0
+    fi
+  fi
+  [ "$age" -ge "$quiet" ] || return 1
+  printf '%s quiet\n' "$age"
+}
+
+# How long, for a human. The long form for a reason line, the short one for a
+# table cell that has sixteen characters to hold the whole process state.
+silence_say() {
+  local s=${1:-0}
+  if   [ "$s" -lt 60 ];     then printf '%ss\n' "$s"
+  elif [ "$s" -lt 3600 ];   then printf '%sm\n' $(( s / 60 ))
+  elif [ "$s" -lt 172800 ]; then printf '%sh %sm\n' $(( s / 3600 )) $(( s % 3600 / 60 ))
+  else printf '%sd %sh\n' $(( s / 86400 )) $(( s % 86400 / 3600 )); fi
+}
+silence_short() {
+  local s=${1:-0}
+  if   [ "$s" -lt 3600 ];   then printf '%sm\n' $(( s / 60 ))
+  elif [ "$s" -lt 172800 ]; then printf '%sh\n' $(( s / 3600 ))
+  else printf '%sd\n' $(( s / 86400 )); fi
+}
+
 # --- offices ---------------------------------------------------------------
 # Single owner of "what offices exist". The directory also holds a README and a
 # settings.json per office, so a bare `ls` lists things that are not offices.
