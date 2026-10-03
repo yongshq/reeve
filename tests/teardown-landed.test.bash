@@ -399,23 +399,39 @@ ck_has "13b it says record and copy disagree"         "$OUT" "the record and the
 ck_eq  "13b nothing is orphaned"                      "$(unreachable "$repo")" none
 ck_eq  "13b the commit is not lost"                   "$(survives "$repo" "$sha")" survived
 
-# 13c. the base still has to resolve for either fact. A copy that committed
-#      nothing looks safe, and is, but only against a base the script can
-#      actually compare with: a check that cannot run refuses.
+# 13c. a base that does not resolve leaves the default branch, main, as the
+#      only ref to ask, which is how a stacked errand finds its base= deleted
+#      once the stack landed. A copy that committed nothing and a landed branch
+#      are both on main, so both facts pass against it.
 cell cell-missing-base landed at-base yes vanished-base
 run_teardown cell-missing-base
-ck_eq  "13c a clean copy with an unresolvable base refuses" "$RC" 1
-ck_eq  "13c its copy survives"                              "$(gone "$wt")" present
-ck_has "13c it refuses on the base"                         "$OUT" "vanished-base"
+ck_eq  "13c a clean copy on main with an unresolvable base tears down" "$RC" 0
+ck_eq  "13c its copy is removed"                            "$(gone "$wt")" removed
+
+# 13c2. the base still has to resolve for either fact when there is no default
+#       to ask in its place. Same cell, main renamed away: a check that cannot
+#       run refuses.
+cell cell-missing-base-nomain landed at-base yes vanished-base
+git -C "$repo" branch -q -m main trunk
+run_teardown cell-missing-base-nomain
+ck_eq  "13c2 no base and no main refuses"                   "$RC" 1
+ck_eq  "13c2 its copy survives"                             "$(gone "$wt")" present
+ck_has "13c2 it refuses on the base"                        "$OUT" "vanished-base"
 
 # 13d. the same, with nothing recorded but the copy. The branch fact is the one
-#      that used to consult the base first, so this proves the copy fact does
-#      not quietly skip a base it cannot resolve.
+#      that used to consult the base first, so this proves the copy fact asks
+#      the default too rather than quietly skipping a base it cannot resolve.
 cell cell-missing-base-detached empty at-base no vanished-base
 run_teardown cell-missing-base-detached
-ck_eq  "13d a detached clean copy with no base refuses"     "$RC" 1
-ck_eq  "13d its copy survives"                              "$(gone "$wt")" present
-ck_has "13d it refuses on the base"                         "$OUT" "does not name a commit"
+ck_eq  "13d a detached clean copy on main with no base tears down" "$RC" 0
+ck_eq  "13d its copy is removed"                            "$(gone "$wt")" removed
+
+cell cell-missing-base-detached-nomain empty at-base no vanished-base
+git -C "$repo" branch -q -m main trunk
+run_teardown cell-missing-base-detached-nomain
+ck_eq  "13d2 a detached clean copy, no base, no main, refuses" "$RC" 1
+ck_eq  "13d2 its copy survives"                             "$(gone "$wt")" present
+ck_has "13d2 it refuses on the base"                        "$OUT" "does not name a commit"
 
 # 14. THE OVER-REFUSAL. A scout's copy that committed nothing, and unrelated
 #     work lands on the base afterwards, which it always does. Asking whether

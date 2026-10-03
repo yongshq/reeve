@@ -86,6 +86,20 @@ stack() { # stack <id> <land> [trunk] [holding]
   printf 'done: finished\n' > "$REEVE_HOME/errands/$id/status"
 }
 
+# The lower errand's own record, <id>-a: A's branch on the default branch, no
+# copy of its own, so tearing it down with --drop-branch deletes base= out from
+# under B, the way the reeve cleans up a landed stack.
+lower() { # lower <id> [trunk]
+  mkdir -p "$REEVE_HOME/errands/$1-a"
+  {
+    printf 'repo=%s\n'   "$repo"
+    printf 'branch=%s\n' "$a_br"
+    printf 'base=%s\n'   "${2:-main}"
+    printf 'writes=yes\n'
+  } > "$REEVE_HOME/state/$1-a.meta"
+  printf 'done: finished\n' > "$REEVE_HOME/errands/$1-a/status"
+}
+
 register() { # register <holding> <path> <base>
   printf -- '- holding: %s | manor: test | path: %s | instructions: AGENTS.md | base: %s\n' \
     "$1" "$2" "$3" >> "$REEVE_HOME/manors.md"
@@ -193,14 +207,128 @@ ck_eq  "4b a registered default that does not resolve refuses" "$RC" 1
 ck_eq  "4b the copy survives"                         "$(gone "$wt")" present
 ck_not "4b it does not name the missing default"      "$OUT" "no-such-branch"
 
-# 5. base= that has been deleted is still require_base's refusal. The default
-#    branch is asked in addition to base=, never in place of one that is gone.
+# 5. base= deleted once it landed, which is the order a stack is normally
+#    cleaned up in. The default branch is asked alone, and B is on it, so it
+#    passes. Refused before, on work plainly on main.
 stack deleted-base both
 git -C "$repo" branch -q -D "$a_br"
 run_teardown deleted-base
-ck_eq  "5 a deleted base= still refuses"              "$RC" 1
-ck_has "5 it says the base does not resolve"          "$OUT" "does not name a commit"
-ck_eq  "5 the copy survives"                          "$(gone "$wt")" present
+ck_eq  "5 a deleted base= over a landed stack tears down" "$RC" 0
+ck_has "5 it says the checks passed"                  "$OUT" "landed-work checks passed"
+ck_eq  "5 the copy is removed"                        "$(gone "$wt")" removed
+ck_eq  "5 nothing is orphaned"                        "$(unreachable "$repo")" none
+ck_eq  "5 the upper commit survives"                  "$(survives "$repo" "$sha")" survived
+
+# 5b. the same reached the way the reeve actually gets there: the lower errand
+#     torn down first with --drop-branch, then the upper one.
+stack lower-first both
+lower lower-first
+run_teardown lower-first-a --drop-branch
+ck_eq  "5b the lower errand tears down first"         "$RC" 0
+ck_eq  "5b its branch is gone"                        \
+       "$(git -C "$repo" rev-parse --verify --quiet "refs/heads/$a_br" >/dev/null && echo kept || echo dropped)" dropped
+run_teardown lower-first
+ck_eq  "5b then the upper errand tears down"          "$RC" 0
+ck_eq  "5b the copy is removed"                       "$(gone "$wt")" removed
+ck_eq  "5b nothing is orphaned"                       "$(unreachable "$repo")" none
+ck_eq  "5b the upper commit survives"                 "$(survives "$repo" "$sha")" survived
+
+# 5c. the same order, but only the lower errand landed. B holds a commit main
+#     does not, so it refuses, and says base= was missing rather than reading as
+#     though it had been asked.
+stack lower-only a
+lower lower-only
+run_teardown lower-only-a --drop-branch
+ck_eq  "5c the lower errand tears down"               "$RC" 0
+run_teardown lower-only
+ck_eq  "5c the unlanded upper errand refuses"         "$RC" 1
+ck_eq  "5c the copy survives"                         "$(gone "$wt")" present
+ck_has "5c it names the ref it asked"                 "$OUT" "1 commit(s) that main does not have"
+ck_has "5c it says base= was missing"                 "$OUT" "The recorded base '$a_br' does not name a commit"
+ck_has "5c it says only the default was asked"        "$OUT" "main was asked. If the work belongs"
+ck_not "5c it does not claim base= was asked"         "$OUT" "neither"
+ck_eq  "5c the commit is not lost"                    "$(survives "$repo" "$sha")" survived
+
+# 5d. base= deleted with nothing landed. Its commit is held by B alone now, and
+#     both are off main.
+stack deleted-unlanded none
+git -C "$repo" branch -q -D "$a_br"
+run_teardown deleted-unlanded
+ck_eq  "5d a deleted base= over unlanded work refuses" "$RC" 1
+ck_eq  "5d the copy survives"                         "$(gone "$wt")" present
+ck_has "5d it counts both unlanded commits"           "$OUT" "2 commit(s) that main does not have"
+ck_eq  "5d the commit is not lost"                    "$(survives "$repo" "$sha")" survived
+
+# 5e. base= deleted and the default does not resolve either. Nothing left to
+#     ask, so it is require_base's refusal, exactly as before.
+stack deleted-no-default both trunk
+git -C "$repo" branch -q -D "$a_br"
+run_teardown deleted-no-default
+ck_eq  "5e no base= and no default refuses"           "$RC" 1
+ck_has "5e it says the base does not resolve"         "$OUT" "does not name a commit"
+ck_not "5e it does not claim main was asked"          "$OUT" "main was asked."
+ck_eq  "5e the copy survives"                         "$(gone "$wt")" present
+
+# 5f. base= deleted, the stack landed, the copy detached on work that is on
+#     nothing. The second fact refuses, naming the default and the missing base.
+stack deleted-copy-off both
+git -C "$repo" branch -q -D "$a_br"
+git -C "$wt" checkout -q --detach
+printf 'c\n' > "$wt/stack-c.txt"
+git -C "$wt" add -A >/dev/null; git -C "$wt" commit -qm 'work on no ref'
+off_sha=$(git -C "$wt" rev-parse HEAD)
+run_teardown deleted-copy-off
+ck_eq  "5f a copy off a landed stack refuses"         "$RC" 1
+ck_has "5f it names the default"                      "$OUT" "moved off main ("
+ck_has "5f it says base= was missing"                 "$OUT" "main was asked. If the work belongs"
+ck_eq  "5f the commit is not lost"                    "$(survives "$repo" "$off_sha")" survived
+
+# 6. the default is a branch, refs/heads/<default>, and nothing else. A base:
+#    line naming a tag, a sha or the errand's own branch, each sitting on B's
+#    commit, would pass B unlanded if any revision were taken. Nothing landed in
+#    any of these, so each must refuse on base= alone.
+stack tag-default none main tag-holding
+git -C "$repo" tag v1 "$sha"
+register tag-holding "$repo" v1
+run_teardown tag-default
+ck_eq  "6 a default naming a tag is not asked"        "$RC" 1
+ck_eq  "6 the copy survives"                          "$(gone "$wt")" present
+ck_not "6 it does not name the tag"                   "$OUT" "nor v1"
+
+stack sha-default none main sha-holding
+register sha-holding "$repo" "$sha"
+run_teardown sha-default
+ck_eq  "6b a default naming a sha is not asked"       "$RC" 1
+ck_eq  "6b the copy survives"                         "$(gone "$wt")" present
+
+stack own-default none main own-holding
+register own-holding "$repo" "$b_br"
+run_teardown own-default
+ck_eq  "6c a default naming the errand's own branch is not asked" "$RC" 1
+ck_eq  "6c the copy survives"                         "$(gone "$wt")" present
+ck_not "6c it does not name its own branch as asked"  "$OUT" "nor $b_br"
+
+# 6d. a tag named main, on B, shadowing the branch main, which holds only A.
+#     The branch is what is asked, so it refuses.
+stack shadow-main a
+git -C "$repo" tag main "$sha"
+run_teardown shadow-main
+ck_eq  "6d a tag shadowing main is not asked"         "$RC" 1
+ck_eq  "6d the copy survives"                         "$(gone "$wt")" present
+ck_has "6d it asked the branch main"                  "$OUT" "neither $a_br nor main has"
+
+# 7. a rewritten base= in a stack: B fast-forwarded into A, A reset back, B not
+#    on main. The diagnosis is about base=, and it says main was asked too.
+stack rewritten-a none
+git -C "$repo" checkout -q "$a_br"
+git -C "$repo" merge -q --ff-only "$b_br"
+git -C "$repo" reset -q --hard HEAD~1
+git -C "$repo" checkout -q main
+run_teardown rewritten-a
+ck_eq  "7 a rewritten stacked base refuses"           "$RC" 1
+ck_eq  "7 the copy survives"                          "$(gone "$wt")" present
+ck_has "7 it diagnoses the base"                      "$OUT" "$b_br is not on $a_br"
+ck_has "7 it says main was asked too"                 "$OUT" "(main was asked too and does not hold it.)"
 
 echo
 echo "passed=$PASS failed=$FAIL"

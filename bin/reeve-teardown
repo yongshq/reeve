@@ -66,11 +66,13 @@
 #   from it. The holding's default branch (its base: in manors.md, else main)
 #   is therefore asked as well, and reaching either counts as landed. It is
 #   asked in addition to base=, never instead of it: a default that does not
-#   resolve is skipped, which leaves the refusal exactly as it was. Two gaps
-#   remain, both failing closed. A stack that landed by rebase or squash holds
-#   the same patches under other shas, and patch equivalence decides nothing
-#   here (see the rewritten-base entry below). And a base= branch that was
-#   deleted once it landed is refused by require_base before either is asked.
+#   resolve is skipped, which leaves the refusal exactly as it was. A base=
+#   branch deleted once it landed, the order a stack is normally cleaned up in,
+#   leaves the default as the only ref to ask, and it is asked alone: reachable
+#   from refs/heads/<default> is landed whatever base= said. With neither
+#   resolving it still refuses. One gap remains, failing closed: a stack that
+#   landed by rebase or squash holds the same patches under other shas, and
+#   patch equivalence decides nothing here (see the rewritten-base entry below).
 #
 # - A base that was rewritten under the errand. A rebase, an amend, a `reset
 #   --hard` or a force-move on the base leaves work that DID land, under the
@@ -144,7 +146,15 @@ trap 'lock_release "$ERRAND_LOCK"' EXIT
 
 run() { if [ "$dry" = yes ]; then printf '  would run: %s\n' "$*"; else "$@"; fi; }
 dismiss=no; dismissed=no
-refuse() { printf 'reeve: REFUSED to tear down %s\n' "$id" >&2; printf '  %s\n' "$@" >&2; exit 1; }
+# Set by require_base when base= did not resolve and the default branch was
+# asked alone, so every refusal after that point says the base was missing
+# rather than reading as though it had been asked.
+base_missing_note=''
+refuse() {
+  printf 'reeve: REFUSED to tear down %s\n' "$id" >&2; printf '  %s\n' "$@" >&2
+  [ -z "$base_missing_note" ] || printf '%s\n' "$base_missing_note" | sed 's/^/  /' >&2
+  exit 1
+}
 
 repo=$(meta_get "$id" repo '')
 wt=$(meta_get "$id" worktree '')
@@ -249,9 +259,12 @@ fi
 #
 # Resolved on first use rather than up front, so an errand whose checks never
 # consult the base is not refused over a base it does not use.
-base_sha=''
+#
+# Empty base_sha after this returns means base= did not resolve and the default
+# branch is the only ref asked. Every reader of base_sha below handles that.
+base_sha='' base_resolved=no
 require_base() {
-  [ -n "$base_sha" ] && return 0
+  [ "$base_resolved" = yes ] && return 0
   # Deliberate fail-closed guard, not dead code: the invariant below calls this
   # before it touches git, so an errand with no repository recorded is told why
   # the test stopped instead of being shown a raw fatal: from git afterwards.
@@ -259,9 +272,22 @@ require_base() {
     "The landed-work test has nothing to compare against, so it stops. Check the repo= line in" \
     "$(meta_file "$id")."
   base_sha=$(git -C "$repo" rev-parse --verify --quiet "$base^{commit}" 2>/dev/null) || base_sha=''
-  [ -n "$base_sha" ] && { resolve_default; return 0; }
-  # No guessing a replacement. Falling back to main, to HEAD or to the default
-  # branch is the same fail-open wearing a friendlier face.
+  resolve_default
+  base_resolved=yes
+  [ -n "$base_sha" ] && return 0
+  # A base= that no longer resolves is usually a stacked errand's lower branch,
+  # deleted once the stack landed. The default branch is then asked alone, by
+  # ancestry only, and that is not a guessed replacement: work reachable from
+  # refs/heads/<default> has landed whatever base= said, so it can only pass
+  # landed work. Falling back to HEAD, or to any revision that merely resolves,
+  # would be the fail-open this guard exists to stop, and resolve_default takes
+  # only a branch for that reason. No default, no question to ask: refuse.
+  if [ -n "$default_sha" ]; then
+    base_missing_note="The recorded base '$base' does not name a commit in $repo, so only
+$default_ref was asked. If the work belongs somewhere else, correct the
+base= line in $(meta_file "$id") to the branch the work actually landed on."
+    return 0
+  fi
   refuse "the recorded base '$base' does not name a commit in $repo." \
     "Without it this script cannot tell landed work from unlanded work, so it refuses rather than" \
     "assume the work is safe. Usually that base has itself landed and been deleted." \
@@ -281,28 +307,38 @@ require_base() {
 # the default branch has landed whatever base= says, so asking it can only turn
 # a refusal over landed work into a pass. A default that does not resolve is not
 # asked at all, which leaves every check exactly as it was without it. Set by
-# require_base, so it is read only after the base itself has resolved.
+# require_base, which asks it alone only when base= itself does not resolve.
+#
+# A branch, and only a branch: refs/heads/<default>. Any revision would let a
+# misconfigured base: line pass unlanded work, because a tag, a sha or a tag
+# named main shadowing the branch can each sit on the copy's own commit. The
+# errand's own branch is never a landing place for it either.
 default_ref='' default_sha='' landed_refs=''
 resolve_default() {
   default_ref=main
   [ -n "$holding" ] && default_ref=$(holding_field "$holding" base main)
-  default_sha=$(git -C "$repo" rev-parse --verify --quiet "$default_ref^{commit}" 2>/dev/null) \
-    || default_sha=''
+  default_sha=$(git -C "$repo" rev-parse --verify --quiet "refs/heads/$default_ref^{commit}" \
+                2>/dev/null) || default_sha=''
   # The same ref asks nothing new, and naming it twice in a refusal reads as a
   # second check that never ran. Compared by name, not by commit: a default
   # sitting on the same commit as a stacked base= is still a second ref, and
   # the reader of the refusal needs to see it was asked.
   [ "$default_ref" = "$base" ] && default_sha=''
+  [ -n "$br" ] && [ "$default_ref" = "$br" ] && default_sha=''
   landed_refs=$base
   [ -n "$default_sha" ] && landed_refs="$base or $default_ref"
+  [ -n "$base_sha" ] || landed_refs=$default_ref
   return 0
 }
 
 # landed_on <sha> -> 0 when the recorded base or the default branch holds it.
 # Non-zero on an error exactly as on unlanded work, like the --is-ancestor it
-# wraps, so a question git cannot answer is a refusal.
+# wraps, so a question git cannot answer is a refusal. Either may be empty, a
+# base= that did not resolve or a default that did not, and an empty one is not
+# asked: require_base has refused before both can be.
 landed_on() {
-  git -C "$repo" merge-base --is-ancestor "$1" "$base_sha" 2>/dev/null && return 0
+  [ -n "$base_sha" ] && git -C "$repo" merge-base --is-ancestor "$1" "$base_sha" 2>/dev/null \
+    && return 0
   [ -n "$default_sha" ] && git -C "$repo" merge-base --is-ancestor "$1" "$default_sha" 2>/dev/null
 }
 
@@ -334,6 +370,8 @@ base_was='' base_was_at='' base_was_when='' base_last_move=''
 base_moved_off() { # base_moved_off <sha> -> 0 if an earlier base position holds it
   base_was='' base_was_at='' base_was_when='' base_last_move=''
   local ref log old sel what
+  # A base= that did not resolve has no position now and no reflog to walk.
+  [ -n "$base_sha" ] || return 1
   ref=$(git -C "$repo" rev-parse --symbolic-full-name "$base" 2>/dev/null) || return 1
   # A sha, a detached HEAD and anything git cannot resolve all print nothing
   # here, and none of them has a reflog of its own to walk.
@@ -383,6 +421,9 @@ refuse_base_moved() { # refuse_base_moved <subject> <sha> [extra line...]
   msg=("$subject is not on $base. $base has held a position that does contain that work:")
   msg+=("$base_was ($base_was_at, $base_was_when).")
   msg+=("It is at $base_sha now, and its most recent move was: ${base_last_move:-not recorded}.")
+  # The diagnosis is about base= alone, but it is not the only ref that was
+  # asked, and a refusal that names one reads as though the other never ran.
+  [ -n "$default_sha" ] && msg+=("($default_ref was asked too and does not hold it.)")
   # Patch equivalence tells a rebase from a reset, and nothing else. It is in the
   # message and nowhere near the gate deliberately: two commits with the same
   # patch are not the same commit, so this never decides anything and is always
@@ -553,13 +594,14 @@ if [ -n "$br" ] || [ "$copy_at_risk" = yes ]; then
       # a count that does not come back can no longer read as "nothing unlanded"
       # the way the old fallback to 0 did. Counted against every ref landed_on
       # asked, so the number is the commits that neither of them holds.
-      # $default_sha is unquoted on purpose: a sha or empty, and empty drops out.
-      ahead=$(git -C "$repo" rev-list --count "$br_sha" --not "$base_sha" $default_sha 2>/dev/null) \
+      # Both are unquoted on purpose: each is a sha or empty, and empty drops out.
+      ahead=$(git -C "$repo" rev-list --count "$br_sha" --not $base_sha $default_sha 2>/dev/null) \
         || ahead=''
-      unlanded=$(git -C "$repo" log --oneline "$br_sha" --not "$base_sha" $default_sha 2>/dev/null \
+      unlanded=$(git -C "$repo" log --oneline "$br_sha" --not $base_sha $default_sha 2>/dev/null \
                  | head -5 | sed 's/^/    /')
       not_on="$base does not have"
       [ -n "$default_sha" ] && not_on="neither $base nor $default_ref has"
+      [ -n "$base_sha" ] || not_on="$default_ref does not have"
       refuse "$br has ${ahead:-unlanded} commit(s) that $not_on." \
              "$unlanded" \
              "Rebase or merge it first. Removing the copy now leaves the branch, but this is the" \

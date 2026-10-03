@@ -178,6 +178,7 @@ ck_has "1 it names the line to correct"      "$OUT" "base= line in $REEVE_HOME/s
 ck_not "1 it does not blame the copy"        "$OUT" "has moved off main"
 ck_not "1 it does not say rebase or merge"   "$OUT" "Rebase or merge it first"
 ck_not "1 it does not date the move"         "$OUT" "$DATED"
+ck_not "1 base=main asks no second ref"      "$OUT" "was asked too"
 
 # 2. the same shape with an amended base, which is the common half: the work IS
 #    on main, under another sha. Patch equivalence is allowed to say so, as a
