@@ -926,12 +926,25 @@ stale_config_warn() {
   esac
 }
 
+# How many lines this errand's log holds right now. grep -c pads its answer on
+# some platforms and says nothing at all when the file is missing, so the trim
+# and the zero are both load bearing.
+status_lines() {
+  local n=0
+  [ -f "$1" ] && n=$(grep -c . "$1" 2>/dev/null || echo 0)
+  n=$(printf '%s' "$n" | tr -d '[:space:]')
+  printf '%s' "${n:-0}"
+}
+
+# The status file's mtime, BSD stat first, then GNU.
+status_mtime() { stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null; }
+
 # Seconds since the status file last changed. The file's own mtime, because an
 # append is the only thing that changes it, and it needs no record of our own.
 status_silence() { # status_silence <id>
   local f m now
   f=$(status_file "$1"); [ -f "$f" ] || return 1
-  m=$(stat -f %m "$f" 2>/dev/null || stat -c %Y "$f" 2>/dev/null) || return 1
+  m=$(status_mtime "$f") || return 1
   case $m in ''|*[!0-9]*) return 1 ;; esac
   now=${REEVE_NOW:-$(date +%s)}
   [ "$now" -ge "$m" ] || { printf '0\n'; return 0; }
@@ -949,15 +962,55 @@ turn_died_from_text() {
   return 1
 }
 
+# How long a session must sit waiting, or idle, before it is worth a wake. A hand
+# between tool calls can read as not-working for an instant, and a wake for that
+# would be noise. Overridable only so the test suite can drive it.
+attn_dwell=${REEVE_ATTN_DWELL:-90}
+
+# The clock the dwell is measured against. Overridable only so the test suite
+# can hold time still while it backdates a reading and then asserts the exact
+# boundary: without this, the gap between writing that reading and this process
+# reading the real clock is enough wall time to cross a one-second edge on a
+# loaded machine, which is a flake, not a bug in the dwell itself.
+attn_now() { printf '%s' "${REEVE_ATTN_NOW:-$(date +%s)}"; }
+
+# The idle latch, one file per errand, `<since> <lines> <mtime> <woke>`: when
+# this silence was first seen stale, what the status file looked like then, as
+# its line count and mtime, and whether the sentry has reported it.
+stale_file() { printf '%s/state/.stale-%s\n' "$REEVE_HOME_D" "$1"; }
+
 # stale_probe <id> <state> <attention> <target> <backend> <bin dir>
 #
-# Prints `<silent seconds> <error|quiet>` and returns 0 when the errand is
-# stale, prints nothing and returns 1 otherwise. Reads and reports, and never
-# acts: what to do with a stale hand is the reeve's decision, and a tool that
-# tidied one away could destroy work that is only paused. The bin dir is the
-# caller's, so a test that stubs reeve-backend beside its caller is honoured.
+# Prints `<silent seconds> <error|quiet> <reported yes|no>` and returns 0 when
+# the errand is stale and has been for the dwell, prints nothing and returns 1
+# otherwise. Both the listing and the sentry ask this, and both call the answer
+# `idle`, so the dwell lives here rather than in either: a listing that skipped
+# it called a hand idle ninety seconds before the alarm would.
+#
+# The dwell is the attention probe's own, for the reason it has one: a hand
+# between tool calls can read `settled` for an instant. The first stale reading
+# only starts the clock, in the latch, and any `working` reading in between
+# deletes the latch and so stops it. Either caller's reading counts, which is
+# what keeps the two in step: whichever looks first starts the clock for both.
+#
+# Two things re-arm it. An append changes the line count and mtime, so a hand
+# that speaks again and then falls silent again starts a new silence. And the
+# session seen `working` deletes the file outright, because that is what a steer
+# looks like from here: the reeve tells a dead turn to carry on, the hand works
+# without writing a line, and dies again. Keyed off the file alone, that second
+# death was never reported, so the remedy the contract prescribes could only
+# ever be used once. `unknown` re-arms nothing, so a backend that blinks for one
+# poll cannot buy a repeat.
+#
+# Writes only that record of what it saw, and never acts: what to do with a
+# stale hand is the reeve's decision, and a tool that tidied one away could
+# destroy work that is only paused. The bin dir is the caller's, so a test that
+# stubs reeve-backend beside its caller is honoured.
 stale_probe() {
-  local id=$1 st=$2 attn=$3 tgt=$4 bk=$5 bin=$6 quiet err age text
+  local id=$1 st=$2 attn=$3 tgt=$4 bk=$5 bin=$6 quiet err age text kind
+  local sf f mark since sl sm woke nowsec
+  sf=$(stale_file "$id")
+  [ "$attn" = working ] && rm -f "$sf"
   [ "$st" = working ] || return 1
   [ "$attn" = settled ] || return 1
   [ -n "$tgt" ] || return 1
@@ -967,14 +1020,40 @@ stale_probe() {
   err=$(stale_after hand-stale-error 600) || err=''
   [ -n "$quiet$err" ] || return 1
   age=$(status_silence "$id") || return 1
+  kind=''
   if [ -n "$err" ] && [ "$age" -ge "$err" ]; then
     text=$("$bin/reeve-backend" call capture "$tgt" 200 --backend "$bk" 2>/dev/null) || text=''
-    if [ -n "$text" ] && turn_died_from_text "$text"; then
-      printf '%s error\n' "$age"; return 0
-    fi
+    if [ -n "$text" ] && turn_died_from_text "$text"; then kind=error; fi
   fi
-  [ -n "$quiet" ] && [ "$age" -ge "$quiet" ] || return 1
-  printf '%s quiet\n' "$age"
+  if [ -z "$kind" ]; then
+    [ -n "$quiet" ] && [ "$age" -ge "$quiet" ] || return 1
+    kind=quiet
+  fi
+
+  f=$(status_file "$id")
+  mark="$(status_lines "$f") $(status_mtime "$f")"
+  since=''; sl=''; sm=''; woke=no
+  [ -f "$sf" ] && read -r since sl sm woke < "$sf"
+  nowsec=$(attn_now)
+  case ${since:-} in ''|*[!0-9]*) sl='' ;; esac
+  if [ "$sl $sm" != "$mark" ]; then
+    since=$nowsec; woke=no
+    { printf '%s %s no\n' "$since" "$mark" > "$sf"; } 2>/dev/null
+  fi
+  [ $(( nowsec - since )) -ge "$attn_dwell" ] || return 1
+  printf '%s %s %s\n' "$age" "$kind" "${woke:-no}"
+}
+
+# stale_reported <id>
+#
+# Latches the silence stale_probe last recorded as reported, so one silence is
+# one wake. The sentry's alone: a listing shows an idle hand for as long as it
+# stays idle, and only the alarm is said once.
+stale_reported() {
+  local sf since sl sm woke
+  sf=$(stale_file "$1"); [ -f "$sf" ] || return 0
+  read -r since sl sm woke < "$sf"
+  { printf '%s %s %s yes\n' "$since" "$sl" "$sm" > "$sf"; } 2>/dev/null
 }
 
 # stale_unseen <id> <state> <attention>

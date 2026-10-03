@@ -132,8 +132,9 @@ than the code did:
 - a command asking some other question never spends one, so `bin/reeve-handoff new` copies pending
   lines into the handoff instead, which is what makes them survive your reset. `bin/reeve-status
   <id>`, the single-errand form, never delivers either
-- a spool holding something it cannot give up says so, as a line of its own, instead of reading as
-  an empty one and leaving you told that nothing is in flight
+- a spool holding something it cannot give up says so, as a line of its own opening
+  `undeliverable:`, instead of reading as an empty one and leaving you told that nothing is in
+  flight
 
 Three cases still have no answer, and all three are yours to know rather than to be surprised by:
 
@@ -182,14 +183,15 @@ Rules you must hold to:
   dialog is an accident the hand cannot report at all.
 - **Idle and quiet is not progress either.** A hand whose turn died, on a dropped connection or an
   API error, sits alive at its prompt with `working:` as its last word and nothing to say it
-  stopped. The sentry calls that `stale` once its status file has been silent past
+  stopped. The sentry calls that `idle` once its status file has been silent past
   `config/hand-stale` (default two hours) with its session idle, or past `config/hand-stale-error`
   (default ten minutes) when the pane also shows the API error that ended the turn. The wake
   waits for the session to read idle for the same 90 seconds a `waiting` one must. Its line opens
   `idle:`, where a session that is gone opens `stale:`, and it is only ever reported: never
   reaped, never prodded. Once per silence, re-armed when the hand writes a line or its session is
   seen working again, so a steered hand that dies a second time wakes you a second time. A `blocked:` hand is not checked, because it already woke you. `bin/reeve-status` shows it
-  in its process column. Two limits. A backend or harness that cannot tell idle from busy, tmux
+  as `idle` in its process column, on the same rule and the same 90 seconds, so the listing and
+  the wake never disagree. Two limits. A backend or harness that cannot tell idle from busy, tmux
   without herdr among them, never reads idle, so the check cannot fire there: the sentry says so
   on stderr, once per watch, for a hand silent past `config/hand-stale`. And a threshold set to
   anything but a whole number of seconds turns its half of the check off, which the sentry and
@@ -439,7 +441,7 @@ fact per line, because you are the one reading it.
 | `bin/reeve-survey --register ...` | record the liege's answer about which manor a repo belongs to |
 | `bin/reeve-brief <id> <holding> --office <o>` | write a brief with the two seams |
 | `bin/reeve-dispatch <id>` | worktree, endpoint, launch. `--dry-run` changes nothing |
-| `bin/reeve-status <id>` / `--all` | the reconciled state, never the last line of the log, and `stale` in the process column for a hand idle and silent past its threshold. Bare lists yours, `--all` the machine's. A listing also delivers anything a caretaker left you, on stderr so a filter over the table cannot eat it, and a script asking a different question passes `--no-wake` |
+| `bin/reeve-status <id>` / `--all` | the reconciled state, never the last line of the log, and `idle` in the process column for a hand idle and silent past its threshold, on the rule the sentry wakes on. Bare lists yours, `--all` the machine's. A listing also delivers anything a caretaker left you, on stderr so a filter over the table cannot eat it, and a script asking a different question passes `--no-wake` |
 | `bin/reeve-status --orphans` | errands whose owning session is provably gone |
 | `bin/reeve-adopt <id>` | take an orphaned errand on, so this session watches it |
 | `bin/reeve-answer <id> <key> <answer>` | close an open question, durably, then tell the hand |

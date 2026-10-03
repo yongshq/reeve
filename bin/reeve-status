@@ -133,17 +133,20 @@ live_state() { # live_state <id> [long]
     attn=$("$BIN/reeve-backend" call attention_state "$tgt" --backend "$bk" 2>/dev/null) || attn=unknown
     # A third fact, and the one the other two hid for twenty two hours: settled
     # with `working:` as the last word, long past any real turn, is not a hand
-    # between steps. stale_probe in bin/reeve-lib.sh owns the rule. The table
-    # cell takes the place of `settled`, which stale already implies, because the
-    # column is sixteen wide; the single errand form keeps both and says why.
+    # between steps. stale_probe in bin/reeve-lib.sh owns the rule, dwell and
+    # all, so this cell and the sentry's `idle:` wake turn on together. Called
+    # idle here too, one word for one thing. The table cell takes the place of
+    # `settled`, which idle already implies, because the column is sixteen wide;
+    # the single errand form keeps both and says why.
     if stale=$(stale_probe "$i" "$(status_field "$i" state)" "${attn:-unknown}" "$tgt" "$bk" "$BIN"); then
+      stale=${stale% *}
       if [ "${2:-}" = long ]; then
         case ${stale#* } in
-          error) printf '%s/%s, stale: silent %s after an API error\n' "$st" "$attn" "$(silence_say "${stale%% *}")" ;;
-          *)     printf '%s/%s, stale: silent %s\n' "$st" "$attn" "$(silence_say "${stale%% *}")" ;;
+          error) printf '%s/%s, idle: silent %s after an API error\n' "$st" "$attn" "$(silence_say "${stale%% *}")" ;;
+          *)     printf '%s/%s, idle: silent %s\n' "$st" "$attn" "$(silence_say "${stale%% *}")" ;;
         esac
       else
-        printf '%s/stale %s\n' "$st" "$(silence_short "${stale%% *}")"
+        printf '%s/idle %s\n' "$st" "$(silence_short "${stale%% *}")"
       fi
       return
     fi

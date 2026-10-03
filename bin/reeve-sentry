@@ -252,24 +252,13 @@ fi
 # Alongside the cursor, and for the same reason: what this errand looked like
 # last time, so a condition that is only interesting once is only reported once.
 attn_file() { printf '%s/state/.attn-%s\n' "$REEVE_HOME_D" "$1"; }
-# And for the same reason, which silence was already reported stale.
-stale_file() { printf '%s/state/.stale-%s\n' "$REEVE_HOME_D" "$1"; }
+# The idle latch, stale_file, lives in bin/reeve-lib.sh with stale_probe, and so
+# do attn_dwell and attn_now: the listing applies the same dwell, so neither can
+# be this file's alone.
 
 # Errands this process has already said it cannot judge for staleness, one id
 # per line, so a long watch says it once rather than every poll.
 unseen=''
-
-# How long a session must sit waiting before it is worth a wake. A hand between
-# tool calls can read as not-working for an instant, and a wake for that would be
-# noise. Overridable only so the test suite can drive it.
-attn_dwell=${REEVE_ATTN_DWELL:-90}
-
-# The clock the dwell is measured against. Overridable only so the test suite
-# can hold time still while it backdates a reading and then asserts the exact
-# boundary: without this, the gap between writing that reading and this process
-# reading the real clock is enough wall time to cross a one-second edge on a
-# loaded machine, which is a flake, not a bug in the dwell itself.
-attn_now() { printf '%s' "${REEVE_ATTN_NOW:-$(date +%s)}"; }
 
 # Clean up a hand that has finished. An agent does not exit itself, so without
 # this every completed errand leaves a session idling at a prompt, holding a
@@ -459,20 +448,10 @@ wake_owed() { # wake_owed <id>
   ! reported_done "$1"
 }
 
-# How many lines this errand's log holds right now. grep -c pads its answer on
-# some platforms and says nothing at all when the file is missing, so the trim
-# and the zero are both load bearing.
-status_lines() {
-  local n=0
-  [ -f "$1" ] && n=$(grep -c . "$1" 2>/dev/null || echo 0)
-  n=$(printf '%s' "$n" | tr -d '[:space:]')
-  printf '%s' "${n:-0}"
-}
-
 # Absorb or escalate. One errand, one verdict.
 check_one() {
   local i=$1 f seen now again new st open div bk tgt live
-  local attn af since woke nowsec last sf stale mark how sl sm
+  local attn af since woke nowsec last stale how
 
   # Counted BEFORE the verdict is read, and again after. The cursor is what says
   # a line has been dealt with, so advancing it past a line the verdict did not
@@ -667,39 +646,16 @@ check_one() {
 
   # The converse of the case above: a hand still there, idle at its prompt, that
   # has said nothing for longer than any turn should take. stale_probe in
-  # bin/reeve-lib.sh owns which signals make that, and why.
+  # bin/reeve-lib.sh owns which signals make that, the dwell before it counts,
+  # what re-arms it, and why: the listing asks the same question and must never
+  # answer it differently.
   #
-  # One silence, one wake. The latch is one file, `<since> <lines> <mtime>
-  # <woke>`: when this silence was first seen stale, what the status file looked
-  # like then, as its line count and mtime, and whether it has been reported.
-  #
-  # Two things re-arm it. An append changes the line count and mtime, so a hand
-  # that speaks again and then falls silent again is a second wake. And the
-  # session seen `working` deletes the file outright, because that is what a
-  # steer looks like from here: the reeve tells a dead turn to carry on, the hand
-  # works without writing a line, and dies again. Keyed off the file alone, that
-  # second death was never reported, so the remedy the contract prescribes
-  # could only ever be used once. `unknown` re-arms nothing, so a backend that
-  # blinks for one poll cannot buy a repeat.
-  #
-  # And a dwell, the attention probe's own, for the reason it has one: a hand
-  # between tool calls can read `settled` for an instant. The first stale reading
-  # only starts the clock, and any `working` reading in between stops it.
-  sf=$(stale_file "$i")
-  [ "$attn" = working ] && rm -f "$sf"
+  # One silence, one wake. The latch's last field says whether this silence was
+  # already reported, and only this process sets it.
   if [ "$live" = alive ] && stale=$(stale_probe "$i" "$st" "$attn" "$tgt" "$bk" "$BIN"); then
-    mark="$now $(stat -f %m "$f" 2>/dev/null || stat -c %Y "$f" 2>/dev/null)"
-    since=''; sl=''; sm=''; woke=no
-    [ -f "$sf" ] && read -r since sl sm woke < "$sf"
-    nowsec=$(attn_now)
-    case ${since:-} in ''|*[!0-9]*) sl='' ;; esac
-    if [ "$sl $sm" != "$mark" ]; then
-      since=$nowsec; woke=no
-      printf '%s %s no\n' "$since" "$mark" > "$sf"
-    fi
-    [ "${woke:-no}" = yes ] && return 1
-    [ $(( nowsec - since )) -ge "$attn_dwell" ] || return 1
-    printf '%s %s yes\n' "$since" "$mark" > "$sf"
+    [ "${stale##* }" = yes ] && return 1
+    stale_reported "$i"
+    stale=${stale% *}
     last=$(status_field "$i" last)
     case ${stale#* } in
       error) how='idle after an API error' ;;
@@ -800,8 +756,11 @@ while :; do
     # otherwise.
     wake_deliver; wrc=$?
     [ "$wrc" = 0 ] && exit 0
+    # Its own word: `stale:` is a session that is gone and `idle:` one that is
+    # silent, and this is about neither, only a line this reeve has not been
+    # given.
     if [ "$wrc" = 2 ]; then
-      printf 'stale: a pending notification cannot be delivered, check %s\n' \
+      printf 'undeliverable: a pending notification cannot be delivered, check %s\n' \
         "$(wake_dir "$(reeve_session)")"
       exit 0
     fi

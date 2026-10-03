@@ -17,8 +17,10 @@
 #   9. a steer re-arms it: working again, then idle again without a line, wakes
 #  10. a bad hand-stale leaves the error wait working, and says so on the watch
 #  11. a momentary settled reading mid turn is not a wake: the dwell
-#  12. a gone session and an idle one open with different words
+#  12. a gone session, an idle one and an undeliverable notification open with
+#      three different words
 #  13. a session that cannot say whether it is idle is said to be unjudgeable
+#  14. the listing and the sentry agree at the dwell boundary, whichever looks first
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 
 PASS=0; FAIL=0
@@ -79,7 +81,7 @@ say() {
   rm -f "$REEVE_HOME/state/.stale-hung"
 }
 sentry() { OUT=$("$ROOT/bin/reeve-sentry" --once --no-reap 2>&1); RC=$?; }
-# The PROCESS cell by position, since a stale cell holds a space of its own.
+# The PROCESS cell by position, since an idle cell holds a space of its own.
 row()    { "$ROOT/bin/reeve-status" --all --no-wake 2>/dev/null | grep '^hung ' | cut -c55-70 | sed 's/ *$//'; }
 single() { "$ROOT/bin/reeve-status" hung 2>/dev/null | sed -n 's/^process  *//p'; }
 
@@ -95,8 +97,8 @@ ck_has "1 it names the errand and the silence"            "$OUT" "idle: hung has
 ck_has "1 it says the session is idle"                    "$OUT" "with its session idle at its prompt"
 ck_has "1 and quotes what it last said"                   "$OUT" "last said rewriting the parser"
 ck_eq  "1 one line, like every other reason"              "$(printf '%s\n' "$OUT" | grep -c .)" 1
-ck_eq  "1 the listing shows it in PROCESS"                "$(row)" "alive/stale 2h"
-ck_eq  "1 and the single form says how long"              "$(single)" "alive/settled, stale: silent 2h 1m"
+ck_eq  "1 the listing shows it in PROCESS"                "$(row)" "alive/idle 2h"
+ck_eq  "1 and the single form says how long"              "$(single)" "alive/settled, idle: silent 2h 1m"
 
 # --- 2. inside the threshold -----------------------------------------------
 say 'working: rewriting the parser'
@@ -104,6 +106,7 @@ backdate 7100
 sentry
 ck_eq  "2 inside the threshold the sentry is quiet"       "$RC" 4
 ck_not "2 and says nothing of staleness"                  "$OUT" "stale"
+ck_not "2 nor of idleness"                                "$OUT" "idle"
 ck_eq  "2 the listing reads settled"                      "$(row)" "alive/settled"
 
 # --- 3. explained silences -------------------------------------------------
@@ -114,8 +117,8 @@ for c in 'done: parser rewritten' 'failed: cannot build' \
   say 'working: rewriting the parser' "$c"
   backdate 86400
   sentry
-  ck_not "3 never stale: ${c%%:*}"                         "$OUT" "stale"
-  ck_not "3 nor in the listing: ${c%%:*}"                  "$(row)" "stale"
+  ck_not "3 never idle: ${c%%:*}"                          "$OUT" "idle:"
+  ck_not "3 nor in the listing: ${c%%:*}"                  "$(row)" "idle"
 done
 
 # --- 4. a long turn --------------------------------------------------------
@@ -126,7 +129,7 @@ for a in working waiting unknown; do
   rm -f "$REEVE_HOME/state/.attn-hung"
   sentry
   ck_not "4 a session reading $a is never stale"          "$OUT" "idle:"
-  ck_not "4 nor in the listing when $a"                    "$(row)" "stale"
+  ck_not "4 nor in the listing when $a"                    "$(row)" "idle"
 done
 printf 'settled\n' > "$STUB_ATTN"
 
@@ -143,7 +146,7 @@ for v in abc 0 -5 ''; do
   printf '%s\n' "$v" > "$REEVE_HOME/config/hand-stale"
   sentry
   ck_eq "5 hand-stale [$v] fails closed, never fires"     "$RC" 4
-  ck_eq "5 and the listing does not call it stale [$v]"   "$(row)" "alive/settled"
+  ck_eq "5 and the listing does not call it idle [$v]"    "$(row)" "alive/settled"
 done
 printf 'abc\n' > "$REEVE_HOME/config/hand-stale"
 ck_has "5 the listing says the check is off"              "$("$ROOT/bin/reeve-status" --all --no-wake 2>&1 >/dev/null)" \
@@ -160,7 +163,7 @@ ck_eq  "6 the next does not repeat it"                    "$RC" 4
 printf 'unknown\n' > "$STUB_ATTN"; sentry
 printf 'settled\n' > "$STUB_ATTN"; sentry
 ck_eq  "6 nor after the backend blinked unknown"          "$RC" 4
-ck_eq  "6 the listing still shows it, it only shows"      "$(row)" "alive/stale 2h"
+ck_eq  "6 the listing still shows it, it only shows"      "$(row)" "alive/idle 2h"
 printf 'working: rewriting the lexer\n' >> "$STATUS"
 backdate 7300
 sentry
@@ -300,6 +303,20 @@ say 'working: rewriting the parser'
 backdate 86400
 sentry
 ck_eq  "12 an idle living one opens with idle:"           "${OUT%%:*}" idle
+w_idle=${OUT%%:*}
+printf 'dead\n' > "$STUB_LIVE"; sentry; w_gone=${OUT%%:*}; rm -f "$STUB_LIVE"
+# A spool that holds a line it cannot give up, for a reeve of its own, so the
+# errand above plays no part in it.
+SPOOL="$REEVE_HOME/state/sessions/stuck/wake"
+REEVE_SESSION=stuck bash -c '. "$1/bin/reeve-lib.sh"; wake_leave stuck "signal: held is done" held 1' _ "$ROOT"
+chmod a-w "$SPOOL"
+OUT=$(REEVE_SESSION=stuck "$ROOT/bin/reeve-sentry" --once --no-reap 2>&1); RC=$?
+chmod u+w "$SPOOL"; rm -rf "$REEVE_HOME/state/sessions/stuck"
+ck_eq  "12 an undeliverable notification wakes"           "$RC" 0
+ck_eq  "12 and opens with undeliverable:"                 "${OUT%%:*}" undeliverable
+ck_has "12 and still says what is in the way"             "$OUT" "cannot be delivered"
+ck_eq  "12 three conditions, three different words"       \
+  "$(printf '%s\n' "$w_gone" "$w_idle" "${OUT%%:*}" | sort -u | grep -c .)" 3
 
 # --- 13. a session that cannot say ------------------------------------------
 # tmux without herdr reads unknown, never settled, so the wake cannot come. The
@@ -315,6 +332,36 @@ ck_eq  "13 on stderr, so stdout stays one line"           \
 backdate 600
 sentry
 ck_not "13 inside the threshold there is nothing to say"  "$OUT" "reads unknown"
+printf 'settled\n' > "$STUB_ATTN"
+
+# --- 14. the listing and the alarm agree -------------------------------------
+# The listing once called a hand stale on its first look, ninety seconds before
+# the sentry would wake for it. Both now ask stale_probe, dwell included, and
+# either one's first look starts the one clock.
+drow() { REEVE_ATTN_DWELL=90 REEVE_ATTN_NOW=$1 row; }
+say 'working: rewriting the parser'
+backdate 86400
+ck_eq  "14 the listing's first look only starts the clock" "$(drow "$NOW")" "alive/settled"
+dsentry $(( NOW + 89 ))
+ck_eq  "14 at 89s the sentry has not woken"                "$RC" 4
+ck_eq  "14 and the listing has not called it idle"         "$(drow $(( NOW + 89 )))" "alive/settled"
+ck_eq  "14 at 90s the listing calls it idle"               "$(drow $(( NOW + 90 )))" "alive/idle 24h"
+dsentry $(( NOW + 90 ))
+ck_eq  "14 and the sentry wakes on the same second"        "$RC" 0
+ck_has "14 with the idle line"                             "$OUT" "idle: hung"
+say 'working: rewriting the parser'
+backdate 86400
+dsentry "$NOW"
+ck_eq  "14 the sentry looking first starts it too"         "$RC" 4
+ck_eq  "14 so at 89s the listing still waits"              "$(drow $(( NOW + 89 )))" "alive/settled"
+dsentry $(( NOW + 89 ))
+ck_eq  "14 as does the sentry"                             "$RC" 4
+dsentry $(( NOW + 90 ))
+ck_eq  "14 at 90s the sentry wakes"                        "$RC" 0
+ck_eq  "14 and the listing agrees"                         "$(drow $(( NOW + 90 )))" "alive/idle 24h"
+printf 'working\n' > "$STUB_ATTN"
+ck_eq  "14 a working reading in the listing"               "$(drow $(( NOW + 100 )))" "alive/working"
+ck_eq  "14 stops the sentry's clock too"                   "$([ -f "$REEVE_HOME/state/.stale-hung" ] && echo kept || echo gone)" gone
 printf 'settled\n' > "$STUB_ATTN"
 
 echo
