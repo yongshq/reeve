@@ -18,10 +18,10 @@
 # past that objection the work is unrecoverable.
 #
 # What it guarantees, mechanically. A copy is removed only when the work it
-# holds has landed on the recorded base: its own HEAD, and its recorded branch
-# if it has one, are each reachable from that base. Both are asked whenever
-# they apply, never one or the other. Nothing else is asked, and the rest of
-# this block is what that leaves open.
+# holds has landed: its own HEAD, and its recorded branch if it has one, are
+# each reachable from the recorded base or from the holding's default branch.
+# Both facts are asked whenever they apply, never one or the other. Nothing
+# else is asked, and the rest of this block is what that leaves open.
 #
 # What it deliberately does not guarantee. These are chosen edges, not
 # oversights, and the reason is the load-bearing half of each: a limit reported
@@ -60,13 +60,17 @@
 #   something the record cannot get wrong, or enumerating every worktree entry
 #   in the repository and refusing over the ones no live errand claims.
 #
-# - The stack case. A base= naming a branch that has itself landed and still
-#   sits behind main refuses work that has in fact landed, because the copy's
-#   commits are not reachable from that branch. The liege parked it
-#   deliberately: it fails closed, so it costs attention rather than work, and
-#   the correction is the base= line in the errand's meta file rather than
-#   anything here. Expect it rather than reading it as a malfunction. The reeve
-#   corrected that line by hand eight times on the day this guard was built.
+# - The stack case, closed by ancestry only. An errand based on another
+#   errand's branch records that branch as base=, and once the stack lands on
+#   main that branch sits behind it, so the copy's commits are not reachable
+#   from it. The holding's default branch (its base: in manors.md, else main)
+#   is therefore asked as well, and reaching either counts as landed. It is
+#   asked in addition to base=, never instead of it: a default that does not
+#   resolve is skipped, which leaves the refusal exactly as it was. Two gaps
+#   remain, both failing closed. A stack that landed by rebase or squash holds
+#   the same patches under other shas, and patch equivalence decides nothing
+#   here (see the rewritten-base entry below). And a base= branch that was
+#   deleted once it landed is refused by require_base before either is asked.
 #
 # - A base that was rewritten under the errand. A rebase, an amend, a `reset
 #   --hard` or a force-move on the base leaves work that DID land, under the
@@ -146,6 +150,7 @@ repo=$(meta_get "$id" repo '')
 wt=$(meta_get "$id" worktree '')
 br=$(meta_get "$id" branch '')
 base=$(meta_get "$id" base main)
+holding=$(meta_get "$id" holding '')
 writes=$(meta_get "$id" writes yes)
 target=$(meta_get "$id" target '')
 backend=$(meta_get "$id" backend herdr)
@@ -254,7 +259,7 @@ require_base() {
     "The landed-work test has nothing to compare against, so it stops. Check the repo= line in" \
     "$(meta_file "$id")."
   base_sha=$(git -C "$repo" rev-parse --verify --quiet "$base^{commit}" 2>/dev/null) || base_sha=''
-  [ -n "$base_sha" ] && return 0
+  [ -n "$base_sha" ] && { resolve_default; return 0; }
   # No guessing a replacement. Falling back to main, to HEAD or to the default
   # branch is the same fail-open wearing a friendlier face.
   refuse "the recorded base '$base' does not name a commit in $repo." \
@@ -262,6 +267,43 @@ require_base() {
     "assume the work is safe. Usually that base has itself landed and been deleted." \
     "Correct the base= line in $(meta_file "$id") to the branch the work actually landed on," \
     "then tear down again."
+}
+
+# The holding's default branch, the second place work counts as landed. An
+# errand stacked on another errand's branch records that branch as base=, and
+# once the whole stack lands on main the recorded branch sits behind it for
+# good: the copy's commits are on main and on nothing base= can reach. Resolved
+# the way bin/reeve-brief picks a base when it is given none, the holding's
+# base: in manors.md, else main.
+#
+# An addition to the base, never a replacement for it, and that is the whole of
+# why this is not the fallback require_base refuses to make: work reachable from
+# the default branch has landed whatever base= says, so asking it can only turn
+# a refusal over landed work into a pass. A default that does not resolve is not
+# asked at all, which leaves every check exactly as it was without it. Set by
+# require_base, so it is read only after the base itself has resolved.
+default_ref='' default_sha='' landed_refs=''
+resolve_default() {
+  default_ref=main
+  [ -n "$holding" ] && default_ref=$(holding_field "$holding" base main)
+  default_sha=$(git -C "$repo" rev-parse --verify --quiet "$default_ref^{commit}" 2>/dev/null) \
+    || default_sha=''
+  # The same ref asks nothing new, and naming it twice in a refusal reads as a
+  # second check that never ran. Compared by name, not by commit: a default
+  # sitting on the same commit as a stacked base= is still a second ref, and
+  # the reader of the refusal needs to see it was asked.
+  [ "$default_ref" = "$base" ] && default_sha=''
+  landed_refs=$base
+  [ -n "$default_sha" ] && landed_refs="$base or $default_ref"
+  return 0
+}
+
+# landed_on <sha> -> 0 when the recorded base or the default branch holds it.
+# Non-zero on an error exactly as on unlanded work, like the --is-ancestor it
+# wraps, so a question git cannot answer is a refusal.
+landed_on() {
+  git -C "$repo" merge-base --is-ancestor "$1" "$base_sha" 2>/dev/null && return 0
+  [ -n "$default_sha" ] && git -C "$repo" merge-base --is-ancestor "$1" "$default_sha" 2>/dev/null
 }
 
 # A base that moved out from under the errand.
@@ -397,12 +439,14 @@ refuse_base_moved() { # refuse_base_moved <subject> <sha> [extra line...]
 # missed the sibling case its new proxy also could not express.
 #
 # "Landed" is the strict reading, deliberately: reachable from the RECORDED
-# BASE, not from any ref that happens to survive the removal. That is the test
-# this script's header claims to own. Conflating it with the looser "the commits
-# stay reachable somehow" is where the holes came from, so the loose reading is
-# not implemented and is not argued for anywhere below. A copy whose record and
-# reality disagree therefore refuses, even when some other branch would have
-# kept its commits: the disagreement is the thing worth hearing about.
+# BASE or the holding's DEFAULT BRANCH, the two places this errand's work is
+# meant to end up, not from any ref that happens to survive the removal. That is
+# the test this script's header claims to own. Conflating it with the looser
+# "the commits stay reachable somehow" is where the holes came from, so the
+# loose reading is not implemented and is not argued for anywhere below. A copy
+# whose record and reality disagree therefore refuses, even when some other
+# branch would have kept its commits: the disagreement is the thing worth
+# hearing about.
 #
 # Reachability, not equality. A copy that committed nothing is an ancestor of
 # its base, and stays one when unrelated work lands there afterwards, so asking
@@ -499,7 +543,7 @@ if [ -n "$br" ] || [ "$copy_at_risk" = yes ]; then
       "The landed-work test has nothing to compare against, so it stops rather than assume the" \
       "work is safe. Correct the branch= line in $(meta_file "$id"), or find out whether that" \
       "branch was deleted before its commits landed."
-    if ! git -C "$repo" merge-base --is-ancestor "$br_sha" "$base_sha" 2>/dev/null; then
+    if ! landed_on "$br_sha"; then
       # Asked before the count, because "rebase or merge it first" is advice the
       # reader cannot act on when the branch already did land and the base was
       # rewritten afterwards. Same refusal either way, different diagnosis.
@@ -507,11 +551,16 @@ if [ -n "$br" ] || [ "$copy_at_risk" = yes ]; then
       # Counted for the message only, never to decide. --is-ancestor has already
       # decided, and it is non-zero on an error exactly as on unlanded work, so
       # a count that does not come back can no longer read as "nothing unlanded"
-      # the way the old fallback to 0 did.
-      ahead=$(git -C "$repo" rev-list --count "$base_sha..$br_sha" 2>/dev/null) || ahead=''
-      unlanded=$(git -C "$repo" log --oneline "$base_sha..$br_sha" 2>/dev/null \
+      # the way the old fallback to 0 did. Counted against every ref landed_on
+      # asked, so the number is the commits that neither of them holds.
+      # $default_sha is unquoted on purpose: a sha or empty, and empty drops out.
+      ahead=$(git -C "$repo" rev-list --count "$br_sha" --not "$base_sha" $default_sha 2>/dev/null) \
+        || ahead=''
+      unlanded=$(git -C "$repo" log --oneline "$br_sha" --not "$base_sha" $default_sha 2>/dev/null \
                  | head -5 | sed 's/^/    /')
-      refuse "$br has ${ahead:-unlanded} commit(s) that $base does not have." \
+      not_on="$base does not have"
+      [ -n "$default_sha" ] && not_on="neither $base nor $default_ref has"
+      refuse "$br has ${ahead:-unlanded} commit(s) that $not_on." \
              "$unlanded" \
              "Rebase or merge it first. Removing the copy now leaves the branch, but this is the" \
              "point at which work gets forgotten, so it stops here."
@@ -521,9 +570,10 @@ if [ -n "$br" ] || [ "$copy_at_risk" = yes ]; then
   # 4b. the copy's own HEAD, whatever it is or is not sitting on. A branch in
   # the meta file is a claim ABOUT the copy, not an observation OF it, so it is
   # never a substitute for asking the copy itself. The question put to it is the
-  # same strict one: is that HEAD on the recorded base. Not whether some other
-  # ref would have kept it alive through the removal, which is the loose reading
-  # this script does not implement.
+  # same strict one: is that HEAD on the recorded base, or on the default branch
+  # a stacked base lands on. Not whether some other ref would have kept it alive
+  # through the removal, which is the loose reading this script does not
+  # implement.
   # A steward is excluded by writes=home: it works in the reeve's home, and that
   # same label keeps the removal section below off any path it records anyway.
   if [ "$copy_at_risk" = yes ]; then
@@ -554,7 +604,7 @@ if [ -n "$br" ] || [ "$copy_at_risk" = yes ]; then
            "Its HEAD ($head_now) is not a commit in that repository at all, so there is nothing" \
            "to compare and the test stops rather than read the failure as unlanded work." \
            "Correct the repo= line in $(meta_file "$id")."
-    if ! git -C "$repo" merge-base --is-ancestor "$head_now" "$base_sha" 2>/dev/null; then
+    if ! landed_on "$head_now"; then
       # Where the work is, not merely that it is somewhere: the branch a copy
       # sits on is the one fact that finds it again, and a detached copy has
       # none, so this says so rather than leaving the sha to stand alone.
@@ -582,20 +632,20 @@ if [ -n "$br" ] || [ "$copy_at_risk" = yes ]; then
         fi
       fi
       if [ "$copy_examined" = record ]; then
-        refuse "the copy recorded at $wt holds work that is not on $base ($holds)." \
+        refuse "the copy recorded at $wt holds work that is not on $landed_refs ($holds)." \
                "Its directory is not there, so this is git's own record of the copy rather than" \
                "the copy itself: the entry under .git/worktrees/ still names that HEAD, and the" \
                "next 'git worktree prune' in $repo discards it and the commit with it." \
                "Give that commit a ref (git -C $repo branch <name> $head_now) or land it, then" \
                "tear down again."
       elif [ -n "$br" ]; then
-        refuse "the copy at $wt has moved off $base ($holds)." \
+        refuse "the copy at $wt has moved off $landed_refs ($holds)." \
                "$br is landed, but the copy is not on it: the record and the copy disagree, so" \
                "that branch says nothing about what this copy holds. Find out where that work" \
                "belongs, or correct the branch= line in $(meta_file "$id"), then tear down again."
       else
-        refuse "the copy at $wt has moved off $base ($holds)." \
-               "It holds work that has not landed on $base, and this errand records no branch," \
+        refuse "the copy at $wt has moved off $landed_refs ($holds)." \
+               "It holds work that has not landed on $landed_refs, and this errand records no branch," \
                "so the test has nothing else to ask. Look at the copy before removing it."
       fi
     fi
