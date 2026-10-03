@@ -24,10 +24,11 @@
 #      ends when the last job it was tending is done.
 #   4. detached. It has to outlive the dispatch that started it, or the fix does
 #      nothing at all.
-#   5. a STANDBY, not a peer. While a foreground watch holds the home it reaps
-#      nothing at all, because cleaning up an errand the watch has not reported
-#      yet destroys that report instead of delaying it. Sections 4 and 5 run the
-#      two of them genuinely concurrently, which is the only way that shows.
+#   5. a STANDBY, not a peer. While an errand's owner is watching, it leaves
+#      that errand alone, because cleaning up an errand the watch has not
+#      reported yet races the watch for that report. An errand nobody owns waits
+#      on any watch at all. Sections 4 and 5 run the two of them genuinely
+#      concurrently, which is the only way that shows.
 #
 # Scratch homes only, never the real one. Every case that starts a process waits
 # for it and kills it: a suite that leaks a poller is a failed suite.
@@ -129,9 +130,9 @@ HARNESS
 # because an unowned errand is what every watch here can see without pinning a
 # session first. A case that wants the copy REMOVED has to name an owner: a
 # caretaker will not remove what it could not report, and an unowned errand has
-# nowhere to leave the report. The name must never be this suite's own session,
-# which is alive throughout and stops a caretaker on the ownership gate before
-# the case gets to whatever it was asking about.
+# nowhere to leave the report. Whether that owner is alive does not matter to a
+# caretaker, only whether it is watching, and nothing here publishes a marker for
+# an owner unless the case says so.
 ERRAND_OWNER=''
 errand() { # errand <id> <writes> <status line>...
   local id=$1 writes=$2; shift 2
@@ -324,10 +325,10 @@ export REEVE_HOME="$SCRATCH/home4"
 mkdir -p "$REEVE_HOME"
 # Everything below is briefed by one named session, so that "no reeve anywhere"
 # can be made TRUE rather than assumed. An errand records the session that
-# briefed it, and a caretaker will not clean up under an owner that is still
-# reporting, so a case that wants the no-reeve path has to retire that owner
-# first. Left implicit, this asserted the opposite of what it claimed: the
-# briefing session was the suite's own, which is alive throughout.
+# briefed it, and the owner is retired here as well as not watching, which is
+# the strongest form of "no reeve anywhere". A caretaker only asks the second
+# question; tests/sentry-ownership.test.bash covers an owner alive and not
+# watching.
 export REEVE_SESSION=departed
 # The owner walked away. Backdated well past the staleness window, so the
 # caretaker can prove it rather than guess.
@@ -516,8 +517,9 @@ eq  "5 and takes the marker with it when it stops" \
 # worse failure than the race it closes.
 # Owned from here on: each of these reads its answer off a completed teardown.
 # `watched` above stays unowned, because the watch that publishes the marker has
-# to be able to see it.
-ERRAND_OWNER=gone
+# to be able to see it. Owned by w5, the session whose marker this is, because a
+# caretaker yields an owned errand to its OWNER'S watch and to nobody else's.
+ERRAND_OWNER=w5
 watched_reap() { # watched_reap <id> <marker line>   -> yes|no
   errand "$1" no "working: going"
   printf 'done: finished\n' >> "$REEVE_HOME/errands/$1/status"
@@ -529,6 +531,11 @@ eq "5 a live watch stops the caretaker reaping"       "$(watched_reap guarded "$
 eq "5 a watch whose process died does not"            "$(watched_reap dead "$(marker "$(free_pid)" 0 60)")" yes
 eq "5 nor one that stopped refreshing, pid or no pid" "$(watched_reap stale "$(marker "$$" 300 1)")" yes
 eq "5 and with no watch at all it just works"         "$(watched_reap alone '')" yes
+# Somebody else's watch is no reason to stand aside: that watch neither sees nor
+# reaps this errand, so yielding to it left the hand idle until its own reeve
+# next looked.
+ERRAND_OWNER=gone
+eq "5 a live watch by another session does not stop it" "$(watched_reap elsewhere "$(marker "$$" 0 60)")" yes
 
 # Standing by is not retiring. The caretaker must still be there, still polling,
 # for the moment the watch goes away, because that moment is a reeve's session
@@ -536,6 +543,7 @@ eq "5 and with no watch at all it just works"         "$(watched_reap alone '')"
 export REEVE_HOME="$SCRATCH/home6"
 WATCH_F="$REEVE_HOME/state/.sentry.watch-w6"
 mkdir -p "$REEVE_HOME/state"
+ERRAND_OWNER=w6
 errand orphan no "working: building" "done: branch ready"
 marker "$$" 0 60 > "$WATCH_F"
 "$ROOT/bin/reeve-sentry" --caretaker --poll 1 >"$SCRATCH/standby.out" 2>&1 &

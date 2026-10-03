@@ -167,22 +167,47 @@ eq "5 one that stopped refreshing is dead"     "$(ask old)"    dead
 eq "5 one that never reported is unknown"      "$(ask ghost)"  unknown
 eq "5 and so is no session at all"             "$(ask '')"     unknown
 
-echo "--- 6. the caretaker cleans for the gone, never against the living ---"
+echo "--- 6. the caretaker cleans for anyone not watching, never under a watch ---"
 # The caretaker sees the whole home on purpose: it exists for errands whose
-# reeve is gone. That makes the owner check load bearing rather than decorative.
-# Tearing an errand down writes tornDown=, live_errands stops listing it, and
-# the wake its owner had not yet delivered is destroyed rather than delayed.
+# reeve is not watching. That makes the owner check load bearing rather than
+# decorative: tearing an errand down under its owner's watch races that watch
+# for the report.
+#
+# WATCHING, not alive. It used to stand aside for an owner whose session was
+# merely alive, and a reeve is alive all day while its watch is a one shot, so a
+# finished hand sat idle at its prompt between one watch and the next: four
+# minutes once and fourteen once, measured in one home on one day, with this
+# caretaker holding the lock throughout.
 export REEVE_HOME="$SCRATCH/home6"
 mkdir -p "$REEVE_HOME/state"
 beat() { # beat <session> <seconds ago>
   mkdir -p "$REEVE_HOME/state/sessions/$1"
   printf '%s\n' "$(( $(date +%s) - $2 ))" > "$REEVE_HOME/state/sessions/$1/seen"
 }
+# watching <session> [<seconds of age>] [<poll>]   that session's watch marker,
+# naming this process, which is the one pid certain to be alive.
+watching() {
+  printf '%s %s %s\n' "$$" "$(( $(date +%s) - ${2:-0} ))" "${3:-60}" \
+    > "$REEVE_HOME/state/.sentry.watch-$1"
+}
+# spool <session>   every line waiting in that session's wake spool
+spool() { cat "$REEVE_HOME/state/sessions/$1/wake"/* 2>/dev/null | sed -n 's/^say=//p'; }
 care() { REEVE_SESSION=janitor "$ROOT/bin/reeve-sentry" --caretaker --once --poll 1 >/dev/null 2>&1; reaped "$1"; }
 
+: > "$KILLS"
 errand live-owned sess-live "working: x" "done: y"
 beat sess-live 0
-eq "6 an owner that is still there is left alone" "$(care live-owned)" no
+eq  "6 an owner alive and not watching has its hand cleaned up" "$(care live-owned)" yes
+eq  "6 its session freed"                                       "$(grep -cF 'stub:1' "$KILLS")" 1
+has "6 and the done line left in that owner's spool"            "$(spool sess-live)" "live-owned is done"
+
+errand watched-owned sess-watch "working: x" "done: y"
+beat sess-watch 0
+watching sess-watch
+eq  "6 an owner that is watching is left alone"     "$(care watched-owned)" no
+eq  "6 its session is not even freed"               "$(meta_of watched-owned target)" stub:1
+eq  "6 and nothing was left in its spool"           "$(spool sess-watch)" ''
+rm -f "$REEVE_HOME/state/.sentry.watch-sess-watch"
 
 errand dead-owned sess-dead "working: x" "done: y"
 beat sess-dead 99999
@@ -205,6 +230,29 @@ eq "6 an errand nobody owns is not finished off"      "$(care un-owned)" no
 eq "6 but its idle session is freed all the same"     "$(meta_of un-owned target)" ''
 eq "6 and it is still there for the first reeve that watches" \
    "$(REEVE_SESSION=passerby "$ROOT/bin/reeve-sentry" --once --no-reap 2>&1 | grep -c 'un-owned is done')" 1
+
+# And with anybody at all watching, an unowned errand keeps the blanket rule it
+# always had: there is no owner's marker to read, so any live one counts, and
+# the caretaker touches nothing, not even the idle session.
+errand un-owned-watched '' "working: x" "done: y"
+watching passerby
+eq "6 an unowned errand waits on any watch at all"  "$(care un-owned-watched)" no
+eq "6 down to its session"                          "$(meta_of un-owned-watched target)" stub:1
+rm -f "$REEVE_HOME/state/.sentry.watch-passerby"
+
+# Never finished, whatever the markers say: a `blocked:` hand can still be
+# steered and a question never answered means the errand is not done.
+for w in no yes; do
+  rm -f "$REEVE_HOME/state/.sentry.watch-sess-held"
+  [ "$w" = yes ] && watching sess-held
+  beat sess-held 0
+  errand held-blocked-$w sess-held "working: x" "blocked: no .env"
+  errand held-asking-$w  sess-held "needs-decision [key=k]: which?" "done: did it anyway"
+  care held-blocked-$w >/dev/null
+  eq "6 a blocked hand is never freed, owner watching=$w"     "$(reaped held-blocked-$w) $(meta_of held-blocked-$w target)" "no stub:1"
+  eq "6 nor an open needs-decision, owner watching=$w"        "$(reaped held-asking-$w) $(meta_of held-asking-$w target)" "no stub:1"
+done
+rm -f "$REEVE_HOME/state/.sentry.watch-sess-held"
 
 echo "--- 7. session records are pruned, but never one still answering for work ---"
 # The statusline gauge writes a record for EVERY claude session on the machine,
@@ -262,6 +310,71 @@ printf '0\n' > "$REEVE_HOME/config/session-retain"
 n=$(REEVE_SESSION=me bash -c '. "$0"/bin/reeve-lib.sh; sessions_prune' "$ROOT")
 eq "7 retain 0 keeps everything" \
    "$([ -d "$REEVE_HOME/state/sessions/ancient" ] && echo kept || echo pruned)" kept
+
+echo "--- 8. two reeves, one watching and one not ---"
+export REEVE_HOME="$SCRATCH/home10"
+mkdir -p "$REEVE_HOME/state"
+beat sess-A 0; beat sess-B 0
+watching sess-A
+errand a-done sess-A "working: x" "done: A's answer"
+errand b-done sess-B "working: x" "done: B's answer"
+REEVE_SESSION=janitor "$ROOT/bin/reeve-sentry" --caretaker --once --poll 1 >/dev/null 2>&1
+eq  "8 the watching reeve's errand is left for its watch" "$(reaped a-done) $(meta_of a-done target)" "no stub:1"
+eq  "8 the other reeve's is cleaned up"                   "$(reaped b-done) $(meta_of b-done target)" "yes "
+has "8 with its line in B's spool"                        "$(spool sess-B)" "b-done is done"
+eq  "8 and nothing in A's"                                "$(spool sess-A)" ''
+
+echo "--- 9. a marker that goes stale under a live owner frees the hand next poll ---"
+# The owner's session stays alive throughout. What changes is only its marker:
+# believed for three polls and five seconds after its last refresh, so planted
+# here four seconds short of that, it is live when the caretaker starts and
+# stale a few seconds later, with nothing else touched in between.
+export REEVE_HOME="$SCRATCH/home11"
+mkdir -p "$REEVE_HOME/state"
+beat sess-S 0
+errand lapsed sess-S "working: x" "done: y"
+watching sess-S 4 1                       # allowance 1*3+5 = 8s, so 4s left
+expires=$(( $(date +%s) + 4 ))
+REEVE_SESSION=janitor "$ROOT/bin/reeve-sentry" --caretaker --poll 1 >/dev/null 2>&1 &
+CARE=$!
+sleep 2
+eq "9 not touched while the owner's marker is live" "$(reaped lapsed)" no
+eq "9 and the caretaker is still standing by"       "$(kill -0 "$CARE" 2>/dev/null && echo alive || echo gone)" alive
+n=0; while [ "$n" -lt 300 ] && [ "$(reaped lapsed)" = no ]; do sleep 0.05; n=$((n + 1)); done
+freed_at=$(date +%s)
+eq "9 freed once it went stale"                     "$(reaped lapsed)" yes
+eq "9 and not before"                               "$([ "$freed_at" -ge "$expires" ] && echo after || echo before)" after
+eq "9 with the owner's session alive throughout"    "$(REEVE_HOME="$REEVE_HOME" bash -c '. "$0"/bin/reeve-lib.sh; session_state sess-S' "$ROOT")" alive
+kill "$CARE" 2>/dev/null; wait "$CARE" 2>/dev/null
+
+echo "--- 10. done to freed is bounded by the caretaker's poll, with no watch at all ---"
+# The measurement behind the whole change, asserted rather than described. No
+# foreground watch runs, the owner is alive, and the time from the `done:` line
+# to its session being freed is at most one poll of sleep plus one pass of work,
+# with a second of slack for a loaded machine. Milliseconds, from perl, because
+# `date +%s` would eat the margin being measured.
+export REEVE_HOME="$SCRATCH/home12"
+mkdir -p "$REEVE_HOME/state"
+ms() { perl -MTime::HiRes=time -e 'printf "%d\n", time * 1000'; }
+POLL=2
+BOUND=$(( POLL * 1000 + 2000 ))
+beat sess-T 0
+errand timed sess-T "working: x"
+: > "$KILLS"
+REEVE_SESSION=janitor "$ROOT/bin/reeve-sentry" --caretaker --poll "$POLL" >/dev/null 2>&1 &
+CARE=$!
+n=0; while [ "$n" -lt 100 ] && [ ! -f "$REEVE_HOME/state/.sentry.lock" ]; do sleep 0.05; n=$((n + 1)); done
+sleep 0.5                                 # into its sleep, so a whole poll is owed
+t0=$(ms)
+printf 'done: branch ready\n' >> "$REEVE_HOME/errands/timed/status"
+n=0; while [ "$n" -lt 400 ] && ! grep -qF 'stub:1' "$KILLS"; do sleep 0.02; n=$((n + 1)); done
+t1=$(ms)
+took=$(( t1 - t0 ))
+printf '        done to freed: %sms against a bound of %sms (poll %ss)\n' "$took" "$BOUND" "$POLL"
+eq "10 the session was freed"                 "$(grep -cF 'stub:1' "$KILLS")" 1
+eq "10 within one poll and one pass of done"  "$([ "$took" -le "$BOUND" ] && echo within || echo "over, ${took}ms")" within
+has "10 and its owner was left the line"      "$(spool sess-T)" "timed is done"
+kill "$CARE" 2>/dev/null; wait "$CARE" 2>/dev/null
 
 printf '\npassed=%s failed=%s\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

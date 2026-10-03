@@ -128,6 +128,15 @@ watch_live() {
   return 1
 }
 
+# Is THIS session watching this home right now: its own marker, under the same
+# staleness rule. The question a caretaker asks about an errand's owner, because
+# an owner that is merely alive is a reeve between watches, and only one that is
+# watching will report the errand and clean it up itself.
+watch_live_for() { # watch_live_for <session>
+  [ -n "${1:-}" ] || return 1
+  marker_alive "$(marker_read "$(watch_marker "$1")")"
+}
+
 # --- pending wakes ----------------------------------------------------------
 # A reeve is woken by bin/reeve-sentry and by nothing else, so a reeve that
 # dispatches and then sits idle has nothing watching on its behalf at all. What

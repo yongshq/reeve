@@ -102,7 +102,8 @@ When that is genuinely unclear, that is a question worth asking.
 
 **Nothing watches on your behalf unless you start it.** `bin/reeve-sentry` is the only thing that
 wakes you, and it wakes the session that runs it. What a dispatch leaves behind is a *caretaker*,
-which cleans up after a finished hand and tells nobody, because it has no reeve to tell. So after
+which cleans up after a finished hand whose reeve is not watching and wakes nobody: it can only
+leave the line where your next watch or listing will find it. So after
 dispatching, start the watch yourself, in a way that returns to you when it exits rather than one
 you sit blocked inside. Then say nothing further until it does.
 
@@ -206,8 +207,10 @@ An agent does not exit itself. A hand that has reported `done:` is finished work
 is still sitting at a prompt holding a pane, so cleanup is not optional tidiness: without it every
 completed errand leaves something running.
 
-The sentry does this for you when it reports a finished errand, and the two halves have different
-safety conditions:
+Your watch does this when it reports a finished errand. Between watches the caretaker does it,
+within one of its polls, after leaving the terminal line in your spool: it stands aside only for an
+errand whose owner is watching right now, proved by that session's own watch marker, and an owner
+merely alive is not watching. Either way the two halves have different safety conditions:
 
 | | When | What it costs |
 |---|---|---|

@@ -33,21 +33,22 @@
 # torn down unreported is the whole defect this exists to close.
 #
 # bin/reeve-dispatch starts one, which is what makes a finished hand get cleaned
-# up even when no reeve session is alive. One per home, enforced by a lock; a
-# second start is a quiet no-op. It exits when nothing is left to tend, so
-# nothing lingers.
+# up even when no reeve is watching. One per home, enforced by a lock; a second
+# start is a quiet no-op. It exits when nothing is left to tend, so nothing
+# lingers.
 #
-# A caretaker is a STANDBY, not a peer. While a foreground watch holds this home
-# it reaps nothing at all, because cleaning up an errand the watch has not yet
-# reported destroys that report rather than delaying it: teardown writes
-# tornDown=, live_errands stops listing the errand, and the watch's next tick
-# finds nothing in flight and exits. The "is done" line is then lost for good,
-# and it is the one thing the household exists to deliver. So the foreground
-# publishes state/.sentry.watch while it watches and the caretaker stands by for
-# as long as that marker is live: still polling, reaping nothing, ready to
-# resume the instant the marker goes. Standby rather than exit, because the
-# session holding it is routinely killed outright, which is the case that put
-# the caretaker here in the first place.
+# A caretaker is a STANDBY, not a peer, towards a watch that is running. While
+# an errand's owner is watching, it leaves that errand alone, because cleaning
+# up an errand the watch has not yet reported races the watch for it. So each
+# foreground watch publishes state/.sentry.watch-<session> while it watches and
+# the caretaker stands by for that session's errands for as long as the marker
+# is live: still polling, reaping none of them, ready to resume the instant the
+# marker goes. Standby rather than exit, because the session holding it is
+# routinely killed outright, which is the case that put the caretaker here in
+# the first place. An owner that is alive and not watching gets no standby at
+# all: its line goes to its spool and the hand is cleaned up, see reap_allowed.
+# An errand that names no owner keeps the older blanket rule, any live marker
+# at all, since there is no owner's marker to read.
 #
 # Exit codes:
 #   0  something actionable, reason printed on stdout (or: a caretaker already
@@ -212,7 +213,7 @@ watch_publish() { mkdir -p "$REEVE_HOME_D/state" 2>/dev/null && marker_stamp "$W
 
 # Is ANY session watching this home: watch_live, in bin/reeve-lib.sh. Used for
 # one question only: an errand with no recorded owner cannot be judged by its
-# owner's liveness, so the blanket answer is the only safe one for those. Owned
+# owner's own marker, so the blanket answer is the only safe one for those. Owned
 # errands are judged per owner in reap_allowed, which is strictly better than a
 # blanket standby.
 watch_drop() {
@@ -315,16 +316,25 @@ reap_one() {
 # A foreground watch only ever sees errands it owns, so the answer is yes.
 #
 # A caretaker sees the whole home, because it exists for errands whose reeve is
-# gone, and there it must not act against an owner that is still there. Tearing
-# an errand down writes tornDown=, live_errands stops listing it, and the wake
-# the owning reeve had not yet delivered is destroyed rather than delayed.
+# not watching, and there it must not act against an owner that is. Tearing an
+# errand down under its owner's watch races that watch for the report: the watch
+# is about to say `is done` and clean up itself, and two cleaners on one errand
+# is one too many.
 #
-# `alive` is the only answer that refuses. `dead` and `unknown` both permit,
-# which is the deliberate asymmetry: this gate protects a reeve that is
-# demonstrably there, and otherwise leaves the caretaker doing exactly the job
-# it was added for. A home whose sessions never report liveness therefore keeps
-# the behaviour it had before ownership existed rather than silently losing its
-# cleaner.
+# WATCHING, not alive, and the difference is the whole of the rule. It used to
+# yield to an owner whose session was alive, and a reeve's session is alive for
+# its whole working day while its watch is a one shot that prints one line and
+# exits. So a finished hand sat idle at its prompt for however long that reeve
+# took between one watch and the next: measured at four minutes and at fourteen,
+# in one home on one day, with a caretaker holding the lock throughout and
+# deliberately standing aside. An owner that is not watching loses nothing to a
+# cleanup, because the line is left in its spool first, which is what its next
+# watch or listing delivers.
+#
+# Proved by the owner's own marker, watch_live_for in bin/reeve-lib.sh, under
+# the staleness rule every marker answers to: published by its watch, refreshed
+# every poll, removed on the way out. Another session's marker is no evidence
+# either way, because that watch neither sees nor reaps this errand.
 reap_allowed() { # reap_allowed <id>
   local own
   [ "$caretaker" = yes ] || return 0
@@ -332,8 +342,7 @@ reap_allowed() { # reap_allowed <id>
   # No recorded owner: nothing can be proved either way, so fall back to the
   # blanket rule, which is whether anybody at all is watching this home.
   [ -n "$own" ] || { [ "$standby" = no ]; return; }
-  [ "$(session_state "$own")" = alive ] && return 1
-  [ "$standby" = no ]
+  ! watch_live_for "$own"
 }
 
 reapable() { # reapable <state> <divergence>
