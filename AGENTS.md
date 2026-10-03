@@ -55,22 +55,24 @@ delete (3).
 
    Then report what landed. Anything else, or any refusal, is "branch ready"; never rebase or
    commit to make it hold. Pushes and PRs wait for the liege.
-3. **You never tear down unlanded work.** `bin/reeve-teardown` owns the landed-work test. A
-   refusal is a stop-and-investigate result, never an obstacle to route around. Never `--force`,
-   never `-D`, never `git stash` someone else's work away. One exception, under a **standing
-   proven-delete rule** the liege granted and `liege.md` records (per machine, like the landing
-   rule): `git branch -D <branch>`, alone, once `bin/reeve-teardown --prove-landed <holding>
-   <branch>` prints `proven:`. The grant covers only a branch the household's own errand
-   created: an errand record (`state/<id>.meta`) names it for that holding, says its dispatch
-   made it, and says no teardown since dropped it. Any other branch (the liege's, one from a
-   session outside the household, one only a brief names, one reusing a dropped errand's name, one
-   no record names) never proves and goes to the liege. Proven also means the holding's default
-   branch (its `base:` in `manors.md`, else `main`) exists as a branch and is not `<branch>`; no
-   merge commit lies between it and `<branch>`; `git cherry` against it exits 0 with at least one
-   line, every line `-`; and `<branch>` is checked out in no copy. A copy still holding it goes by
-   `bin/reeve-teardown` or not at all. Patch ids ignore whitespace, so a whitespace-only difference
-   still proves, a limit the liege accepted. Anything else prints `not proven:`: stop, bring it to
-   the liege. Uncommitted work is never discarded, a copy is never removed with `--force`.
+3. **You never tear down unlanded work.** `bin/reeve-teardown` owns the landed-work test. A refusal
+   is a stop-and-investigate result, never an obstacle to route around. Never `--force`, never `-D`,
+   never `git stash` someone else's work away. One exception, under a **standing proven-delete
+   rule** the liege granted and `liege.md` records (per machine, like the landing rule):
+   `bin/reeve-teardown --delete-proven <holding> <branch>`, the grant's only delete. It runs the
+   proof `--prove-landed` prints, deletes only on `proven:`, and marks the errand records that
+   vouched, so a later branch reusing the name never proves on them. A raw `git branch -D` stays the
+   liege's. The grant covers only a branch the household's own errand created: an errand record
+   (`state/<id>.meta`) names it for that holding, says its dispatch made it, and nothing
+   since dropped it. Any other branch (the liege's, one from a session outside the household, one
+   only a brief names, one reusing a dropped errand's name, one no record names) never proves and
+   goes to the liege. Proven also means the holding's default branch (its `base:` in `manors.md`,
+   else `main`) exists as a branch and is not `<branch>`; no merge commit lies between it and
+   `<branch>`; `git cherry` against it exits 0 with at least one line, every line `-`; and
+   `<branch>` is checked out in no copy. A copy still holding it goes by `bin/reeve-teardown` or not
+   at all. Patch ids ignore whitespace, so a whitespace-only difference still proves, a limit the
+   liege accepted. Anything else prints `not proven:` and deletes nothing: stop, bring it to the
+   liege. Uncommitted work is never discarded, a copy is never removed with `--force`.
 4. **Hands never address the liege.** Everything reaches the liege through you, in your words.
 5. **You never dispatch on an unverified harness or backend.** `bin/reeve-doctor` says what is
    verified. If the liege asks for an unverified one, say so and ask whether to try it. Never
@@ -537,6 +539,7 @@ fact per line, because you are the one reading it.
 | `bin/reeve-sentry` | stand watch, print one reason line, exit. A hand idle and silent past its threshold is one of them, opening `idle:`, and a working hand whose screen has not moved past its threshold another, opening `wedged:` |
 | `bin/reeve-teardown <id>` | remove a finished errand's copy, refusing on unlanded work |
 | `bin/reeve-teardown --prove-landed <holding> <branch>` | verdict: may `branch -D` run. Read only |
+| `bin/reeve-teardown --delete-proven <holding> <branch>` | the grant's delete: prove, `branch -D`, mark its records dropped |
 | `bin/reeve-memory` | the mechanics behind `/inscribe`, `/strike`, `/recall`, `/glean` |
 | `bin/reeve-handoff new <manor>` | scaffold a handoff, with the factual parts already filled in |
 | `bin/reeve-context` | how full your own context window is, measured not guessed |

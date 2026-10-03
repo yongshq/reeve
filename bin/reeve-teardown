@@ -4,11 +4,17 @@
 # Usage:
 #   reeve-teardown <id> [--drop-branch] [--dismiss-only] [--dry-run]
 #   reeve-teardown --prove-landed <holding> <branch>
+#   reeve-teardown --delete-proven <holding> <branch>
 #
 # --prove-landed changes nothing. It prints one verdict line, `proven:` (exit 0)
 # or `not proven:` (exit 1), saying whether `git branch -D <branch>` would lose
 # anything: the proof behind hard rule 3's standing proven-delete grant, so the
 # reeve never assembles it by hand. See the block above prove_landed below.
+#
+# --delete-proven is the grant's delete, and the only one: the same proof, then
+# `git branch -D`, then branchDropped= on every record that vouched for the
+# branch, so a later branch reusing the name never proves on them. Not proven
+# changes nothing and exits 1.
 #
 # Two separate jobs with different safety conditions. DISMISSING a finished
 # hand's session loses nothing and happens as soon as it reports a terminal
@@ -135,7 +141,7 @@ BIN=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 #   torn down or not, whose branch= is the branch, whose repo= is the same
 #   repository, that carries branchMade= (written by reeve-dispatch right after
 #   its `worktree add -b`) and no branchDropped= (written by this script's
-#   --drop-branch). The grant covers only branches the household's own errands
+#   --drop-branch and --delete-proven). The grant covers only branches the household's own errands
 #   created. The liege's, one from a session outside the household, one only a
 #   brief names (dispatch refuses a branch that already exists, so the name may
 #   be the liege's), one reusing a dropped errand's name, or one no record
@@ -159,8 +165,11 @@ BIN=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # is not byte equality. A commit that differs from its landed copy only in
 # whitespace proves.
 prove_landed() { # prove_landed <holding> <branch> -> one verdict line
-  local holding=$1 br=$2 repo repo_p name='' h p f i rp recorded='' default_ref default_sha
+  local holding=$1 br=$2 repo repo_p name='' h p f i rp default_ref default_sha
   local br_sha at merges cherry total plus
+  # What --delete-proven acts on, set only as far as the proof got: every
+  # record that vouches for the branch, the repository, and the tip proved.
+  PL_RECORDS=() PL_REPO='' PL_SHA=''
   no() { printf 'not proven: %s\n' "$*"; return 1; }
   repo=$(resolve_holding_path "$holding") \
     || { no "'$holding' is not a registered holding or a git repository"; return; }
@@ -173,9 +182,9 @@ prove_landed() { # prove_landed <holding> <branch> -> one verdict line
     [ -z "$(meta_get "$i" branchDropped '')" ] || continue
     rp=$(meta_get "$i" repo '')
     [ -n "$rp" ] && [ "$(cd "$rp" 2>/dev/null && pwd -P)" = "$repo_p" ] \
-      && { recorded=$i; break; }
+      && PL_RECORDS+=("$i")
   done
-  [ -n "$recorded" ] || { no "no errand record names $br for $repo as a branch its dispatch" \
+  [ "${#PL_RECORDS[@]}" -gt 0 ] || { no "no errand record names $br for $repo as a branch its dispatch" \
                              "made and nothing since dropped; the grant covers only branches" \
                              "the household's errands created, so bring it to the liege"
                           return; }
@@ -221,6 +230,31 @@ prove_landed() { # prove_landed <holding> <branch> -> one verdict line
   printf 'proven: all %s commit(s) on %s have a patch equivalent on %s, no merges, checked out' \
     "$total" "$br" "$default_ref"
   printf ' nowhere: git -C %s branch -D %s loses nothing\n' "$repo" "$br"
+  PL_REPO=$repo PL_SHA=$br_sha
+}
+
+# --delete-proven: the proof, then the delete, then the records. A branch the
+# grant deleted by hand left its records vouching for a name now free for anyone,
+# so the delete lives here, where it can mark them. The tip is asked again just
+# before the delete: a commit landing on the branch after the proof was never
+# proved, and git branch -D would take it.
+delete_proven() { # delete_proven <holding> <branch>
+  local br=$2 i now
+  prove_landed "$1" "$br" || return 1
+  [ "$(git -C "$PL_REPO" rev-parse --verify --quiet "refs/heads/$br^{commit}" 2>/dev/null)" \
+    = "$PL_SHA" ] || { printf 'not deleted: %s moved after the proof; prove it again\n' "$br"
+                       return 1; }
+  git -C "$PL_REPO" branch -D "$br" >/dev/null \
+    || { printf 'not deleted: git refused to delete %s in %s\n' "$br" "$PL_REPO"; return 1; }
+  now=$(date +%Y-%m-%dT%H:%M:%S)
+  for i in "${PL_RECORDS[@]}"; do
+    meta_set "$i" branchDropped "$now" \
+      || { printf 'deleted, unmarked: %s is gone but record %s could not be marked' "$br" "$i"
+           printf ' branchDropped=, so a branch reusing the name would prove on it\n'
+           return 1; }
+  done
+  printf 'deleted: %s in %s, was %s; marked dropped on %s\n' "$br" "$PL_REPO" "$PL_SHA" \
+    "${PL_RECORDS[*]}"
 }
 
 case ${1:-} in
@@ -228,6 +262,9 @@ case ${1:-} in
   --prove-landed)
     [ $# -eq 3 ] || die "usage: reeve-teardown --prove-landed <holding> <branch>"
     prove_landed "$2" "$3"; exit ;;
+  --delete-proven)
+    [ $# -eq 3 ] || die "usage: reeve-teardown --delete-proven <holding> <branch>"
+    delete_proven "$2" "$3"; exit ;;
 esac
 id=${1:-}; shift 2>/dev/null || :
 drop_branch=no dry=no dismiss_only=no

@@ -7,7 +7,7 @@
 # cases the grant exists for still prove. The grant covers only a branch an
 # errand's dispatch made for that holding and nothing since dropped, so every
 # scene records br as made; case 13 takes the record away, 14 and 15 the made
-# and the not dropped.
+# and the not dropped. 16 and 17 are --delete-proven, the grant's own delete.
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 
 # --- safety -----------------------------------------------------------------
@@ -202,10 +202,45 @@ prove "$repo" br
 ck_eq  "15 a liege branch reusing the name does not prove" "$RC" 1
 ck_has "15 says no record shows it made"               "$OUT" "no errand record names br"
 
+# 16 --delete-proven: the grant's delete. It deletes and marks every record that
+# vouched, so a liege branch later reusing the name does not prove on them.
+scene delprove; G cherry-pick br
+record delprove-twin "$repo" br
+OUT=$("$ROOT/bin/reeve-teardown" --delete-proven "$repo" br 2>&1); RC=$?
+ck_eq  "16 a proven branch is deleted"                 "$RC" 0
+ck_has "16 says deleted"                               "$OUT" "deleted: br in"
+ck_eq  "16 the branch is gone"                         "$(git -C "$repo" branch --list br)" ""
+ck_has "16 its record is marked dropped"               "$(cat "$REEVE_HOME/state/delprove.meta")" \
+       "branchDropped="
+ck_has "16 every vouching record is marked"            \
+       "$(cat "$REEVE_HOME/state/delprove-twin.meta")" "branchDropped="
+G checkout -b br; echo l > "$repo/l"; G add l; G commit -m liege; G checkout main
+G cherry-pick br
+prove "$repo" br
+ck_eq  "16 a reused name does not prove"               "$RC" 1
+ck_has "16 says no record shows it made"               "$OUT" "no errand record names br"
+OUT=$("$ROOT/bin/reeve-teardown" --delete-proven "$repo" br 2>&1); RC=$?
+ck_eq  "16 nor does it delete"                         "$RC" 1
+ck_eq  "16 the reused branch is untouched"             "$(git -C "$repo" branch --list br)" "  br"
+
+# 17 --delete-proven on a branch that does not prove changes nothing.
+scene delunproven
+OUT=$("$ROOT/bin/reeve-teardown" --delete-proven "$repo" br 2>&1); RC=$?
+ck_eq  "17 an unlanded branch is refused"              "$RC" 1
+ck_has "17 with the not proven verdict"                "$OUT" "not proven: 1 of 1 commit(s)"
+ck_eq  "17 the branch is untouched"                    "$(git -C "$repo" branch --list br)" "  br"
+case $(cat "$REEVE_HOME/state/delunproven.meta") in
+  *branchDropped=*) bad "17 the record is not marked" ;;
+  *) ok "17 the record is not marked" ;;
+esac
+
 # 12 usage errors are not verdicts.
 OUT=$("$ROOT/bin/reeve-teardown" --prove-landed only-one 2>&1); RC=$?
 ck_eq  "12 wrong arity exits 1"                 "$RC" 1
 ck_has "12 and prints usage"                    "$OUT" "usage: reeve-teardown --prove-landed"
+OUT=$("$ROOT/bin/reeve-teardown" --delete-proven only-one 2>&1); RC=$?
+ck_eq  "12 delete-proven wrong arity exits 1"   "$RC" 1
+ck_has "12 and prints its usage"                "$OUT" "usage: reeve-teardown --delete-proven"
 
 echo "passed=$PASS failed=$FAIL"
 [ "$FAIL" -eq 0 ]
