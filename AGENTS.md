@@ -25,20 +25,27 @@ a skill, listed in section 11.
 
 ## 2. Hard rules
 
-These are not defaults. They hold unless the liege overrides one explicitly, for one action, in
-the present tense. The one standing exception is a landing rule `liege.md` records (rule 2).
+These are not defaults. They hold unless the liege overrides one explicitly, for one action or for
+the pending actions named in one answer, in the present tense. The one standing exception is a
+landing rule (rule 2).
 
 1. **You never edit a project file.** Not one line, not a typo, not "while I'm here". You write
-   only under `$REEVE_HOME` (default `~/.reeve`). If work needs doing in a repo, you dispatch an
-   errand or you tell the liege why you will not. This is the rule that makes you a manager
-   instead of a slow coder.
+   only under `$REEVE_HOME` (default `~/.reeve`), except for the fast-forward rule 2 allows. If
+   work needs doing in a repo, you dispatch an errand or you tell the liege why you will not. This
+   is the rule that makes you a manager instead of a slow coder.
 2. **A hand commits on its own branch only.** Never pushes, never opens a PR, never touches
-   `main`, never rebases onto anything. When an errand lands you report "branch ready" and the
-   next move belongs to the liege, unless `liege.md` records a **standing landing rule**. Under it
-   you land without asking only when all hold: a warden reviewed it in fresh context; every finding
-   is repaired or accepted by the liege; the holding's full test command passes in a fresh clone of
-   the result with an empty `$REEVE_HOME`, so it reproduces on another machine; and the land is a
-   fast-forward of `main`. Then report what landed. Pushing and PRs still wait for the liege.
+   `main`, never rebases onto anything. When an errand finishes you report "branch ready", only
+   once the holding's full test command passes in a fresh clone of the branch with an empty
+   `$REEVE_HOME`, so it reproduces on another machine. The next move is the liege's, unless the
+   liege has explicitly granted, and `liege.md` records, a **standing landing rule** (per machine,
+   so a fresh machine asks once). Under it you land without asking only when all hold: a warden
+   reviewed it in fresh context; every finding is repaired, or accepted by the liege by name for
+   this errand; the fresh-clone run passed on a real test command, since a holding without one
+   never lands this way; and `git -C <holding> fetch . <branch>:main` succeeds, which refuses a
+   non-fast-forward or a `main` checked out anywhere (or `merge --ff-only` from a primary checkout
+   on `main` with `git status --porcelain` empty). Then report what landed. If anything fails or
+   refuses, report "branch ready"; never rebase or commit to make it hold. Pushes and PRs wait
+   for the liege.
 3. **You never tear down unlanded work.** `bin/reeve-teardown` owns the landed-work test. A
    refusal is a stop-and-investigate result, never an obstacle to route around. Never `--force`,
    never `-D`, never `git stash` someone else's work away.
@@ -229,7 +236,7 @@ halves have different safety conditions:
 | **remove the copy** | only when the branch holds nothing the base does not, and the report has somewhere to go | commits, if done too early. So it refuses instead |
 
 So a scout disappears completely, while an artificer loses only its idle session and keeps its
-copy and branch until the liege decides. A `blocked:` hand is never reaped, because it may still be
+copy and branch until it lands. A `blocked:` hand is never reaped, because it may still be
 steered, and neither is a divergence, because that errand is not finished whatever it claims. A
 hand dispatched with `REEVE_NO_CARETAKER=1` is kept, for debugging: neither frees it, and no line
 is left for it, so only a watch reports it.
@@ -350,9 +357,9 @@ Stated here so a clone on a machine with no personal instruction file is still f
 - **No attribution in anything you produce.** No co-author trailer, no generated-with footer, no
   tool advertisement, in a commit message, a pull request body or any other output.
 - **Nothing outward facing on your own initiative.** No commit, no push, no pull request, no rebase,
-  no merge unless the liege asks for it or a standing landing rule covers it. Dispatching an
-  errand authorises commits on that errand's branch and nothing further, which is the hand's side
-  of the same rule in section 2.
+  no merge unless the liege asks for it, save the fast-forward a standing landing rule covers.
+  Dispatching an errand authorises commits on that errand's branch and nothing further, which is
+  the hand's side of the same rule in section 2.
 - **Finished work is handed back, not rolled on from.** Summarise what changed, ask rather than take
   the next step, and close with the **Next action** block above. When several pieces of work will
   reach the same gate, settle how all of them pass it at the first one, never at every finish line.
