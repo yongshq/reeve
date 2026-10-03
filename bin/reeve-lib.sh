@@ -1044,7 +1044,8 @@ stale_latch() {
 # tells a dead turn to carry on, the hand works without writing a line, and dies
 # again, and keyed off the status file alone that second death was never
 # reported. `unknown` re-arms nothing, so a backend that blinks for one poll
-# cannot buy a repeat.
+# cannot buy a repeat. A steer through bin/reeve-steer deletes it too, since a
+# watch is rarely polling while the steered turn runs.
 #
 # Temp file then rename, as session_touch does: a write that truncates first
 # leaves an empty file for an instant, and a reader that met it took the

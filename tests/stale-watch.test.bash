@@ -26,6 +26,8 @@
 #  16. the sentry's latch writes are atomic
 #  17. a read only home: the listing still shows the silence, the sentry says why
 #  18. the widest age of each kind stays inside the PROCESS column
+#  19. a steer through bin/reeve-steer re-arms it with no sentry seeing working,
+#      where a steer typed by hand does not
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 
 PASS=0; FAIL=0
@@ -486,6 +488,41 @@ sentry
 ck_eq  "18 idle after it too"                              "$(row)" "alive/idle 59m"
 ck_eq  "18 and OPEN stays where it was"                    "$(open)" " -"
 : > "$STUB_PANE"
+
+# --- 19. a steer through bin/reeve-steer re-arms it --------------------------
+# Case 9 with the one thing it had that real life does not: a sentry polling
+# while the steered turn ran. Watches exit once they wake, so usually nothing
+# sees the session working, the hand dies again within its turn, and the latch
+# still says the silence was reported. Typed into the session by hand, that
+# second death is never a wake: pinned first, as the gap the command closes.
+say 'working: rewriting the parser'
+backdate 86400
+dsentry "$NOW"
+dsentry $(( NOW + 90 ))
+ck_eq  "19 the first death wakes"                          "$RC" 0
+"$ROOT/bin/reeve-backend" call send_text_submit 's|s:p1' 'carry on with your brief' --backend stub
+for t in 300 400 4000; do
+  dsentry $(( NOW + t ))
+  ck_eq "19 steered by hand, no second wake at +${t}s"     "$RC" 4
+done
+ck_eq  "19 and the listing keeps calling the old silence idle" "$(drow $(( NOW + 4000 )))" "alive/idle 24h"
+# The same death, steered through the command, and the session never once read
+# working in front of a sentry.
+OUT=$("$ROOT/bin/reeve-steer" hung 'carry on with your brief' 2>&1); RC=$?
+ck_eq  "19 the steer is delivered"                         "$RC" 0
+ck_has "19 and says the alarm is re-armed"                 "$OUT" "idle alarm re-armed"
+ck_eq  "19 the latch is gone"                              "$(latched)" gone
+ck_eq  "19 the status file is untouched"                   "$(cat "$STATUS")" "working: rewriting the parser"
+ck_eq  "19 the listing shows only the silence again"       "$(drow $(( NOW + 4000 )))" "alive/silent 24h"
+dsentry $(( NOW + 4100 ))
+ck_eq  "19 the next look starts a fresh dwell"             "$RC" 4
+dsentry $(( NOW + 4189 ))
+ck_eq  "19 and does not wake inside it"                    "$RC" 4
+dsentry $(( NOW + 4190 ))
+ck_eq  "19 the second death wakes a second time"           "$RC" 0
+ck_has "19 as an idle line"                                "$OUT" "idle: hung has been silent for 24h 0m"
+dsentry $(( NOW + 4300 ))
+ck_eq  "19 and that one is said once too"                  "$RC" 4
 
 echo
 echo "passed=$PASS failed=$FAIL"

@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+# Steer a hand: type into its session, then re-arm its idle alarm.
+#
+# Usage:
+#   bin/reeve-steer <id> <text>
+#
+# The way to tell a living hand what to do next, most often a hand whose turn
+# died: the sentry woke you with `idle:`, and the hand has to be pointed back at
+# its brief. Typing into the session by hand does that too, and loses the second
+# alarm. The idle latch records the silence the sentry already reported, and it
+# re-arms only on a new status line or a sentry seeing the session `working`. A
+# steer writes no line, and no watch is usually polling during the steered turn,
+# so a hand that died again within it was never reported a second time. This
+# clears the latch once the text is delivered, so the next silence starts a fresh
+# dwell and wakes you again.
+#
+# Refuses an errand it cannot steer: one that is not known, finished, cleaned
+# up, or whose session is gone. Refuses too a session standing at a dialog: the
+# text would land in the dialog and answer it, which is never the reeve's to do.
+# Deny it or bring it to the liege, in the session itself.
+#
+# Writes nothing but the latch, and never the status file, which is the hand's.
+#
+# Exit: 0 delivered, 1 refused or not delivered. A latch that could not be
+# cleared after a delivery is said on stderr and still exits 0, because the text
+# has landed and sending it again would say it twice.
+
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/reeve-lib.sh"
+BIN=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+
+case ${1:-} in -h|--help) print_help "$0"; exit 0 ;; esac
+id=${1:-}; require_id "$id"; shift
+[ -f "$(meta_file "$id")" ] || die "no errand '$id'"
+text="$*"
+[ -n "$text" ] || die "no text given. usage: bin/reeve-steer $id <text>"
+
+# Finished first, then gone: a finished hand whose session is also gone is
+# finished, and saying so is the more useful of the two.
+[ -z "$(meta_get "$id" tornDown '')" ] || die "errand '$id' was cleaned up. Nothing to steer."
+st=$(status_field "$id" state)
+case $st in
+  done|failed) die "errand '$id' reported $st. Nothing to steer; relaunch with: bin/reeve-dispatch $id" ;;
+esac
+
+target=$(meta_get "$id" target '')
+backend=$(meta_get "$id" backend herdr)
+[ -n "$target" ] || die "errand '$id' has no session to steer. relaunch with: bin/reeve-dispatch $id"
+live=$("$BIN/reeve-backend" call agent_state "$target" --backend "$backend" 2>/dev/null || echo unreadable)
+[ "$live" = alive ] || die "the hand is $live at $target. Nothing to steer; relaunch with: bin/reeve-dispatch $id"
+
+# The sentry's own word for a session stopped at a dialog. Anything typed now
+# would go into the dialog, so this refuses, and `unknown` is let through: a
+# backend that cannot say is no evidence of a dialog.
+attn=$("$BIN/reeve-backend" call attention_state "$target" --backend "$backend" 2>/dev/null || echo unknown)
+[ "$attn" != waiting ] \
+  || die "the hand at $target is waiting at a dialog in its session. Typing would answer it, so nothing was sent. Deny it there, or bring it to the liege."
+
+"$BIN/reeve-backend" call send_text_submit "$target" "$text" --backend "$backend" 2>/dev/null \
+  || die "could not deliver to $target. Nothing was sent and nothing was cleared."
+info "delivered to the hand at $target"
+
+# Only after the text landed: a steer that never arrived leaves a hand as dead as
+# it was, and a cleared latch would wake you for that same silence twice.
+sf=$(stale_file "$id")
+if rm -f "$sf" 2>/dev/null && [ ! -e "$sf" ]; then
+  info "idle alarm re-armed: the next silence of $id wakes you again"
+else
+  warn "cannot clear $sf, so if $id dies again in this turn no second idle wake will come for it"
+fi

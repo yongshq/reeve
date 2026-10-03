@@ -40,9 +40,9 @@ report briefly, then walk the open decisions one at a time.
 
    Then stop and wait. One question per turn. A list of five questions gets one answer.
 
-5. **Record each answer as it arrives.** Append a `resolved [key=<key>]:` line to that errand's
-   status file, then steer the hand if it is still alive, or note the answer for the relaunch if it
-   is not. Never leave an answer only in the chat: the status file is the durable record and the
+5. **Record each answer as it arrives.** `bin/reeve-answer <id> <key> <answer>` appends the
+   `resolved [key=<key>]:` line to that errand's status file, then tells the hand if it is still
+   alive, or leaves the answer for the relaunch if it is not. Never leave an answer only in the chat: the status file is the durable record and the
    chat is not.
 
 6. **Close by naming the next action and whose it is.** Never end a court leaving the liege to

@@ -53,7 +53,7 @@ has "handoff In flight advice is runnable, something live" \
   "$ROOT/bin/reeve-handoff" '`bin/reeve-status --all` is the live truth for'
 
 # The help block of each is printed verbatim by print_help, so it is advice too.
-for f in reeve-answer reeve-handoff; do
+for f in reeve-answer reeve-handoff reeve-steer; do
   bare=$("$ROOT/bin/$f" --help | grep -nE '(^|[^/[:alnum:]_.-])reeve-[a-z]+' || true)
   ck "$f --help names no tool without its bin/ prefix" "" "$bare"
 done

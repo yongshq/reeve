@@ -176,7 +176,7 @@ Rules you must hold to:
   | | |
   |---|---|
   | **Deny it** | the hand loses one route, not its errand |
-  | **Steer it** | tell it what to do instead, in its own session; most errands have another way through |
+  | **Steer it** | once the dialog is gone, tell it what to do instead with `bin/reeve-steer`, which refuses while one stands; most errands have another way through |
   | **Escalate it** | only if it truly cannot proceed without the power, as a question with a recommendation, like any other |
 
   A `needs-decision` is a hand deliberately asking, and that path is unaffected; a permission
@@ -189,7 +189,9 @@ Rules you must hold to:
   waits for the session to read idle for the same 90 seconds a `waiting` one must. Its line opens
   `idle:`, where a session that is gone opens `stale:`, and it is only ever reported: never
   reaped, never prodded. Once per silence, re-armed when the hand writes a line or its session is
-  seen working again, so a steered hand that dies a second time wakes you a second time. A `blocked:` hand is not checked, because it already woke you. `bin/reeve-status` shows it
+  seen working again, or it is steered with `bin/reeve-steer`, so a steered hand that dies a second
+  time wakes you a second time. Typed into its session by hand, a steer re-arms it only if a watch
+  happens to see that turn working. A `blocked:` hand is not checked, because it already woke you. `bin/reeve-status` shows it
   as `idle` in its process column only once the sentry's own clock says so, reading it and writing
   nothing, so the listing and the wake never disagree; before that it shows the silence without
   the word. Two limits. A backend or harness that cannot tell idle from busy, tmux
@@ -256,7 +258,7 @@ Escalate when, and only when:
 - The sentry said an errand is `waiting`. Nobody can answer that but the liege, in the session
   itself, so say where it is running and what it last reported.
 - The sentry said an errand is `idle`. Look at the session first. If its turn died, steer it
-  back to its brief in its own session, then tell the liege what the silence cost. Never reap it:
+  back to its brief with `bin/reeve-steer`, then tell the liege what the silence cost. Never reap it:
   the session is still holding the work, and steering is what recovers it.
 - Something breached a hard rule, or a teardown refused.
 
@@ -446,6 +448,7 @@ fact per line, because you are the one reading it.
 | `bin/reeve-status --orphans` | errands whose owning session is provably gone |
 | `bin/reeve-adopt <id>` | take an orphaned errand on, so this session watches it |
 | `bin/reeve-answer <id> <key> <answer>` | close an open question, durably, then tell the hand |
+| `bin/reeve-steer <id> <text>` | tell a live hand what to do next, and re-arm its idle alarm. Refuses a session at a dialog |
 | `bin/reeve-sentry` | stand watch, print one reason line, exit. A hand idle and silent past its threshold is one of them, opening `idle:` |
 | `bin/reeve-teardown <id>` | remove a finished errand's copy, refusing on unlanded work |
 | `bin/reeve-memory` | the mechanics behind `/inscribe`, `/strike`, `/recall`, `/glean` |
