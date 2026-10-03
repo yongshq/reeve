@@ -252,9 +252,19 @@ fi
 # Alongside the cursor, and for the same reason: what this errand looked like
 # last time, so a condition that is only interesting once is only reported once.
 attn_file() { printf '%s/state/.attn-%s\n' "$REEVE_HOME_D" "$1"; }
-# The idle latch, stale_file, lives in bin/reeve-lib.sh with stale_probe, and so
-# do attn_dwell and attn_now: the listing applies the same dwell, so neither can
-# be this file's alone.
+# The idle latch, stale_file, lives in bin/reeve-lib.sh with stale_write, and so
+# do attn_dwell and attn_now: the listing reads the latch this process writes and
+# applies the same dwell to it, so neither can be this file's alone.
+
+# Errands whose idle latch this process could not write, one id per line, so a
+# read only home is said once per watch rather than every poll.
+unlatched=''
+latch_warn() { # latch_warn <id> <message>
+  lines_has "$1" "$unlatched" && return 0
+  unlatched="$unlatched$1
+"
+  warn "$2"
+}
 
 # Errands this process has already said it cannot judge for staleness, one id
 # per line, so a long watch says it once rather than every poll.
@@ -451,7 +461,7 @@ wake_owed() { # wake_owed <id>
 # Absorb or escalate. One errand, one verdict.
 check_one() {
   local i=$1 f seen now again new st open div bk tgt live
-  local attn af since woke nowsec last stale how
+  local attn af since woke nowsec last stale how mark latch
 
   # Counted BEFORE the verdict is read, and again after. The cursor is what says
   # a line has been dealt with, so advancing it past a line the verdict did not
@@ -645,32 +655,51 @@ check_one() {
   esac
 
   # The converse of the case above: a hand still there, idle at its prompt, that
-  # has said nothing for longer than any turn should take. stale_probe in
-  # bin/reeve-lib.sh owns which signals make that, the dwell before it counts,
-  # what re-arms it, and why: the listing asks the same question and must never
-  # answer it differently.
+  # has said nothing for longer than any turn should take. stale_silence in
+  # bin/reeve-lib.sh owns which signals make that; this process owns the clock.
+  # The first such reading only starts the dwell, in the latch, and a `working`
+  # reading deletes the latch and so stops it, which is also what re-arms it
+  # after a steer. stale_write says why at length.
   #
   # One silence, one wake. The latch's last field says whether this silence was
-  # already reported, and only this process sets it.
-  if [ "$live" = alive ] && stale=$(stale_probe "$i" "$st" "$attn" "$tgt" "$bk" "$BIN"); then
-    [ "${stale##* }" = yes ] && return 1
-    stale_reported "$i"
-    stale=${stale% *}
-    last=$(status_field "$i" last)
-    case ${stale#* } in
-      error) how='idle after an API error' ;;
-      *)     how='idle at its prompt' ;;
-    esac
-    # Reported and nothing more. Never reaped, never prodded: whether a paused
-    # hand is resumed, re-sent or abandoned is the reeve's call, and the session
-    # is still holding whatever context it had.
-    #
-    # `idle:`, not `stale:`, which the case above already uses for a session
-    # that is gone. The two want different things done, so one line has to say
-    # which it is.
-    printf 'idle: %s has been silent for %s with its session %s, last said %s\n' \
-      "$i" "$(silence_say "${stale%% *}")" "$how" "${last:-nothing}"
-    return 0
+  # already reported. Only this process writes it, so the listing, which reads
+  # it, calls a hand idle on the same second this wakes for it and not before.
+  #
+  # A latch that cannot be written is said on stderr, once per watch: the first
+  # write failing means the dwell never starts and no idle wake will come, the
+  # second means the wake will come again. A duplicate is acceptable; silence
+  # about why is not.
+  [ "$attn" = working ] && rm -f "$(stale_file "$i")"
+  if [ "$live" = alive ] && stale=$(stale_silence "$i" "$st" "$attn" "$tgt" "$bk" "$BIN"); then
+    mark=$(stale_mark "$i"); nowsec=$(attn_now)
+    if latch=$(stale_latch "$i" "$mark"); then
+      since=${latch% *}; woke=${latch#* }
+    else
+      since=$nowsec; woke=no
+      # With no dwell there is no clock to start, and the write below says it.
+      stale_write "$i" "$since" "$mark" no || [ "$attn_dwell" -le 0 ] \
+        || latch_warn "$i" "cannot write $(stale_file "$i"), so $i's silence of $(silence_say "${stale%% *}") cannot start its dwell and no idle wake will come for it"
+    fi
+    if [ $(( nowsec - since )) -ge "$attn_dwell" ]; then
+      [ "$woke" = yes ] && return 1
+      stale_write "$i" "$since" "$mark" yes \
+        || latch_warn "$i" "cannot write $(stale_file "$i"), so $i's idle wake is not recorded as reported and will be said again"
+      last=$(status_field "$i" last)
+      case ${stale#* } in
+        error) how='idle after an API error' ;;
+        *)     how='idle at its prompt' ;;
+      esac
+      # Reported and nothing more. Never reaped, never prodded: whether a paused
+      # hand is resumed, re-sent or abandoned is the reeve's call, and the
+      # session is still holding whatever context it had.
+      #
+      # `idle:`, not `stale:`, which the case above already uses for a session
+      # that is gone. The two want different things done, so one line has to
+      # say which it is.
+      printf 'idle: %s has been silent for %s with its session %s, last said %s\n' \
+        "$i" "$(silence_say "${stale%% *}")" "$how" "${last:-nothing}"
+      return 0
+    fi
   fi
 
   # The one case the probe is blind to, said rather than left to read as quiet:

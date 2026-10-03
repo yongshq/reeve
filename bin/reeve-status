@@ -108,7 +108,7 @@ ticket_label() {  # ticket_label <key> <id>...   the header line for one group
 }
 
 live_state() { # live_state <id> [long]
-  local i=$1 tgt bk st attn stale
+  local i=$1 tgt bk st attn stale word how
   tgt=$(meta_get "$i" target '')
   # `target=` is emptied when a session is freed, so on its own it cannot tell a
   # dispatch that ended from one that never happened: both look identical here,
@@ -133,20 +133,25 @@ live_state() { # live_state <id> [long]
     attn=$("$BIN/reeve-backend" call attention_state "$tgt" --backend "$bk" 2>/dev/null) || attn=unknown
     # A third fact, and the one the other two hid for twenty two hours: settled
     # with `working:` as the last word, long past any real turn, is not a hand
-    # between steps. stale_probe in bin/reeve-lib.sh owns the rule, dwell and
-    # all, so this cell and the sentry's `idle:` wake turn on together. Called
-    # idle here too, one word for one thing. The table cell takes the place of
-    # `settled`, which idle already implies, because the column is sixteen wide;
-    # the single errand form keeps both and says why.
-    if stale=$(stale_probe "$i" "$(status_field "$i" state)" "${attn:-unknown}" "$tgt" "$bk" "$BIN"); then
-      stale=${stale% *}
+    # between steps. stale_look in bin/reeve-lib.sh asks it, and reads the
+    # sentry's latch to decide the word: `idle` only once the sentry's clock
+    # says so, so this cell and the `idle:` wake turn on together, and the
+    # silence without the word before that, so a hand dead for a day shows on
+    # the first look at a home no watch has seen. It writes nothing, in any
+    # form. The idle cell takes the place of `settled`, which idle already
+    # implies, because the column is sixteen wide; the single errand form keeps
+    # both and says why.
+    if stale=$(stale_look "$i" "$(status_field "$i" state)" "${attn:-unknown}" "$tgt" "$bk" "$BIN"); then
+      word=${stale##* }; stale=${stale% *}
       if [ "${2:-}" = long ]; then
-        case ${stale#* } in
-          error) printf '%s/%s, idle: silent %s after an API error\n' "$st" "$attn" "$(silence_say "${stale%% *}")" ;;
-          *)     printf '%s/%s, idle: silent %s\n' "$st" "$attn" "$(silence_say "${stale%% *}")" ;;
-        esac
-      else
+        how="silent $(silence_say "${stale%% *}")"
+        [ "${stale#* }" = error ] && how="$how after an API error"
+        [ "$word" = idle ] && how="idle: $how"
+        printf '%s/%s, %s\n' "$st" "$attn" "$how"
+      elif [ "$word" = idle ]; then
         printf '%s/idle %s\n' "$st" "$(silence_short "${stale%% *}")"
+      else
+        printf '%s/%s %s\n' "$st" "$attn" "$(silence_short "${stale%% *}")"
       fi
       return
     fi

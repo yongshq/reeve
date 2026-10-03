@@ -190,8 +190,9 @@ Rules you must hold to:
   `idle:`, where a session that is gone opens `stale:`, and it is only ever reported: never
   reaped, never prodded. Once per silence, re-armed when the hand writes a line or its session is
   seen working again, so a steered hand that dies a second time wakes you a second time. A `blocked:` hand is not checked, because it already woke you. `bin/reeve-status` shows it
-  as `idle` in its process column, on the same rule and the same 90 seconds, so the listing and
-  the wake never disagree. Two limits. A backend or harness that cannot tell idle from busy, tmux
+  as `idle` in its process column only once the sentry's own clock says so, reading it and writing
+  nothing, so the listing and the wake never disagree; before that it shows the silence without
+  the word. Two limits. A backend or harness that cannot tell idle from busy, tmux
   without herdr among them, never reads idle, so the check cannot fire there: the sentry says so
   on stderr, once per watch, for a hand silent past `config/hand-stale`. And a threshold set to
   anything but a whole number of seconds turns its half of the check off, which the sentry and

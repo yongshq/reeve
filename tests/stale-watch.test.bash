@@ -20,7 +20,11 @@
 #  12. a gone session, an idle one and an undeliverable notification open with
 #      three different words
 #  13. a session that cannot say whether it is idle is said to be unjudgeable
-#  14. the listing and the sentry agree at the dwell boundary, whichever looks first
+#  14. the listing shows the silence on its first look, calls it idle only once
+#      the sentry has, and agrees with it at the dwell boundary
+#  15. no listing form writes the latch
+#  16. the sentry's latch writes are atomic
+#  17. a read only home: the listing still shows the silence, the sentry says why
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 
 PASS=0; FAIL=0
@@ -34,7 +38,7 @@ ck_has() { case $2 in *"$3"*) ok "$1" ;; *) bad "$1" "output did not mention [$3
 ck_not() { case $2 in *"$3"*) bad "$1" "output should not have said [$3]: $2" ;; *) ok "$1" ;; esac; }
 
 SCRATCH=$(mktemp -d "${TMPDIR:-/tmp}/reeve-stale-test.XXXXXX") || exit 1
-trap 'rm -rf "$SCRATCH"' EXIT
+trap 'chmod -R u+w "$SCRATCH" 2>/dev/null; rm -rf "$SCRATCH"' EXIT
 
 # Ownership off: the errand below records no session, and a watch that names one
 # would still see it, but the spool it drains should be this home's, not ours.
@@ -81,8 +85,9 @@ say() {
   rm -f "$REEVE_HOME/state/.stale-hung"
 }
 sentry() { OUT=$("$ROOT/bin/reeve-sentry" --once --no-reap 2>&1); RC=$?; }
-# The PROCESS cell by position, since an idle cell holds a space of its own.
-row()    { "$ROOT/bin/reeve-status" --all --no-wake 2>/dev/null | grep '^hung ' | cut -c55-70 | sed 's/ *$//'; }
+# The PROCESS cell by position, since an idle cell holds a space of its own, and
+# a silent one can run a character past the column into OPEN.
+row()    { "$ROOT/bin/reeve-status" --all --no-wake 2>/dev/null | grep '^hung ' | cut -c55- | sed -E 's/ +(-|[0-9]+ waiting)$//'; }
 single() { "$ROOT/bin/reeve-status" hung 2>/dev/null | sed -n 's/^process  *//p'; }
 
 printf 'settled\n' > "$STUB_ATTN"
@@ -336,33 +341,123 @@ printf 'settled\n' > "$STUB_ATTN"
 
 # --- 14. the listing and the alarm agree -------------------------------------
 # The listing once called a hand stale on its first look, ninety seconds before
-# the sentry would wake for it. Both now ask stale_probe, dwell included, and
-# either one's first look starts the one clock.
-drow() { REEVE_ATTN_DWELL=90 REEVE_ATTN_NOW=$1 row; }
+# the sentry would wake for it, and then once wrote the sentry's clock itself to
+# avoid that, which hid a day dead hand from a single listing. Now it shows the
+# silence at once, without the word, and says idle only when the sentry's latch
+# says the dwell has passed.
+drow()    { REEVE_ATTN_DWELL=90 REEVE_ATTN_NOW=$1 row; }
+dsingle() { REEVE_ATTN_DWELL=90 REEVE_ATTN_NOW=$1 single; }
+LATCH="$REEVE_HOME/state/.stale-hung"
+latched() { [ -f "$LATCH" ] && echo kept || echo gone; }
 say 'working: rewriting the parser'
 backdate 86400
-ck_eq  "14 the listing's first look only starts the clock" "$(drow "$NOW")" "alive/settled"
+ck_eq  "14 a fresh home's first listing shows the silence" "$(drow "$NOW")" "alive/settled 24h"
+ck_eq  "14 and the single form says how long"              "$(dsingle "$NOW")" "alive/settled, silent 24h 0m"
+ck_not "14 without calling it idle"                        "$(dsingle "$NOW")" "idle"
+ck_eq  "14 and starts no clock"                            "$(latched)" gone
+dsentry "$NOW"
+ck_eq  "14 the sentry's first look only starts the clock"  "$RC" 4
+ck_eq  "14 in its latch"                                   "$(latched)" kept
+ck_eq  "14 at 89s the listing still shows only silence"    "$(drow $(( NOW + 89 )))" "alive/settled 24h"
 dsentry $(( NOW + 89 ))
-ck_eq  "14 at 89s the sentry has not woken"                "$RC" 4
-ck_eq  "14 and the listing has not called it idle"         "$(drow $(( NOW + 89 )))" "alive/settled"
+ck_eq  "14 as the sentry has not woken"                    "$RC" 4
 ck_eq  "14 at 90s the listing calls it idle"               "$(drow $(( NOW + 90 )))" "alive/idle 24h"
+ck_eq  "14 and the single form too"                        "$(dsingle $(( NOW + 90 )))" "alive/settled, idle: silent 24h 0m"
 dsentry $(( NOW + 90 ))
 ck_eq  "14 and the sentry wakes on the same second"        "$RC" 0
 ck_has "14 with the idle line"                             "$OUT" "idle: hung"
+ck_eq  "14 after the wake the listing still says idle"     "$(drow $(( NOW + 200 )))" "alive/idle 24h"
+printf 'working\n' > "$STUB_ATTN"
+ck_eq  "14 a working reading in the listing"               "$(drow $(( NOW + 300 )))" "alive/working"
+ck_eq  "14 leaves the sentry's latch alone"                "$(latched)" kept
+dsentry $(( NOW + 300 ))
+ck_eq  "14 the sentry's working reading stops the clock"   "$(latched)" gone
+printf 'settled\n' > "$STUB_ATTN"
+ck_eq  "14 so the listing is back to silence alone"        "$(drow $(( NOW + 400 )))" "alive/settled 24h"
+say 'working: rewriting the parser'
+backdate 7100
+ck_eq  "14 inside the threshold no silence is shown"       "$(drow "$NOW")" "alive/settled"
+
+# --- 15. no listing form writes the latch ----------------------------------
 say 'working: rewriting the parser'
 backdate 86400
+for form in '--all' '--all --no-wake' '' '--no-wake' '--orphans' 'hung' 'hung --raw'; do
+  # shellcheck disable=SC2086
+  REEVE_ATTN_DWELL=90 "$ROOT/bin/reeve-status" $form >/dev/null 2>&1
+  ck_eq "15 reeve-status ${form:-bare} creates no latch"   "$(latched)" gone
+done
 dsentry "$NOW"
-ck_eq  "14 the sentry looking first starts it too"         "$RC" 4
-ck_eq  "14 so at 89s the listing still waits"              "$(drow $(( NOW + 89 )))" "alive/settled"
-dsentry $(( NOW + 89 ))
-ck_eq  "14 as does the sentry"                             "$RC" 4
+before=$(cat "$LATCH")
+touch -t 200001010000 "$LATCH"
+mtime() { stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null; }
+mbefore=$(mtime "$LATCH")
+for form in '--all' '--all --no-wake' '' 'hung'; do
+  # shellcheck disable=SC2086
+  REEVE_ATTN_DWELL=90 REEVE_ATTN_NOW=$(( NOW + 100 )) "$ROOT/bin/reeve-status" $form >/dev/null 2>&1
+done
+ck_eq  "15 nor rewrites one the sentry wrote"              "$(cat "$LATCH")" "$before"
+ck_eq  "15 not even its mtime"                             "$(mtime "$LATCH")" "$mbefore"
+
+# --- 16. atomic latch writes -----------------------------------------------
+# A truncating write leaves an empty file for an instant, and a reader that met
+# one took a reported silence for a new one: 664 empty reads in 3000 measured.
+say 'working: rewriting the parser'
+backdate 86400
+MARK=$(bash -c '. "$1/bin/reeve-lib.sh"; stale_mark hung' _ "$ROOT")
+bash -c '. "$1/bin/reeve-lib.sh"; stale_write hung 1 "$2" no' _ "$ROOT" "$MARK"
+bash -c '. "$1/bin/reeve-lib.sh"; for n in $(seq 1 400); do stale_write hung "$n" "$2" no; done' _ "$ROOT" "$MARK" &
+wpid=$!
+empty=0 reads=0
+while kill -0 "$wpid" 2>/dev/null; do
+  reads=$((reads + 1))
+  [ -s "$LATCH" ] || empty=$((empty + 1))
+  IFS= read -r line < "$LATCH" || :
+  [ -n "$line" ] || empty=$((empty + 1))
+done
+wait "$wpid"
+ck_eq  "16 a reader racing the writer never meets an empty latch" "$empty" 0
+ck_eq  "16 and the race was run"                           "$([ "$reads" -gt 0 ] && echo yes)" yes
+ck_eq  "16 no temp file is left behind"                    "$(ls -a "$REEVE_HOME/state" | grep -c '^\.stale-hung\.')" 0
+ck_eq  "16 the last write is what is there"                "$(cat "$LATCH")" "400 $MARK no"
+
+# --- 17. a read only home --------------------------------------------------
+# The listing writes nothing, so it shows the silence there just as anywhere.
+# The sentry cannot start its clock, and says so rather than going quiet.
+say 'working: rewriting the parser'
+backdate 86400
+chmod a-w "$REEVE_HOME/state"
+ck_eq  "17 the listing still shows the silence"            "$(drow "$NOW")" "alive/settled 24h"
+lerr=$(REEVE_ATTN_DWELL=90 "$ROOT/bin/reeve-status" --all --no-wake 2>&1 >/dev/null)
+ck_eq  "17 and has nothing to complain about"              "$lerr" ""
+dsentry "$NOW"
+ck_eq  "17 the sentry cannot start the clock"              "$RC" 4
+ck_eq  "17 so no latch exists"                             "$(latched)" gone
+ck_has "17 and it says so"                                 "$OUT" "cannot write $LATCH"
+ck_has "17 and what that costs"                            "$OUT" "no idle wake will come for it"
+ck_eq  "17 once per watch, on stderr"                      "$(printf '%s\n' "$OUT" | grep -c 'cannot write')" 1
+chmod u+w "$REEVE_HOME/state"
+# Latched, past the dwell, unreported, then the home goes read only: the wake
+# comes every time, and every time it says why.
+dsentry "$NOW"
+chmod a-w "$LATCH" "$REEVE_HOME/state"
 dsentry $(( NOW + 90 ))
-ck_eq  "14 at 90s the sentry wakes"                        "$RC" 0
-ck_eq  "14 and the listing agrees"                         "$(drow $(( NOW + 90 )))" "alive/idle 24h"
-printf 'working\n' > "$STUB_ATTN"
-ck_eq  "14 a working reading in the listing"               "$(drow $(( NOW + 100 )))" "alive/working"
-ck_eq  "14 stops the sentry's clock too"                   "$([ -f "$REEVE_HOME/state/.stale-hung" ] && echo kept || echo gone)" gone
-printf 'settled\n' > "$STUB_ATTN"
+ck_eq  "17 an unrecordable wake still wakes"               "$RC" 0
+ck_has "17 and says it will be said again"                 "$OUT" "will be said again"
+dsentry $(( NOW + 95 ))
+ck_eq  "17 and it is, a duplicate"                         "$RC" 0
+ck_has "17 with the reason again"                          "$OUT" "will be said again"
+ck_eq  "17 stdout is still one line"                       \
+  "$(REEVE_ATTN_DWELL=90 REEVE_ATTN_NOW=$(( NOW + 99 )) "$ROOT/bin/reeve-sentry" --once --no-reap 2>/dev/null | grep -c .)" 1
+chmod u+w "$REEVE_HOME/state" "$LATCH"
+# No dwell, no clock to start: only the wake's own failure is said.
+say 'working: rewriting the parser'
+backdate 86400
+chmod a-w "$REEVE_HOME/state"
+sentry
+chmod u+w "$REEVE_HOME/state"
+ck_eq  "17 with no dwell it wakes"                         "$RC" 0
+ck_not "17 without claiming no wake will come"             "$OUT" "no idle wake will come"
+ck_has "17 and says it will be said again"                 "$OUT" "will be said again"
 
 echo
 echo "passed=$PASS failed=$FAIL"

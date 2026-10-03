@@ -979,38 +979,19 @@ attn_now() { printf '%s' "${REEVE_ATTN_NOW:-$(date +%s)}"; }
 # its line count and mtime, and whether the sentry has reported it.
 stale_file() { printf '%s/state/.stale-%s\n' "$REEVE_HOME_D" "$1"; }
 
-# stale_probe <id> <state> <attention> <target> <backend> <bin dir>
+# stale_silence <id> <state> <attention> <target> <backend> <bin dir>
 #
-# Prints `<silent seconds> <error|quiet> <reported yes|no>` and returns 0 when
-# the errand is stale and has been for the dwell, prints nothing and returns 1
-# otherwise. Both the listing and the sentry ask this, and both call the answer
-# `idle`, so the dwell lives here rather than in either: a listing that skipped
-# it called a hand idle ninety seconds before the alarm would.
+# Prints `<silent seconds> <error|quiet>` and returns 0 when the errand is silent
+# past its threshold, prints nothing and returns 1 otherwise. The rule alone, no
+# dwell and no latch: the sentry adds those, and the listing only reads what the
+# sentry recorded, through stale_look.
 #
-# The dwell is the attention probe's own, for the reason it has one: a hand
-# between tool calls can read `settled` for an instant. The first stale reading
-# only starts the clock, in the latch, and any `working` reading in between
-# deletes the latch and so stops it. Either caller's reading counts, which is
-# what keeps the two in step: whichever looks first starts the clock for both.
-#
-# Two things re-arm it. An append changes the line count and mtime, so a hand
-# that speaks again and then falls silent again starts a new silence. And the
-# session seen `working` deletes the file outright, because that is what a steer
-# looks like from here: the reeve tells a dead turn to carry on, the hand works
-# without writing a line, and dies again. Keyed off the file alone, that second
-# death was never reported, so the remedy the contract prescribes could only
-# ever be used once. `unknown` re-arms nothing, so a backend that blinks for one
-# poll cannot buy a repeat.
-#
-# Writes only that record of what it saw, and never acts: what to do with a
-# stale hand is the reeve's decision, and a tool that tidied one away could
-# destroy work that is only paused. The bin dir is the caller's, so a test that
-# stubs reeve-backend beside its caller is honoured.
-stale_probe() {
+# Reads only, and never acts: what to do with a stale hand is the reeve's
+# decision, and a tool that tidied one away could destroy work that is only
+# paused. The bin dir is the caller's, so a test that stubs reeve-backend beside
+# its caller is honoured.
+stale_silence() {
   local id=$1 st=$2 attn=$3 tgt=$4 bk=$5 bin=$6 quiet err age text kind
-  local sf f mark since sl sm woke nowsec
-  sf=$(stale_file "$id")
-  [ "$attn" = working ] && rm -f "$sf"
   [ "$st" = working ] || return 1
   [ "$attn" = settled ] || return 1
   [ -n "$tgt" ] || return 1
@@ -1029,36 +1010,81 @@ stale_probe() {
     [ -n "$quiet" ] && [ "$age" -ge "$quiet" ] || return 1
     kind=quiet
   fi
-
-  f=$(status_file "$id")
-  mark="$(status_lines "$f") $(status_mtime "$f")"
-  since=''; sl=''; sm=''; woke=no
-  [ -f "$sf" ] && read -r since sl sm woke < "$sf"
-  nowsec=$(attn_now)
-  case ${since:-} in ''|*[!0-9]*) sl='' ;; esac
-  if [ "$sl $sm" != "$mark" ]; then
-    since=$nowsec; woke=no
-    { printf '%s %s no\n' "$since" "$mark" > "$sf"; } 2>/dev/null
-  fi
-  [ $(( nowsec - since )) -ge "$attn_dwell" ] || return 1
-  printf '%s %s %s\n' "$age" "$kind" "${woke:-no}"
+  printf '%s %s\n' "$age" "$kind"
 }
 
-# stale_reported <id>
+# The status file as the latch records it, `<lines> <mtime>`. An append changes
+# both, so a hand that speaks again and then falls silent again is a new silence.
+stale_mark() {
+  local f; f=$(status_file "$1")
+  printf '%s %s\n' "$(status_lines "$f")" "$(status_mtime "$f")"
+}
+
+# stale_latch <id> <mark>
 #
-# Latches the silence stale_probe last recorded as reported, so one silence is
-# one wake. The sentry's alone: a listing shows an idle hand for as long as it
-# stays idle, and only the alarm is said once.
-stale_reported() {
+# Prints `<since> <woke>` when the latch records the silence <mark> describes,
+# returns 1 when there is no latch or it records an earlier one. Reads only, so
+# the listing asks it too.
+stale_latch() {
   local sf since sl sm woke
-  sf=$(stale_file "$1"); [ -f "$sf" ] || return 0
-  read -r since sl sm woke < "$sf"
-  { printf '%s %s %s yes\n' "$since" "$sl" "$sm" > "$sf"; } 2>/dev/null
+  sf=$(stale_file "$1"); [ -f "$sf" ] || return 1
+  read -r since sl sm woke < "$sf" || return 1
+  case $since in ''|*[!0-9]*) return 1 ;; esac
+  [ "$sl $sm" = "$2" ] || return 1
+  printf '%s %s\n' "$since" "${woke:-no}"
+}
+
+# stale_write <id> <since> <mark> <woke>
+#
+# The sentry's alone: it is the one clock, and the listing writes nothing. The
+# dwell is the attention probe's own, for the reason it has one: a hand between
+# tool calls can read `settled` for an instant, so the sentry's first stale
+# reading only starts the clock, here, and a `working` reading deletes the file
+# and so stops it. That deletion is also what lets a steer re-arm it: the reeve
+# tells a dead turn to carry on, the hand works without writing a line, and dies
+# again, and keyed off the status file alone that second death was never
+# reported. `unknown` re-arms nothing, so a backend that blinks for one poll
+# cannot buy a repeat.
+#
+# Temp file then rename, as session_touch does: a write that truncates first
+# leaves an empty file for an instant, and a reader that met it took the
+# reported silence for a new one and woke a second time. Returns 1 when the
+# write did not land, and the caller says so, because a latch that cannot be
+# written is an idle wake that never comes, or one that comes every poll.
+stale_write() {
+  local sf; sf=$(stale_file "$1")
+  if { printf '%s %s %s\n' "$2" "$3" "$4" > "$sf.$$" && mv -f "$sf.$$" "$sf"; } 2>/dev/null; then
+    return 0
+  fi
+  rm -f "$sf.$$" 2>/dev/null
+  return 1
+}
+
+# stale_look <id> <state> <attention> <target> <backend> <bin dir>
+#
+# The listing's question. Prints `<silent seconds> <error|quiet> <idle|silent>`
+# and returns 0 when the errand is silent past its threshold, prints nothing and
+# returns 1 otherwise. `idle` only once the sentry's latch has held this silence
+# for the dwell, which is the moment the sentry wakes for it, so the two never
+# call one hand two things. Before that, `silent`: the silence is shown on the
+# first look, without the word, so a hand dead for a day is visible on a fresh
+# home or a read only one that no watch has ever latched.
+#
+# Writes nothing, in every listing form.
+stale_look() {
+  local sil latch
+  sil=$(stale_silence "$@") || return 1
+  if latch=$(stale_latch "$1" "$(stale_mark "$1")") \
+     && [ $(( $(attn_now) - ${latch%% *} )) -ge "$attn_dwell" ]; then
+    printf '%s idle\n' "$sil"
+  else
+    printf '%s silent\n' "$sil"
+  fi
 }
 
 # stale_unseen <id> <state> <attention>
 #
-# The case stale_probe cannot judge and should not pass over in silence: a
+# The case stale_silence cannot judge and should not pass over in silence: a
 # `working` hand silent past `hand-stale` whose attention reads `unknown`. That
 # is every hand on a backend or harness that cannot tell idle from busy, tmux
 # without herdr among them, where `settled` never comes and the check above can
