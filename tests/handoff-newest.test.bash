@@ -31,6 +31,14 @@ mkstub() { # mkstub <path>
 echo "--- no handoffs yet ---"
 "$BIN" newest reeve >/dev/null 2>&1
 ckrc "newest fails with an empty handoffs dir" 1 "$?"
+# An empty list is a valid answer: rc 0 and one line saying so, with the dir
+# present and empty and with no dir at all.
+out=$("$BIN" list reeve 2>&1); rc=$?
+ckrc "list succeeds with an empty handoffs dir" 0 "$rc"
+ck "list says none with an empty handoffs dir" "no handoffs yet" "$out"
+out=$(REEVE_HOME="$SCRATCH/no-home" "$BIN" list reeve 2>&1); rc=$?
+ckrc "list succeeds with no handoffs dir" 0 "$rc"
+ck "list says none with no handoffs dir" "no handoffs yet" "$out"
 
 echo "--- mtime disagrees with filename order (the reproduction) ---"
 OLD="$REEVE_HOME/handoffs/reeve-2026-01-01-0100.md"
