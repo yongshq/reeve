@@ -28,6 +28,8 @@
 #  18. the widest age of each kind stays inside the PROCESS column
 #  19. a steer through bin/reeve-steer re-arms it with no sentry seeing working,
 #      where a steer typed by hand does not
+#  20. a watch pass that writes the latch back after a steer cannot swallow the
+#      steered turn's death
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 
 PASS=0; FAIL=0
@@ -508,7 +510,7 @@ done
 ck_eq  "19 and the listing keeps calling the old silence idle" "$(drow $(( NOW + 4000 )))" "alive/idle 24h"
 # The same death, steered through the command, and the session never once read
 # working in front of a sentry.
-OUT=$("$ROOT/bin/reeve-steer" hung 'carry on with your brief' 2>&1); RC=$?
+OUT=$(REEVE_ATTN_NOW=$(( NOW + 4000 )) "$ROOT/bin/reeve-steer" hung 'carry on with your brief' 2>&1); RC=$?
 ck_eq  "19 the steer is delivered"                         "$RC" 0
 ck_has "19 and says the alarm is re-armed"                 "$OUT" "idle alarm re-armed"
 ck_eq  "19 the latch is gone"                              "$(latched)" gone
@@ -523,6 +525,38 @@ ck_eq  "19 the second death wakes a second time"           "$RC" 0
 ck_has "19 as an idle line"                                "$OUT" "idle: hung has been silent for 24h 0m"
 dsentry $(( NOW + 4300 ))
 ck_eq  "19 and that one is said once too"                  "$RC" 4
+
+# --- 20. a watch's late write cannot swallow the steered turn's death --------
+# A watch pass reads the latch, dwell passed and not yet reported, and the steer
+# clears it before that pass writes it back as reported, carrying the old
+# silence's since. Written here by hand as exactly that late write, after the
+# steer. Keyed off the latch alone it read as this silence, already reported,
+# and the steered turn's death never woke anyone.
+say 'working: rewriting the parser'
+backdate 86400
+T=$(( NOW + 10000 ))
+dsentry "$T"
+ck_eq  "20 the dwell starts"                               "$RC" 4
+pre=$(cat "$LATCH")
+OUT=$(REEVE_ATTN_NOW=$(( T + 100 )) "$ROOT/bin/reeve-steer" hung 'carry on' 2>&1); RC=$?
+ck_eq  "20 the steer is delivered"                         "$RC" 0
+printf '%s yes\n' "${pre% *}" > "$LATCH"
+ck_eq  "20 the late write is no latch to the listing"      "$(drow $(( T + 200 )))" "alive/silent 24h"
+dsentry $(( T + 200 ))
+ck_eq  "20 nor to the sentry, which starts a fresh dwell"  "$RC" 4
+dsentry $(( T + 289 ))
+ck_eq  "20 and does not wake inside it"                    "$RC" 4
+dsentry $(( T + 290 ))
+ck_eq  "20 the steered turn's death still wakes"           "$RC" 0
+ck_has "20 as an idle line"                                "$OUT" "idle: hung has been silent"
+dsentry $(( T + 400 ))
+ck_eq  "20 once"                                           "$RC" 4
+# A latch started in the steer's own second is the steered turn's, not the old one.
+OUT=$(REEVE_ATTN_NOW=$(( T + 500 )) "$ROOT/bin/reeve-steer" hung 'carry on' 2>&1)
+dsentry $(( T + 500 ))
+ck_eq  "20 a dwell started in the steer's second holds"    "$RC" 4
+dsentry $(( T + 590 ))
+ck_eq  "20 and wakes at its end"                           "$RC" 0
 
 echo
 echo "passed=$PASS failed=$FAIL"

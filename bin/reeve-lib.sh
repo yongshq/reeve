@@ -733,6 +733,21 @@ meta_write() {
   mv "$tmp" "$f"
 }
 
+# errand_session <id> <bin dir>
+#
+# The hand's session as the errand records it, for a command about to type into
+# it. Sets `target`, `backend` and `live` in the caller, `live` being the
+# backend's agent_state, or `unreadable` when it could not be asked. Returns 1,
+# with `live` empty, when the record names no session, so each caller says what
+# that means for it. The bin dir is the caller's, as for stale_silence.
+errand_session() {
+  target=$(meta_get "$1" target '')
+  backend=$(meta_get "$1" backend herdr)
+  live=''
+  [ -n "$target" ] || return 1
+  live=$("$2/reeve-backend" call agent_state "$target" --backend "$backend" 2>/dev/null || echo unreadable)
+}
+
 # --- status reconciliation --------------------------------------------------
 # The status file is append-only and every append is a WAKE EVENT, not the
 # current state. This function is the single owner of turning the log into a
@@ -979,6 +994,29 @@ attn_now() { printf '%s' "${REEVE_ATTN_NOW:-$(date +%s)}"; }
 # its line count and mtime, and whether the sentry has reported it.
 stale_file() { printf '%s/state/.stale-%s\n' "$REEVE_HOME_D" "$1"; }
 
+# When bin/reeve-steer last delivered to an errand, on attn_now's clock. A watch
+# pass that read the latch just before a steer cleared it can still write it
+# back just after, carrying the old silence's `since` and `woke=yes`, and that
+# late write would swallow the wake for the steered turn's death. Every latch a
+# pass starts after the steer has a `since` at or past this time, so stale_latch
+# takes one from before it as no latch at all.
+steered_file() { printf '%s/state/.steered-%s\n' "$REEVE_HOME_D" "$1"; }
+
+steered_get() { # steered_get <id>   prints the time, or nothing and rc 1
+  local v
+  v=$(cat "$(steered_file "$1")" 2>/dev/null | tr -d '[:space:]')
+  case $v in ''|*[!0-9]*) return 1 ;; esac
+  printf '%s\n' "$v"
+}
+
+# Whole, through a temp file and a rename, as delivered_set and for its reason.
+steered_set() { # steered_set <id> <time>
+  local f tmp
+  f=$(steered_file "$1"); tmp="$f.$$"
+  printf '%s\n' "$2" 2>/dev/null > "$tmp" || { rm -f "$tmp" 2>/dev/null; return 1; }
+  mv "$tmp" "$f" 2>/dev/null || { rm -f "$tmp" 2>/dev/null; return 1; }
+}
+
 # stale_silence <id> <state> <attention> <target> <backend> <bin dir>
 #
 # Prints `<silent seconds> <error|quiet>` and returns 0 when the errand is silent
@@ -1023,14 +1061,16 @@ stale_mark() {
 # stale_latch <id> <mark>
 #
 # Prints `<since> <woke>` when the latch records the silence <mark> describes,
-# returns 1 when there is no latch or it records an earlier one. Reads only, so
-# the listing asks it too.
+# returns 1 when there is no latch, it records an earlier one, or it started
+# before the last steer (steered_file says why). Reads only, so the listing asks
+# it too.
 stale_latch() {
-  local sf since sl sm woke
+  local sf since sl sm woke steered
   sf=$(stale_file "$1"); [ -f "$sf" ] || return 1
   read -r since sl sm woke < "$sf" || return 1
   case $since in ''|*[!0-9]*) return 1 ;; esac
   [ "$sl $sm" = "$2" ] || return 1
+  if steered=$(steered_get "$1") && [ "$since" -lt "$steered" ]; then return 1; fi
   printf '%s %s\n' "$since" "${woke:-no}"
 }
 
@@ -1045,7 +1085,8 @@ stale_latch() {
 # again, and keyed off the status file alone that second death was never
 # reported. `unknown` re-arms nothing, so a backend that blinks for one poll
 # cannot buy a repeat. A steer through bin/reeve-steer deletes it too, since a
-# watch is rarely polling while the steered turn runs.
+# watch is rarely polling while the steered turn runs, and records when, so a
+# pass already under way cannot write the old silence back after it.
 #
 # Temp file then rename, as session_touch does: a write that truncates first
 # leaves an empty file for an instant, and a reader that met it took the

@@ -191,14 +191,14 @@ Rules you must hold to:
   reaped, never prodded. Once per silence, re-armed when the hand writes a line or its session is
   seen working again, or it is steered with `bin/reeve-steer`, so a steered hand that dies a second
   time wakes you a second time. Typed into its session by hand, a steer re-arms it only if a watch
-  happens to see that turn working. A `blocked:` hand is not checked, because it already woke you. `bin/reeve-status` shows it
-  as `idle` in its process column only once the sentry's own clock says so, reading it and writing
-  nothing, so the listing and the wake never disagree; before that it shows the silence without
-  the word. Two limits. A backend or harness that cannot tell idle from busy, tmux
-  without herdr among them, never reads idle, so the check cannot fire there: the sentry says so
-  on stderr, once per watch, for a hand silent past `config/hand-stale`. And a threshold set to
-  anything but a whole number of seconds turns its half of the check off, which the sentry and
-  the listing both say on stderr.
+  happens to see that turn working. A `blocked:` hand is not checked, because it already woke you.
+  `bin/reeve-status` shows it as `idle` in its process column only once the sentry's own clock says
+  so, reading it and writing nothing, so the listing and the wake never disagree; before that it
+  shows the silence without the word. Two limits. A backend or harness that cannot tell idle from
+  busy, tmux without herdr among them, never reads idle, so the check cannot fire there: the
+  sentry says so on stderr, once per watch, for a hand silent past `config/hand-stale`. And a
+  threshold set to anything but a whole number of seconds turns its half of the check off, which
+  the sentry and the listing both say on stderr.
 - When the sentry wakes you, handle every actionable errand before you reply to the liege. Do not
   report on one and leave two.
 - **You supervise your own errands and nobody else's.** Several reeves share one home, and an
@@ -448,7 +448,7 @@ fact per line, because you are the one reading it.
 | `bin/reeve-status --orphans` | errands whose owning session is provably gone |
 | `bin/reeve-adopt <id>` | take an orphaned errand on, so this session watches it |
 | `bin/reeve-answer <id> <key> <answer>` | close an open question, durably, then tell the hand |
-| `bin/reeve-steer <id> <text>` | tell a live hand what to do next, and re-arm its idle alarm. Refuses a session at a dialog |
+| `bin/reeve-steer <id> <text>` | tell a live hand what to do next, and re-arm its idle alarm. Refuses a session at a dialog, or one it cannot tell is not |
 | `bin/reeve-sentry` | stand watch, print one reason line, exit. A hand idle and silent past its threshold is one of them, opening `idle:` |
 | `bin/reeve-teardown <id>` | remove a finished errand's copy, refusing on unlanded work |
 | `bin/reeve-memory` | the mechanics behind `/inscribe`, `/strike`, `/recall`, `/glean` |

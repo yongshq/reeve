@@ -5,7 +5,8 @@
 #   1. a steer is delivered verbatim, and re-arms with or without a latch
 #   2. an unknown, finished, failed or cleaned up errand is refused
 #   3. a session that is gone, or was never there, is refused
-#   4. a session standing at a dialog is refused, and nothing is typed into it
+#   4. a session standing at a dialog, or one that cannot be told from one, is
+#      refused, and nothing is typed into it
 #   5. a send that fails clears nothing
 #   6. a latch that cannot be cleared is said, and the delivery still counts
 #   7. it never writes the status file
@@ -29,12 +30,12 @@ export REEVE_ROOT="$SCRATCH/root"
 export REEVE_HOME="$SCRATCH/home"
 mkdir -p "$REEVE_ROOT/backends" "$REEVE_HOME/state" "$REEVE_HOME/errands/hung"
 
-export STUB_ATTN="$SCRATCH/attn" STUB_ACTS="$SCRATCH/acts" STUB_LIVE="$SCRATCH/live" STUB_SENDFAIL="$SCRATCH/sendfail"
+export STUB_ATTN="$SCRATCH/attn" STUB_ACTS="$SCRATCH/acts" STUB_LIVE="$SCRATCH/live" STUB_SENDFAIL="$SCRATCH/sendfail" STUB_ATTNFAIL="$SCRATCH/attnfail"
 cat > "$REEVE_ROOT/backends/stub.sh" <<'STUB'
 reeve_backend_stub_available()        { return 0; }
 reeve_backend_stub_describe()         { echo stub; }
 reeve_backend_stub_agent_state()      { cat "$STUB_LIVE" 2>/dev/null || echo alive; }
-reeve_backend_stub_attention_state()  { cat "$STUB_ATTN"; }
+reeve_backend_stub_attention_state()  { [ -f "$STUB_ATTNFAIL" ] && { echo settled; return 1; }; cat "$STUB_ATTN"; }
 reeve_backend_stub_send_text_submit() {
   [ -f "$STUB_SENDFAIL" ] && return 1
   printf 'send %s\n' "$*" >> "$STUB_ACTS"
@@ -44,10 +45,12 @@ STUB
 META="$REEVE_HOME/state/hung.meta"
 STATUS="$REEVE_HOME/errands/hung/status"
 LATCH="$REEVE_HOME/state/.stale-hung"
+STEERED="$REEVE_HOME/state/.steered-hung"
 fresh() { # fresh [status lines...]   a live idle hand, a reported silence, an empty log of sends
   printf 'target=s|s:p1\nbackend=stub\noffice=artificer\nrepo=\nworktree=\nbranch=\nbase=main\nwrites=yes\ndispatched=2026-10-01T21:30:00\n' > "$META"
   if [ $# -gt 0 ]; then printf '%s\n' "$@" > "$STATUS"; else printf 'working: rewriting the parser\n' > "$STATUS"; fi
   printf '1 1 1 yes\n' > "$LATCH"
+  rm -f "$STEERED"
   printf 'settled\n' > "$STUB_ATTN"
   rm -f "$STUB_LIVE" "$STUB_SENDFAIL"; : > "$STUB_ACTS"
 }
@@ -62,6 +65,7 @@ ck_eq  "1 a steer to a live idle hand succeeds"            "$RC" 0
 ck_eq  "1 the text arrives verbatim, submitted"            "$(sent)" "send s|s:p1 carry on with your brief: the parser, then the tests"
 ck_has "1 it says where"                                   "$OUT" "delivered to the hand at s|s:p1"
 ck_eq  "1 the latch is cleared"                            "$(latched)" gone
+ck_eq  "1 and the steer's time recorded"                   "$(fresh; REEVE_ATTN_NOW=1790000000 "$ROOT/bin/reeve-steer" hung go >/dev/null 2>&1; cat "$STEERED")" 1790000000
 ck_eq  "1 one fact per line, two lines"                    "$(printf '%s\n' "$OUT" | grep -c .)" 2
 steer hung 'and again'
 ck_eq  "1 a missing latch is no obstacle"                  "$RC" 0
@@ -72,9 +76,6 @@ ck_eq  "1 a blocked hand can be steered"                   "$RC" 0
 printf 'working\n' > "$STUB_ATTN"; : > "$STUB_ACTS"
 steer hung 'also update the changelog'
 ck_eq  "1 so can a working one"                            "$RC" 0
-printf 'unknown\n' > "$STUB_ATTN"; : > "$STUB_ACTS"
-steer hung 'carry on'
-ck_eq  "1 and one whose backend cannot say"                "$RC" 0
 
 # --- 2. nothing to steer ---------------------------------------------------
 fresh
@@ -129,6 +130,28 @@ ck_has "4 and what to do instead"                          "$OUT" "bring it to t
 ck_eq  "4 nothing was typed into it"                       "$(sent)" ""
 ck_eq  "4 nor the latch cleared"                           "$(latched)" kept
 
+# A session that cannot be told from one at a dialog is refused the same way:
+# tmux without herdr and an unverified harness answer `unknown` whatever is on
+# the screen, and hard rule 7 is not broken on a guess. So is a probe that
+# failed, whatever it printed, and one that printed nothing.
+for a in unknown error empty; do
+  fresh
+  case $a in
+    unknown) printf 'unknown\n' > "$STUB_ATTN" ;;
+    error)   touch "$STUB_ATTNFAIL" ;;
+    empty)   : > "$STUB_ATTN" ;;
+  esac
+  steer hung 'yes'
+  rm -f "$STUB_ATTNFAIL"
+  ck_eq  "4 attention $a is refused"                       "$RC" 1
+  ck_has "4 and says it cannot tell"                       "$OUT" "cannot tell whether the hand at s|s:p1 is at a dialog"
+  ck_has "4 and what to do instead"                        "$OUT" "Look at the session yourself"
+  ck_eq  "4 nothing was typed into it"                     "$(sent)" ""
+  ck_eq  "4 nor the latch cleared"                         "$(latched)" kept
+  ck_eq  "4 nor the steer recorded"                        "$([ -f "$STEERED" ] && echo kept || echo gone)" gone
+done
+ck_has "4 an answer is named"                              "$(fresh; printf 'unknown\n' > "$STUB_ATTN"; "$ROOT/bin/reeve-steer" hung yes 2>&1)" "answered unknown"
+
 # --- 5. a send that fails ---------------------------------------------------
 fresh
 touch "$STUB_SENDFAIL"
@@ -137,6 +160,7 @@ ck_eq  "5 a failed send fails"                             "$RC" 1
 ck_has "5 and says nothing was cleared"                    "$OUT" "nothing was cleared"
 ck_eq  "5 and the latch is still there"                    "$(latched)" kept
 ck_eq  "5 untouched"                                       "$(cat "$LATCH")" "1 1 1 yes"
+ck_eq  "5 and no steer recorded"                           "$([ -f "$STEERED" ] && echo kept || echo gone)" gone
 
 # --- 6. a latch that cannot be cleared --------------------------------------
 fresh
@@ -147,6 +171,7 @@ ck_eq  "6 the delivery still counts"                       "$RC" 0
 ck_eq  "6 it was sent once"                                "$(sent | grep -c .)" 1
 ck_has "6 the failed clear is said"                        "$OUT" "cannot clear $LATCH"
 ck_has "6 with what it costs"                              "$OUT" "no second idle wake will come"
+ck_has "6 as is the steer's time it could not record"      "$OUT" "cannot write $STEERED"
 ck_eq  "6 on stderr, stdout keeps the one delivery line"   \
   "$(fresh; chmod a-w "$REEVE_HOME/state"; "$ROOT/bin/reeve-steer" hung 'carry on' 2>/dev/null; chmod u+w "$REEVE_HOME/state")" \
   "delivered to the hand at s|s:p1"

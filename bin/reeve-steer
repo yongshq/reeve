@@ -17,9 +17,12 @@
 # Refuses an errand it cannot steer: one that is not known, finished, cleaned
 # up, or whose session is gone. Refuses too a session standing at a dialog: the
 # text would land in the dialog and answer it, which is never the reeve's to do.
-# Deny it or bring it to the liege, in the session itself.
+# Deny it or bring it to the liege, in the session itself. And a session it
+# cannot tell from one, for the same reason: tmux without herdr and an
+# unverified harness both answer `unknown`, whatever is on the screen.
 #
-# Writes nothing but the latch, and never the status file, which is the hand's.
+# Writes nothing but the latch and the time of the steer, and never the status
+# file, which is the hand's.
 #
 # Exit: 0 delivered, 1 refused or not delivered. A latch that could not be
 # cleared after a delivery is said on stderr and still exits 0, because the text
@@ -42,18 +45,19 @@ case $st in
   done|failed) die "errand '$id' reported $st. Nothing to steer; relaunch with: bin/reeve-dispatch $id" ;;
 esac
 
-target=$(meta_get "$id" target '')
-backend=$(meta_get "$id" backend herdr)
-[ -n "$target" ] || die "errand '$id' has no session to steer. relaunch with: bin/reeve-dispatch $id"
-live=$("$BIN/reeve-backend" call agent_state "$target" --backend "$backend" 2>/dev/null || echo unreadable)
+errand_session "$id" "$BIN" || die "errand '$id' has no session to steer. relaunch with: bin/reeve-dispatch $id"
 [ "$live" = alive ] || die "the hand is $live at $target. Nothing to steer; relaunch with: bin/reeve-dispatch $id"
 
 # The sentry's own word for a session stopped at a dialog. Anything typed now
-# would go into the dialog, so this refuses, and `unknown` is let through: a
-# backend that cannot say is no evidence of a dialog.
-attn=$("$BIN/reeve-backend" call attention_state "$target" --backend "$backend" 2>/dev/null || echo unknown)
-[ "$attn" != waiting ] \
-  || die "the hand at $target is waiting at a dialog in its session. Typing would answer it, so nothing was sent. Deny it there, or bring it to the liege."
+# would go into the dialog, so this refuses, and it refuses `unknown` and a call
+# that failed too: hard rule 7 is never broken on a guess. Only an answer that
+# positively rules a dialog out lets the text through.
+attn=$("$BIN/reeve-backend" call attention_state "$target" --backend "$backend" 2>/dev/null) || attn=''
+case $attn in
+  settled|working) : ;;
+  waiting) die "the hand at $target is waiting at a dialog in its session. Typing would answer it, so nothing was sent. Deny it there, or bring it to the liege." ;;
+  *) die "cannot tell whether the hand at $target is at a dialog: backend $backend answered ${attn:-nothing}. Typing into one would answer it, so nothing was sent. Look at the session yourself: tmux without herdr, and any unverified harness, cannot be told apart from a dialog." ;;
+esac
 
 "$BIN/reeve-backend" call send_text_submit "$target" "$text" --backend "$backend" 2>/dev/null \
   || die "could not deliver to $target. Nothing was sent and nothing was cleared."
@@ -61,7 +65,11 @@ info "delivered to the hand at $target"
 
 # Only after the text landed: a steer that never arrived leaves a hand as dead as
 # it was, and a cleared latch would wake you for that same silence twice.
+# The time first, then the latch: a watch pass that read the latch before this
+# can write it back after, and stale_latch knows that write by its older `since`.
 sf=$(stale_file "$id")
+steered_set "$id" "$(attn_now)" \
+  || warn "cannot write $(steered_file "$id"), so a watch running right now could still write back the silence this steer ended"
 if rm -f "$sf" 2>/dev/null && [ ! -e "$sf" ]; then
   info "idle alarm re-armed: the next silence of $id wakes you again"
 else

@@ -45,14 +45,11 @@ printf 'resolved [key=%s]: %s\n' "$key" "$answer" >> "$(status_file "$id")"
 info "recorded: resolved [key=$key]"
 
 # 2. then tell the hand, if one is still alive to tell
-target=$(meta_get "$id" target '')
-backend=$(meta_get "$id" backend herdr)
-if [ -z "$target" ]; then
+if ! errand_session "$id" "$BIN"; then
   info "no session to notify. The answer is in the status file and a relaunch will read it."
   exit 0
 fi
-state=$("$BIN/reeve-backend" call agent_state "$target" --backend "$backend" 2>/dev/null || echo unreadable)
-case $state in
+case $live in
   alive)
     msg="The liege has answered your question [key=$key]: $answer  Continue the errand. Do not append a resolved line yourself; it is already recorded."
     if "$BIN/reeve-backend" call send_text_submit "$target" "$msg" --backend "$backend" 2>/dev/null; then
@@ -61,5 +58,5 @@ case $state in
       warn "could not deliver to $target. The answer is recorded, so relaunch the errand to apply it."
     fi ;;
   *)
-    info "the hand is $state. The answer is recorded; relaunch with: bin/reeve-dispatch $id" ;;
+    info "the hand is $live. The answer is recorded; relaunch with: bin/reeve-dispatch $id" ;;
 esac
