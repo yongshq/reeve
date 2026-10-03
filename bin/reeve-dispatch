@@ -356,8 +356,10 @@ meta_set "$id" dispatched "$(date +%Y-%m-%dT%H:%M:%S)"
 # The opt-out belongs to the errand, not to this process. Skipping the caretaker
 # alone kept nothing up: any other dispatch's caretaker on this home freed the
 # hand within one poll of it finishing. Recorded here, it is read by every
-# cleaner, see kept() in bin/reeve-sentry.
-if [ -n "${REEVE_NO_CARETAKER:-}" ]; then meta_set "$id" keep REEVE_NO_CARETAKER; fi
+# cleaner, see kept() in bin/reeve-sentry. Blanked on a dispatch without it, so a
+# relaunch of the same errand is tended again rather than kept by the last one.
+if [ -n "${REEVE_NO_CARETAKER:-}" ]; then meta_set "$id" keep REEVE_NO_CARETAKER
+else meta_set "$id" keep ''; fi
 touch "$(status_file "$id")"
 
 # --- the caretaker ---------------------------------------------------------

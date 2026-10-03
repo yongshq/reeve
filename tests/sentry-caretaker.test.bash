@@ -113,7 +113,7 @@ reeve_backend_stub_available()       { return 0; }
 reeve_backend_stub_describe()        { printf 'stub backend\n'; }
 reeve_backend_stub_create_endpoint() { printf 'stub:1\n'; }
 reeve_backend_stub_launch()          { return 0; }
-reeve_backend_stub_agent_state()     { printf 'alive\n'; }
+reeve_backend_stub_agent_state()     { case $1 in gone:*) printf 'gone\n' ;; *) printf 'alive\n' ;; esac; }
 reeve_backend_stub_attention_state() { printf 'settled\n'; }
 reeve_backend_stub_wait_change()     { return 2; }
 reeve_backend_stub_kill()            { printf '%s\n' "$1" >> "$STUB_KILLS"; return 0; }
@@ -448,6 +448,43 @@ has "3 but it says no caretaker started"                  "$ERR" "no caretaker s
 has "3 and names what could not be written"               "$ERR" "$REEVE_HOME/state/sentry.log"
 eq  "3 and nothing is locking that home"                  \
     "$([ -e "$REEVE_HOME/state/.sentry.lock" ] && echo present || echo absent)" absent
+
+# The opt-out is one dispatch's word, not the errand's for good. A relaunch of the
+# same errand without it, which is how a hand whose session died is sent out
+# again, used to inherit keep= from the first and be kept forever though nobody
+# asked. A steward, because it has no copy for the relaunch to collide with.
+export REEVE_HOME="$SCRATCH/home4c"
+mkdir -p "$REEVE_HOME"
+LOG="$REEVE_HOME/state/sentry.log"
+LOCK="$REEVE_HOME/state/.sentry.lock"
+REEVE_ROOT="$ROOT" "$ROOT/bin/reeve-brief" again "$REPO" --office steward >/dev/null \
+  || bad "3 reeve-brief refused"
+b="$REEVE_HOME/errands/again/brief.md"
+sed -e 's/{INTENT}/the liege said so/' -e 's/{SPEC}/tidy the home/' "$b" > "$b.filled" && mv "$b.filled" "$b"
+REEVE_NO_CARETAKER=1 dispatch again
+eq  "3 a steward dispatched under the opt-out"   "$RC" 0
+eq  "3 is recorded as kept"                      "$(meta_of again keep)" REEVE_NO_CARETAKER
+# Its session went away, so the next dispatch is a relaunch rather than a refusal.
+sed 's/^target=.*/target=gone:1/' "$REEVE_HOME/state/again.meta" > "$SCRATCH/again.meta" \
+  && mv "$SCRATCH/again.meta" "$REEVE_HOME/state/again.meta"
+: > "$KILLS"
+dispatch again
+eq  "3 relaunched without the opt-out"           "$RC" 0
+has "3 as a relaunch"                            "$ERR" "relaunching"
+eq  "3 and is no longer kept"                    "$(meta_of again keep)" ""
+if waitfor 10 '[ -f "$LOCK" ]'; then
+  CARE=$(marker_pid "$LOCK"); STARTED="$STARTED $CARE"
+  printf 'working: tidying\ndone: home tidied\n' > "$REEVE_HOME/errands/again/status"
+  depart
+  if waitfor 15 '[ "$(killed stub:1)" = yes ]'; then
+    ok "3 so the caretaker frees it once it is done"
+  else
+    bad "3 so the caretaker frees it once it is done" "never freed: $(cat "$REEVE_HOME/state/again.meta")"
+  fi
+  waitfor 15 '! kill -0 "$CARE" 2>/dev/null' || bad "3 the relaunch's caretaker ends" "pid $CARE is still alive"
+else
+  bad "3 the relaunch started a caretaker" "no lock appeared at $LOCK. log: $(cat "$LOG" 2>/dev/null)"
+fi
 
 echo "--- 4. the watch and the caretaker, at the same time, on one home ---"
 # The regression this section exists for, and the reason every case above it is

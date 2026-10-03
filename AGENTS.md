@@ -222,7 +222,8 @@ halves have different safety conditions:
 So a scout disappears completely, while an artificer loses only its idle session and keeps its
 copy and branch until the liege decides. A `blocked:` hand is never reaped, because it may still be
 steered, and neither is a divergence, because that errand is not finished whatever it claims. A
-hand dispatched with `REEVE_NO_CARETAKER=1` is kept, for debugging: neither frees it.
+hand dispatched with `REEVE_NO_CARETAKER=1` is kept, for debugging: neither frees it, and no line
+is left for it, so only a watch reports it.
 
 You rarely run this yourself. When you do: `bin/reeve-teardown <id>`, or `--dismiss-only` to free
 the session and keep everything else.
