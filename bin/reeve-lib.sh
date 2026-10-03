@@ -939,6 +939,9 @@ stale_config_warn() {
   case $(config_get hand-stale-error 0) in
     ''|*[!0-9]*) warn "config/hand-stale-error is not a whole number of seconds, so the shorter staleness check after an API error is off" ;;
   esac
+  case $(config_get hand-wedged 0) in
+    ''|*[!0-9]*) warn "config/hand-wedged is not a whole number of seconds, so the check for a hand wedged mid turn is off" ;;
+  esac
 }
 
 # How many lines this errand's log holds right now. grep -c pads its answer on
@@ -991,8 +994,17 @@ attn_now() { printf '%s' "${REEVE_ATTN_NOW:-$(date +%s)}"; }
 
 # The idle latch, one file per errand, `<since> <lines> <mtime> <woke>`: when
 # this silence was first seen stale, what the status file looked like then, as
-# its line count and mtime, and whether the sentry has reported it.
-stale_file() { printf '%s/state/.stale-%s\n' "$REEVE_HOME_D" "$1"; }
+# its line count and mtime, and whether the sentry has reported it. The wedged
+# latch is the same machinery with a kind of its own, `wedged`, and one more
+# word in its mark, the pane's fingerprint: `<since> <lines> <mtime> <print>
+# <woke>`. Both are read and written by stale_latch and stale_write, so the rule
+# about a steer and the rule about an atomic write hold for both by construction.
+stale_file() { # stale_file <id> [idle|wedged]
+  case ${2:-idle} in
+    wedged) printf '%s/state/.wedged-%s\n' "$REEVE_HOME_D" "$1" ;;
+    *)      printf '%s/state/.stale-%s\n' "$REEVE_HOME_D" "$1" ;;
+  esac
+}
 
 # When bin/reeve-steer last delivered to an errand, on attn_now's clock. A watch
 # pass that read the latch just before a steer cleared it can still write it
@@ -1060,24 +1072,26 @@ stale_mark() {
   printf '%s %s\n' "$(status_lines "$f")" "$(status_mtime "$f")"
 }
 
-# stale_latch <id> <mark>
+# stale_latch <id> <mark> [idle|wedged]
 #
 # Prints `<since> <woke>` when the latch records the silence <mark> describes,
 # returns 1 when there is no latch, it records an earlier one, or it started
 # before the last steer (steered_file says why). Reads only, so the listing asks
-# it too.
+# it too. The mark is everything between the first word and the last, so a kind
+# whose mark carries more words needs nothing of its own here.
 stale_latch() {
-  local sf since sl sm woke steered
-  sf=$(stale_file "$1"); [ -f "$sf" ] || return 1
-  read -r since sl sm woke < "$sf" || return 1
+  local sf line since mark woke steered
+  sf=$(stale_file "$1" "${3:-idle}"); [ -f "$sf" ] || return 1
+  read -r line < "$sf" || return 1
+  since=${line%% *}; woke=${line##* }; mark=${line#* }; mark=${mark% *}
   case $since in ''|*[!0-9]*) return 1 ;; esac
-  [ "$sl $sm" = "$2" ] || return 1
+  [ "$mark" = "$2" ] || return 1
   if steered=$(steered_get "$1") && [ "$since" -lt "$steered" ] \
     && [ "$steered" -le "$(attn_now)" ]; then return 1; fi
   printf '%s %s\n' "$since" "${woke:-no}"
 }
 
-# stale_write <id> <since> <mark> <woke>
+# stale_write <id> <since> <mark> <woke> [idle|wedged]
 #
 # The sentry's alone: it is the one clock, and the listing writes nothing. The
 # dwell is the attention probe's own, for the reason it has one: a hand between
@@ -1096,8 +1110,11 @@ stale_latch() {
 # reported silence for a new one and woke a second time. Returns 1 when the
 # write did not land, and the caller says so, because a latch that cannot be
 # written is an idle wake that never comes, or one that comes every poll.
+#
+# The wedged latch, the optional fifth argument, is written the same way and by
+# the same process, for the same reasons.
 stale_write() {
-  local sf; sf=$(stale_file "$1")
+  local sf; sf=$(stale_file "$1" "${5:-idle}")
   if { printf '%s %s %s\n' "$2" "$3" "$4" > "$sf.$$" && mv -f "$sf.$$" "$sf"; } 2>/dev/null; then
     return 0
   fi
@@ -1142,6 +1159,158 @@ stale_unseen() {
   age=$(status_silence "$1") || return 1
   [ "$age" -ge "$quiet" ] || return 1
   printf '%s\n' "$age"
+}
+
+# --- wedging ----------------------------------------------------------------
+# The case the idle rule cannot see, because it needs `settled`. A hand frozen
+# inside one command, a test that hangs or a network call that never returns,
+# keeps its session reading `working` for as long as it is frozen, so it read as
+# progress forever and nothing ever woke the reeve for it. Silence alone cannot
+# judge it either: one hand legitimately thought for forty minutes in a single
+# turn, and a timeout on the status file alone would cry wolf at every long one.
+#
+# So the screen is the second witness. A hand that is getting on with it grows
+# its transcript; a wedged one's transcript stands still while only its chrome
+# moves. WEDGED is all of:
+#
+#   reported state is `working`    as for staleness, and for the same reasons
+#   attention is `working`         the turn is still running: exactly the half
+#                                  the idle rule leaves alone
+#   silent past `hand-wedged`      seconds since the status file last changed,
+#                                  default two hours, the idle rule's default
+#   the screen unchanged as long   pane_print the same for that whole span, which
+#                                  the sentry measures in the wedged latch: its
+#                                  `since` is when it first saw this print over
+#                                  this status file, and any change restarts it
+#
+# Reported once per silence and never acted on, as idle is. A pane that cannot
+# be read, or a backend that cannot capture at all, cannot be judged, so it
+# never wakes on one: the sentry says so on stderr instead. A threshold of 0
+# turns the check off; one that is not a whole number turns it off too, and
+# stale_config_warn says so.
+#
+# One known cost of reading the screen and not the model: a single thinking
+# block that runs past the whole window with nothing new on screen but its timer
+# reads as wedged. Three times the longest turn seen so far, and only an alarm.
+
+# pane_print <captured text>
+#
+# A fingerprint of what the hand has put on its screen, with the chrome that
+# moves on its own taken out, because chrome that ticks would hide every wedge.
+# Shaped on claude's pane, where the spinner glyph turns and its verb can change,
+# the turn's timer and token counter tick, a pending tool's bullet blinks, and the
+# statusline under the composer redraws, and none of that is the hand doing
+# anything. In order:
+#
+#   blank lines and trailing blanks go, everywhere: a tip or a hint line comes
+#     and goes and moves everything under it
+#   the composer and everything under it go: from the first rule line, a run of
+#     `─` or the box's `╭`, among the bottom fifteen lines, to the end
+#   in the bottom twelve lines left, a running turn's chrome: a spinner line (a
+#     glyph, then a word ending in an ellipsis), the tip hung under it, and any
+#     line carrying the interrupt hint go whole, then every number with the unit
+#     letters stuck to it, so `1m 3s` and `2h 0m 2s` read alike, every spinner
+#     or bullet glyph, and every space, since what they leave is spacing too
+#
+# Checked against a real claude pane mid tool call: two captures forty seconds
+# apart differed in the tool's elapsed time, its output's elapsed time and the
+# spinner's glyph, timer and token count, and printed the same. A few seconds
+# into a call claude adds a background hint under the command once, which is
+# one restart of the clock and not a moving one.
+#
+# Above those twelve lines nothing is touched, so a digit that changes in the
+# transcript is a change. A transcript that grows scrolls the whole capture, so
+# a hand getting on with it never prints the same twice.
+#
+# Glyphs as alternations and never as bracket expressions: an awk that reads
+# bytes takes `[✢✳]` as a set of single bytes, several of them lead bytes that
+# box drawing shares, and would eat pieces of other characters.
+pane_print() {
+  printf '%s\n' "$1" | awk '
+    BEGIN {
+      g = "(·|✢|✳|✶|✻|✽|\\*|∗|⏺|●|•|◦|⠋|⠙|⠹|⠸|⠼|⠴|⠦|⠧|⠇|⠏)"
+      spin = "^[ \t]*" g "[ \t]+[^ \t]+(…|\\.\\.\\.)"
+      rule = "^[ \t]*(╭|─|━|═)(─|━|═)(─|━|═)"
+      tip = "^[ \t]*⎿[ \t]+Tip:"
+    }
+    { sub(/\r$/, ""); sub(/[ \t]+$/, ""); if ($0 != "") L[++n] = $0 }
+    END {
+      cut = n + 1
+      for (i = n; i > 0 && i > n - 15; i--) if (L[i] ~ rule) cut = i
+      n = cut - 1
+      for (i = 1; i <= n; i++) {
+        s = L[i]
+        if (i > n - 12) {
+          if (s ~ spin || s ~ /esc to interrupt/ || s ~ tip) continue
+          gsub(/[0-9]+[A-Za-z]*/, "", s); gsub(g, "", s); gsub(/[ \t]+/, "", s)
+        }
+        print s
+      }
+    }' | cksum | awk '{ print $1 "-" $2 }'
+}
+
+# The status file and the screen as the wedged latch records them,
+# `<lines> <mtime> <print>`: a line written or a screen that moved is a new
+# silence, which is what re-arms the alarm.
+wedge_mark() { printf '%s %s\n' "$(stale_mark "$1")" "$2"; }
+
+# wedge_probe <id> <state> <attention> <target> <backend> <bin dir>
+#
+# Prints `<silent seconds> <print>` and returns 0 for a hand the rule applies to.
+# Returns 1, printing nothing, for one it does not: not `working` in both senses,
+# no session, or the check is off. Returns 2, printing only the silence, when the
+# pane could not be read, so the caller can say the check is blind there rather
+# than let it read as fine. An empty capture is a failed one: a hand's pane is
+# never empty.
+#
+# The sentry asks this of a working hand every poll, from the first second of its
+# silence and not from the threshold, because the screen has to be seen unchanged
+# across the whole window and only a look taken at its start can say so. Reads
+# only, like stale_silence, and the bin dir is the caller's for the same reason.
+wedge_probe() {
+  local id=$1 st=$2 attn=$3 tgt=$4 bk=$5 bin=$6 age text
+  [ "$st" = working ] && [ "$attn" = working ] && [ -n "$tgt" ] || return 1
+  stale_after hand-wedged 7200 >/dev/null || return 1
+  age=$(status_silence "$id") || return 1
+  text=$("$bin/reeve-backend" call capture "$tgt" 200 --backend "$bk" 2>/dev/null) || text=''
+  [ -n "$text" ] || { printf '%s\n' "$age"; return 2; }
+  printf '%s %s\n' "$age" "$(pane_print "$text")"
+}
+
+# wedge_due <silent seconds> <since>
+#
+# True once both witnesses have held still for `hand-wedged`: the status file,
+# by its silence, and the screen, by the latch's `since` on attn_now's clock. The
+# one test both the wake and the listing apply, so they turn on together.
+wedge_due() {
+  local w; w=$(stale_after hand-wedged 7200) || return 1
+  [ "$1" -ge "$w" ] && [ $(( $(attn_now) - $2 )) -ge "$w" ]
+}
+
+# wedge_look <id> <state> <attention> <target> <backend> <bin dir>
+#
+# The listing's question. Prints `<silent seconds> <unchanged seconds>` and
+# returns 0 when the sentry's latch has held this screen over this silence for
+# the whole window, which is the moment the sentry wakes for it. Returns 1
+# otherwise. A working hand is shown as nothing but working before that, since a
+# long turn is not news. The screen is read again here and never taken from the
+# latch: the sentry may not have looked for an hour, and a hand that moved since
+# is not wedged whatever the latch last saw. Only read once the cheap tests have
+# passed, so a listing captures nothing for a hand inside its window.
+#
+# Writes nothing, in every listing form.
+wedge_look() {
+  local w age probe latch since
+  [ "$2" = working ] && [ "$3" = working ] || return 1
+  w=$(stale_after hand-wedged 7200) || return 1
+  [ -f "$(stale_file "$1" wedged)" ] || return 1
+  age=$(status_silence "$1") || return 1
+  [ "$age" -ge "$w" ] || return 1
+  probe=$(wedge_probe "$@") || return 1
+  latch=$(stale_latch "$1" "$(wedge_mark "$1" "${probe#* }")" wedged) || return 1
+  since=${latch% *}
+  wedge_due "${probe%% *}" "$since" || return 1
+  printf '%s %s\n' "${probe%% *}" $(( $(attn_now) - since ))
 }
 
 # How long, for a human. The long form for a reason line, the short one for a

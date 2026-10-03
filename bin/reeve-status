@@ -153,6 +153,21 @@ live_state() { # live_state <id> [long]
       fi
       return
     fi
+    # The fourth, for a hand the third cannot see because it never settles: still
+    # working, its status file and its screen both unchanged for `hand-wedged`.
+    # wedge_look reads the sentry's wedged latch and the screen, and writes
+    # nothing. Shown only once the sentry would wake for it, since a working hand
+    # with a long silence is a long turn until then, not news. `wedged` takes the
+    # place of `working` for the same sixteen columns.
+    if stale=$(wedge_look "$i" "$(status_field "$i" state)" "${attn:-unknown}" "$tgt" "$bk" "$BIN"); then
+      if [ "${2:-}" = long ]; then
+        printf '%s/%s, wedged: silent %s, screen unchanged %s\n' "$st" "$attn" \
+          "$(silence_say "${stale%% *}")" "$(silence_say "${stale#* }")"
+      else
+        printf '%s/wedged %s\n' "$st" "$(silence_short "${stale%% *}")"
+      fi
+      return
+    fi
     printf '%s/%s\n' "$st" "${attn:-unknown}"
   else
     printf '%s\n' "$st"

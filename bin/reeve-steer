@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Steer a hand: type into its session, then re-arm its idle alarm.
+# Steer a hand: type into its session, then re-arm its idle and wedged alarms.
 #
 # Usage:
 #   bin/reeve-steer <id> <text>
@@ -12,7 +12,9 @@
 # steer writes no line, and no watch is usually polling during the steered turn,
 # so a hand that died again within it was never reported a second time. This
 # clears the latch once the text is delivered, so the next silence starts a fresh
-# dwell and wakes you again.
+# dwell and wakes you again. The same goes for a hand the sentry woke you about
+# with `wedged:`, frozen inside a command: its latch is cleared too, so a hand
+# steered past it that freezes again wakes you again.
 #
 # Refuses an errand it cannot steer: one that is not known, finished, cleaned
 # up, or whose session is gone. Refuses too a session standing at a dialog: the
@@ -21,8 +23,8 @@
 # cannot tell from one, for the same reason: tmux without herdr and an
 # unverified harness both answer `unknown`, whatever is on the screen.
 #
-# Writes nothing but the latch and the time of the steer, and never the status
-# file, which is the hand's.
+# Writes nothing but the two latches and the time of the steer, and never the
+# status file, which is the hand's.
 #
 # Exit: 0 delivered, 1 refused or not delivered. A latch that could not be
 # cleared after a delivery is said on stderr and still exits 0, because the text
@@ -67,11 +69,19 @@ info "delivered to the hand at $target"
 # it was, and a cleared latch would wake you for that same silence twice.
 # The time first, then the latch: a watch pass that read the latch before this
 # can write it back after, and stale_latch knows that write by its older `since`.
-sf=$(stale_file "$id")
+# The wedged latch goes with it, the same way and for the same reason: a hand
+# steered past a frozen command that freezes again in the steered turn, with no
+# line written and no watch to see its screen move, is a second wedge.
+sf=$(stale_file "$id"); wf=$(stale_file "$id" wedged)
 steered_set "$id" "$(attn_now)" \
   || warn "cannot write $(steered_file "$id"), so a watch running right now could still write back the silence this steer ended"
+also=', and the wedged alarm with it'
+if ! { rm -f "$wf" 2>/dev/null && [ ! -e "$wf" ]; }; then
+  also=''
+  warn "cannot clear $wf, so if $id freezes again in this turn no second wedged wake will come for it"
+fi
 if rm -f "$sf" 2>/dev/null && [ ! -e "$sf" ]; then
-  info "idle alarm re-armed: the next silence of $id wakes you again"
+  info "idle alarm re-armed$also: the next silence of $id wakes you again"
 else
   warn "cannot clear $sf, so if $id dies again in this turn no second idle wake will come for it"
 fi

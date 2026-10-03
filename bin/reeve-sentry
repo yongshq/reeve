@@ -252,7 +252,8 @@ fi
 # Alongside the cursor, and for the same reason: what this errand looked like
 # last time, so a condition that is only interesting once is only reported once.
 attn_file() { printf '%s/state/.attn-%s\n' "$REEVE_HOME_D" "$1"; }
-# The idle latch, stale_file, lives in bin/reeve-lib.sh with stale_write, and so
+# The idle latch, stale_file, lives in bin/reeve-lib.sh with stale_write, as does
+# the wedged latch, the same machinery under a kind of its own, and so
 # do attn_dwell and attn_now: the listing reads the latch this process writes and
 # applies the same dwell to it, so neither can be this file's alone.
 
@@ -269,6 +270,9 @@ latch_warn() { # latch_warn <id> <message>
 # Errands this process has already said it cannot judge for staleness, one id
 # per line, so a long watch says it once rather than every poll.
 unseen=''
+# The same, for a working hand whose screen could not be read, so it cannot be
+# judged wedged.
+blind=''
 
 # Clean up a hand that has finished. An agent does not exit itself, so without
 # this every completed errand leaves a session idling at a prompt, holding a
@@ -461,7 +465,7 @@ wake_owed() { # wake_owed <id>
 # Absorb or escalate. One errand, one verdict.
 check_one() {
   local i=$1 f seen now again new st open div bk tgt live
-  local attn af since woke nowsec last stale how mark latch
+  local attn af since woke nowsec last stale how mark latch wedge prc w
 
   # Counted BEFORE the verdict is read, and again after. The cursor is what says
   # a line has been dealt with, so advancing it past a line the verdict did not
@@ -620,6 +624,8 @@ check_one() {
   attn=''
   af=$(attn_file "$i")
   [ "$st" = working ] && attn=$("$BIN/reeve-backend" call attention_state "$tgt" --backend "$bk" 2>/dev/null || echo unknown)
+  # The turn is over, so a wedge in it is too: the wedged latch, below.
+  case $attn in settled|waiting) rm -f "$(stale_file "$i" wedged)" ;; esac
   if [ "$attn" = waiting ]; then
     since=''; woke=no
     [ -f "$af" ] && read -r since woke < "$af"
@@ -699,6 +705,54 @@ check_one() {
       printf 'idle: %s has been silent for %s with its session %s, last said %s\n' \
         "$i" "$(silence_say "${stale%% *}")" "$how" "${last:-nothing}"
       return 0
+    fi
+  fi
+
+  # The hand the case above cannot see, because it never reads `settled`: one
+  # still `working`, frozen inside a single command. wedge_probe in
+  # bin/reeve-lib.sh owns the rule and pane_print the fingerprint; this process
+  # owns the clock, the wedged latch, which starts the first time a print is seen
+  # over a status file and starts again whenever either changes. That is what
+  # re-arms it after a hand writes a line or its screen moves, and bin/reeve-steer
+  # deletes it as it does the idle latch. A `settled` or `waiting` reading is the
+  # turn over, so it deletes this latch as `working` deletes the idle one, and
+  # `unknown` re-arms nothing, for the same reason. That deletion sits beside the
+  # attention probe above, because a `waiting` reading wakes before it gets here.
+  #
+  # One silence, one wake, reported and nothing more: whether a frozen command
+  # is killed, waited on or steered past is the reeve's call, made by looking.
+  # No dwell either, since the window is two hours of the screen holding still.
+  #
+  # A pane that cannot be read cannot be judged, so it never wakes, and once the
+  # silence is past the window that is said on stderr, once per watch, rather
+  # than left to read as quiet. A capture that fails leaves the latch as it was.
+  if [ "$live" = alive ]; then
+    wedge=$(wedge_probe "$i" "$st" "$attn" "$tgt" "$bk" "$BIN"); prc=$?
+    if [ "$prc" = 0 ]; then
+      mark=$(wedge_mark "$i" "${wedge#* }"); nowsec=$(attn_now)
+      if latch=$(stale_latch "$i" "$mark" wedged); then
+        since=${latch% *}; woke=${latch#* }
+      else
+        since=$nowsec; woke=no
+        stale_write "$i" "$since" "$mark" no wedged \
+          || latch_warn "wedged:$i" "cannot write $(stale_file "$i" wedged), so $i's screen cannot start its clock and no wedged wake will come for it"
+      fi
+      if wedge_due "${wedge%% *}" "$since"; then
+        [ "$woke" = yes ] && return 1
+        stale_write "$i" "$since" "$mark" yes wedged \
+          || latch_warn "wedged:$i" "cannot write $(stale_file "$i" wedged), so $i's wedged wake is not recorded as reported and will be said again"
+        last=$(status_field "$i" last)
+        # `wedged:`, a word of its own: `idle:` is a turn that ended and this is
+        # one that never does, and the two want different things looked at.
+        printf 'wedged: %s has been silent for %s with its session working and its screen unchanged for %s, last said %s\n' \
+          "$i" "$(silence_say "${wedge%% *}")" "$(silence_say $(( nowsec - since )))" "${last:-nothing}"
+        return 0
+      fi
+    elif [ "$prc" = 2 ] && ! lines_has "$i" "$blind" \
+         && w=$(stale_after hand-wedged 7200) && [ "$wedge" -ge "$w" ]; then
+      blind="$blind$i
+"
+      warn "$i has been silent for $(silence_say "$wedge") while its session works, but its screen could not be read on backend $bk, so it cannot be judged wedged and no wedged wake will come for it"
     fi
   fi
 
