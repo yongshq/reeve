@@ -98,18 +98,58 @@ f=$(brief_for e-lantern lantern artificer)
 lacks "registered without the flag: no section" "$f" "$SECTION"
 
 # --- the household's own repository: always, no flag -------------------------
-# Only meaningful when this suite runs from a git clone, which is how the
-# household's own test run is defined.
-if git -C "$ROOT" rev-parse --git-common-dir >/dev/null 2>&1; then
-  f=$(brief_for e-own "$ROOT" scribe)
-  has "own repository: section present with no registry entry" "$f" "$SECTION"
-  has "own repository: scribe gets it too, not only the artificer" "$f" \
-    "git clone -q --branch docs/e-own"
-  has "own repository: no test command known, the spec names it" "$f" \
-    '<the test command your spec names>'
-else
-  ok "own repository: skipped, not a git clone"
-fi
+# Known by its plugin manifest's name, not by sharing an object store with the
+# code root, so a plugin install running from a separate clone or a cache still
+# recognises it.
+f=$(brief_for e-own "$ROOT" scribe)
+has "own repository: section present with no registry entry" "$f" "$SECTION"
+has "own repository: scribe gets it too, not only the artificer" "$f" \
+  "git clone -q --branch docs/e-own"
+has "own repository: no test command known, the spec names it" "$f" \
+  '<the test command your spec names>'
+
+# A separate clone of the household's repository, nothing shared with the code
+# root but the manifest.
+r=$(mkrepo own-clone)
+mkdir -p "$r/.claude-plugin"
+cp "$ROOT/.claude-plugin/plugin.json" "$r/.claude-plugin/plugin.json"
+f=$(brief_for e-own-clone "$r" artificer)
+has "separate clone of the own repository: section present" "$f" "$SECTION"
+
+# A repository with some other plugin's manifest is not the household's.
+r=$(mkrepo other-plugin)
+mkdir -p "$r/.claude-plugin"
+printf '{\n  "name": "not-reeve",\n  "author": { "name": "reeve" }\n}\n' \
+  > "$r/.claude-plugin/plugin.json"
+f=$(brief_for e-other "$r" artificer)
+lacks "unrelated plugin repository: no section" "$f" "$SECTION"
+
+# --- the office's own write rule, reconciled once ----------------------------
+# "What you may write" is fixed office text: "Nothing outside it" for the
+# artificer, "Exactly one file" for a reader. A brief that asks for the run
+# says, right after it, that the throwaway clone is allowed; one that does not
+# ask leaves the office text alone.
+PLUS='Plus a throwaway clone under a temporary directory when this brief asks for a'
+for o in artificer scribe scout warden; do
+  f=$(brief_for "e-plus-$o" "$ROOT" "$o")
+  has "own repository, $o: write rule names the clone" "$f" "$PLUS"
+  if awk -v p="$PLUS" '/^### What you may write/ { w = 1; next }
+       w && /^### / { exit }  w && index($0, p) { found = 1 }
+       END { exit !found }' "$f"; then
+    ok "own repository, $o: the clone sentence sits inside What you may write"
+  else bad "own repository, $o: the clone sentence sits inside What you may write"; fi
+done
+f=$(brief_for e-plus-steward "$ROOT" steward)
+lacks "own repository, steward: no copy, no clone sentence" "$f" "$PLUS"
+
+r=$(mkrepo unchanged)
+f=$(brief_for e-unchanged "$r" artificer)
+lacks "ordinary holding: office write rule unchanged" "$f" "$PLUS"
+want=$(sed 's/^#/##/' "$ROOT/offices/artificer.md")
+got=$(sed -n '/^### What you may write/,/^### Your rules/p' "$f")
+exp=$(printf '%s\n' "$want" | sed -n '/^### What you may write/,/^### Your rules/p')
+if [ "$got" = "$exp" ]; then ok "ordinary holding: What you may write is the office text verbatim"
+else bad "ordinary holding: What you may write is the office text verbatim"; fi
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

@@ -65,5 +65,27 @@ mkdir -p "$r/build" && echo X > "$r/build/out.bin"
 eq "ignored directory replaced by an incoming file refuses" 1 "$(land "$r")"
 eq "  and its contents are intact" X "$(cat "$r/build/out.bin" 2>/dev/null)"
 
+# --- a dirty tracked file: the contract's own clause refuses -----------------
+# Git alone lands this one, since the modified file is not on an incoming path,
+# so "a clean tree apart from `??` and `!!` entries" is what stops it. Pinned
+# both ways: the clause refuses, and git by itself would not have.
+precheck() { # precheck <repo> -> 0 when every status entry is ?? or !!
+  ! git -C "$1" status --porcelain --ignored | grep -qv '^?? \|^!! '
+}
+r=$(fixture dirty 'echo c > new.c && git add new.c')
+echo edited > "$r/README"
+before=$(git -C "$r" rev-parse main)
+if precheck "$r"; then got=passed; else got=refused; fi
+eq "dirty tracked file: the clean-tree clause refuses" refused "$got"
+eq "  and main did not move" "$before" "$(git -C "$r" rev-parse main)"
+eq "  and the edit is intact" edited "$(cat "$r/README")"
+r=$(fixture dirty-git 'echo c > new.c && git add new.c')
+echo edited > "$r/README"
+eq "  git alone would have landed it, so the clause is load-bearing" 0 "$(land "$r")"
+r=$(fixture ignored-only 'echo c > new.c && git add new.c')
+echo SECRET > "$r/local.env"; echo mine > "$r/notes.txt"
+if precheck "$r"; then got=passed; else got=refused; fi
+eq "only ?? and !! entries: the clause passes" passed "$got"
+
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

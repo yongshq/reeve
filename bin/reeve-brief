@@ -146,19 +146,21 @@ test_cmd=$(holding_field "$holding" test '')
 # the brief here rather than left to the spec, because a requirement that holds
 # only when the reeve remembers to type it is one some brief will omit.
 #
-# "Own repository" is decided by object store, not by path: the reeve may run
-# from a linked worktree of the very clone it is briefing, and the two share one
-# common git dir while their toplevels differ. A code root that is no repository
-# at all, a plugin cache say, matches nothing, and the manor line still applies.
-git_common() { # git_common <dir> -> the absolute common git dir, or fails
-  local d
-  d=$(git -C "$1" rev-parse --git-common-dir 2>/dev/null) || return 1
-  (cd "$1" && cd -P "$d" && pwd)
+# "Own repository" is decided by identity, not by location: the holding carries
+# a plugin manifest whose name is the code root's own. That holds wherever the
+# reeve runs from, a linked worktree, a separate clone, or a plugin cache with no
+# git at all, where comparing object stores or root commits finds nothing. A
+# repository with no manifest matches nothing, and the manor line still applies.
+plugin_name() { # plugin_name <dir> -> the name in its .claude-plugin/plugin.json, or fails
+  local n
+  n=$(sed -n 's/^[[:space:]]*"name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
+    "$1/.claude-plugin/plugin.json" 2>/dev/null | head -n 1)
+  [ -n "$n" ] && printf '%s\n' "$n"
 }
 fresh_clone=no
 [ "$(holding_field "$holding" fresh-clone '')" = yes ] && fresh_clone=yes
-if [ "$fresh_clone" = no ] && own=$(git_common "$REEVE_ROOT_D") \
-   && [ "$own" = "$(git_common "$repo")" ]; then
+if [ "$fresh_clone" = no ] && own=$(plugin_name "$REEVE_ROOT_D") \
+   && [ "$own" = "$(plugin_name "$repo")" ]; then
   fresh_clone=yes
 fi
 
@@ -413,9 +415,21 @@ fi
 
 # Headings are demoted one level so the inlined office sits under the brief's
 # hierarchy instead of starting a second H1 halfway down the page.
+# The office's "What you may write" is fixed text, and for a brief that asks for
+# a fresh-clone run it would read as forbidding the clone hard rule 1 allows. So
+# the one sentence reconciling them goes right after that section, here, once,
+# rather than into every office file and every brief that never asks.
+office_text=$(sed 's/^#/##/' "$office_file")
+if [ "$fresh_clone" = yes ] && [ "$writes" != home ]; then
+  office_text=$(printf '%s\n' "$office_text" | awk '
+    /^### What you may write/ { inw = 1; print; next }
+    inw && /^### / { print "Plus a throwaway clone under a temporary directory when this brief asks for a"
+                     print "fresh-clone run."; print ""; inw = 0 }
+    { print }')
+fi
 cat <<ROLE
 
-$(sed 's/^#/##/' "$office_file")
+$office_text
 ROLE
 
 # Hard rule 1 says "nowhere else on disk", and a fresh-clone run writes a clone

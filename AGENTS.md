@@ -35,7 +35,7 @@ the pending actions named in one answer, in the present tense.
 2. **A hand commits on its own branch only.** Never pushes, never opens a PR, never touches
    `main`, never rebases onto anything. When an errand finishes you report "branch ready" once the
    holding's test command passes (its manor line's `test:`, or the one the brief names). For the
-   household's own repository (the holding at `$REEVE_ROOT`), and any holding whose manor line says
+   household's own repository (any clone, by plugin name), and any holding whose manor line says
    `fresh-clone: yes`, that run is in a fresh clone of the branch with an empty `$REEVE_HOME`, so
    it reproduces on another machine: `bin/reeve-brief` writes it into the brief, the hand runs it.
    A holding with no test command is "branch ready, untested", said plainly. The next move is the
