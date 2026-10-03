@@ -3,6 +3,12 @@
 #
 # Usage:
 #   reeve-teardown <id> [--drop-branch] [--dismiss-only] [--dry-run]
+#   reeve-teardown --prove-landed <holding> <branch>
+#
+# --prove-landed changes nothing. It prints one verdict line, `proven:` (exit 0)
+# or `not proven:` (exit 1), saying whether `git branch -D <branch>` would lose
+# anything: the proof behind hard rule 3's standing proven-delete grant, so the
+# reeve never assembles it by hand. See the block above prove_landed below.
 #
 # Two separate jobs with different safety conditions. DISMISSING a finished
 # hand's session loses nothing and happens as soon as it reports a terminal
@@ -119,7 +125,85 @@
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/reeve-lib.sh"
 BIN=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
-case ${1:-} in -h|--help) print_help "$0"; exit 0 ;; esac
+# --prove-landed: may `git branch -D <branch>` run without losing anything.
+#
+# For a branch whose work landed under other commit ids (cherry-picked, or
+# rebased and fast-forwarded), so `-d` refuses over ancestry while nothing is
+# lost. Proven needs ALL of these, and anything git cannot answer is not proven:
+#
+# - the default branch exists as refs/heads/<default>, resolved the way
+#   resolve_default below resolves it (the holding's base: in manors.md, else
+#   main), a branch and only a branch, and never the branch being proved. Asked
+#   by name, a missing default made `git cherry` exit 128 with no output, and a
+#   tag named main on the branch tip made it print nothing at exit 0: both read
+#   as "no + line".
+# - no merge commit between the default and the branch. `git cherry` never
+#   looks at merges, so what only a merge adds (a conflict resolved one way on
+#   the branch, another way when it landed) passes as all `-`. Always a stop.
+# - `git cherry` exits 0, prints at least one line, and every line is `-`.
+#   Empty means the branch holds nothing the default lacks: nothing to prove,
+#   and plain `git branch -d` is the tool for it.
+# - the branch is checked out in no copy. A copy holding it goes by this
+#   script's own teardown or not at all, and its refusal goes to the liege.
+#
+# The limit left open: patch ids ignore whitespace, so `-` is not byte equality.
+# A commit that differs from its landed copy only in whitespace proves.
+prove_landed() { # prove_landed <holding> <branch> -> one verdict line
+  local holding=$1 br=$2 repo name='' h p default_ref default_sha br_sha at merges cherry
+  local total plus
+  no() { printf 'not proven: %s\n' "$*"; return 1; }
+  repo=$(resolve_holding_path "$holding") \
+    || { no "'$holding' is not a registered holding or a git repository"; return; }
+  # The default is the holding's base:, so a holding given by path is matched to
+  # its manors.md line by that path. Unmatched, it is main, and a main that does
+  # not exist is refused below rather than guessed at.
+  if holding_line "$holding" >/dev/null; then name=$holding
+  else
+    for h in $(holding_names); do
+      p=$(holding_field "$h" path '')
+      [ -n "$p" ] && [ "$(cd "$p" 2>/dev/null && pwd -P)" = "$(cd "$repo" && pwd -P)" ] \
+        && { name=$h; break; }
+    done
+  fi
+  default_ref=main
+  [ -n "$name" ] && default_ref=$(holding_field "$name" base main)
+  [ "$default_ref" = "$br" ] && { no "$br is the default branch of $repo itself"; return; }
+  default_sha=$(git -C "$repo" rev-parse --verify --quiet "refs/heads/$default_ref^{commit}" \
+                2>/dev/null) \
+    || { no "no branch refs/heads/$default_ref in $repo to prove against (the holding's" \
+              "base: in manors.md, else main)"; return; }
+  br_sha=$(git -C "$repo" rev-parse --verify --quiet "refs/heads/$br^{commit}" 2>/dev/null) \
+    || { no "no branch refs/heads/$br in $repo"; return; }
+  at=$(git -C "$repo" worktree list --porcelain 2>/dev/null \
+       | PL_WANT="refs/heads/$br" awk '
+           $1 == "worktree" { p = substr($0, 10); next }
+           $1 == "branch" && $2 == ENVIRON["PL_WANT"] { print p; exit }')
+  [ -z "$at" ] || { no "$br is checked out at $at; that copy goes by reeve-teardown or not" \
+                       "at all, and a refusal there goes to the liege"; return; }
+  merges=$(git -C "$repo" rev-list --merges "$default_sha..$br_sha" 2>/dev/null) \
+    || { no "git could not list the merge commits on $br"; return; }
+  [ -z "$merges" ] || { no "$br holds $(printf '%s\n' "$merges" | wc -l | tr -d ' ') merge" \
+                           "commit(s) $default_ref lacks, which git cherry cannot see; bring it" \
+                           "to the liege"; return; }
+  cherry=$(git -C "$repo" cherry "$default_sha" "$br_sha" 2>/dev/null) \
+    || { no "git cherry failed on $br against $default_ref"; return; }
+  [ -n "$cherry" ] || { no "nothing to prove: $br holds no commit $default_ref lacks, so" \
+                           "git branch -d is the tool, not this grant"; return; }
+  total=$(printf '%s\n' "$cherry" | wc -l | tr -d ' ')
+  plus=$(printf '%s\n' "$cherry" | grep -cv '^- ')
+  [ "$plus" -eq 0 ] || { no "$plus of $total commit(s) on $br have no patch equivalent on" \
+                            "$default_ref; bring it to the liege"; return; }
+  printf 'proven: all %s commit(s) on %s have a patch equivalent on %s, no merges, checked out' \
+    "$total" "$br" "$default_ref"
+  printf ' nowhere: git -C %s branch -D %s loses nothing\n' "$repo" "$br"
+}
+
+case ${1:-} in
+  -h|--help) print_help "$0"; exit 0 ;;
+  --prove-landed)
+    [ $# -eq 3 ] || die "usage: reeve-teardown --prove-landed <holding> <branch>"
+    prove_landed "$2" "$3"; exit ;;
+esac
 id=${1:-}; shift 2>/dev/null || :
 drop_branch=no dry=no dismiss_only=no
 while [ $# -gt 0 ]; do
@@ -506,8 +590,10 @@ refuse_base_moved() { # refuse_base_moved <subject> <sha> [extra line...]
   [ -n "$default_sha" ] && msg+=("($default_ref was asked too and does not hold it.)")
   # Patch equivalence tells a rebase from a reset, and nothing else. It is in the
   # message and nowhere near the gate deliberately: two commits with the same
-  # patch are not the same commit, so this never decides anything and is always
-  # labelled as the guess it is.
+  # patch are not the same commit, so here it never decides anything and is always
+  # labelled as the guess it is. The one place it decides is --prove-landed, a
+  # branch delete under the liege's standing grant, behind its own guards, and the
+  # message says so, so this text and hard rule 3 never disagree.
   cherry=$(git -C "$repo" cherry "$base_sha" "$sha" 2>/dev/null) || cherry=''
   case $cherry in
     ''|*+*) ;;
@@ -516,7 +602,8 @@ refuse_base_moved() { # refuse_base_moved <subject> <sha> [extra line...]
   if [ -n "$guess" ]; then
     msg+=("Every commit it holds already has an equivalent on $base by patch text, so this looks")
     msg+=("like a rebase rather than a reset. That is a guess for you to confirm, never a reason to")
-    msg+=("remove anything.")
+    msg+=("remove this copy. Deleting a branch on that proof is the liege's standing grant under")
+    msg+=("hard rule 3 alone, and only once reeve-teardown --prove-landed says proven.")
   fi
   while [ $# -gt 0 ]; do msg+=("$1"); shift; done
   if [ -n "$copy_off_landed_branch" ]; then
