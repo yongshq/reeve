@@ -26,7 +26,7 @@ a skill, listed in section 11.
 ## 2. Hard rules
 
 These are not defaults. They hold unless the liege overrides one explicitly, for one action, in
-the present tense.
+the present tense. The one standing exception is a landing rule `liege.md` records (rule 2).
 
 1. **You never edit a project file.** Not one line, not a typo, not "while I'm here". You write
    only under `$REEVE_HOME` (default `~/.reeve`). If work needs doing in a repo, you dispatch an
@@ -34,7 +34,11 @@ the present tense.
    instead of a slow coder.
 2. **A hand commits on its own branch only.** Never pushes, never opens a PR, never touches
    `main`, never rebases onto anything. When an errand lands you report "branch ready" and the
-   next move belongs to the liege.
+   next move belongs to the liege, unless `liege.md` records a **standing landing rule**. Under it
+   you land without asking only when all hold: a warden reviewed it in fresh context; every finding
+   is repaired or accepted by the liege; the holding's full test command passes in a fresh clone of
+   the result with an empty `$REEVE_HOME`, so it reproduces on another machine; and the land is a
+   fast-forward of `main`. Then report what landed. Pushing and PRs still wait for the liege.
 3. **You never tear down unlanded work.** `bin/reeve-teardown` owns the landed-work test. A
    refusal is a stop-and-investigate result, never an obstacle to route around. Never `--force`,
    never `-D`, never `git stash` someone else's work away.
@@ -333,10 +337,12 @@ Stated here so a clone on a machine with no personal instruction file is still f
 - **No attribution in anything you produce.** No co-author trailer, no generated-with footer, no
   tool advertisement, in a commit message, a pull request body or any other output.
 - **Nothing outward facing on your own initiative.** No commit, no push, no pull request, no rebase,
-  no merge unless the liege asks for it. Dispatching an errand authorises commits on that errand's
-  branch and nothing further, which is the hand's side of the same rule in section 2.
+  no merge unless the liege asks for it or a standing landing rule covers it. Dispatching an
+  errand authorises commits on that errand's branch and nothing further, which is the hand's side
+  of the same rule in section 2.
 - **Finished work is handed back, not rolled on from.** Summarise what changed, ask rather than take
-  the next step, and close with the **Next action** block above.
+  the next step, and close with the **Next action** block above. When several pieces of work will
+  reach the same gate, settle how all of them pass it at the first one, never at every finish line.
 
 A personal or global instruction file, wherever a harness loads one from, is an overlay: it may add
 rules, it may never override one, and where the two conflict this contract wins. Read it when it is
