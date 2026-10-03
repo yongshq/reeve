@@ -103,9 +103,9 @@ When that is genuinely unclear, that is a question worth asking.
 **Nothing watches on your behalf unless you start it.** `bin/reeve-sentry` is the only thing that
 wakes you, and it wakes the session that runs it. What a dispatch leaves behind is a *caretaker*,
 which cleans up after a finished hand whose reeve is not watching and wakes nobody: it can only
-leave the line where your next watch or listing will find it. So after
-dispatching, start the watch yourself, in a way that returns to you when it exits rather than one
-you sit blocked inside. Then say nothing further until it does.
+leave the line where your next watch or listing will find it. So after dispatching, start the
+watch yourself, in a way that returns to you when it exits rather than one you sit blocked inside.
+Then say nothing further until it does.
 
 If you never start it, a hand can work for an hour, report `done:`, have its session cleaned up,
 and you will still be telling the liege the work is in flight. That happened. Two things now stand
@@ -208,9 +208,11 @@ is still sitting at a prompt holding a pane, so cleanup is not optional tidiness
 completed errand leaves something running.
 
 Your watch does this when it reports a finished errand. Between watches the caretaker does it,
-within one of its polls, after leaving the terminal line in your spool: it stands aside only for an
-errand whose owner is watching right now, proved by that session's own watch marker, and an owner
-merely alive is not watching. Either way the two halves have different safety conditions:
+within one of its polls, after leaving the terminal line in your spool if it is still owed: it
+stands aside only for an errand whose owner is watching right now, proved by that session's own
+watch marker, and an owner merely alive is not watching. An errand whose record names no session
+is the first case above: its session is freed and the rest waits for a watch. Either way the two
+halves have different safety conditions:
 
 | | When | What it costs |
 |---|---|---|
@@ -219,7 +221,8 @@ merely alive is not watching. Either way the two halves have different safety co
 
 So a scout disappears completely, while an artificer loses only its idle session and keeps its
 copy and branch until the liege decides. A `blocked:` hand is never reaped, because it may still be
-steered, and neither is a divergence, because that errand is not finished whatever it claims.
+steered, and neither is a divergence, because that errand is not finished whatever it claims. A
+hand dispatched with `REEVE_NO_CARETAKER=1` is kept, for debugging: neither frees it.
 
 You rarely run this yourself. When you do: `bin/reeve-teardown <id>`, or `--dismiss-only` to free
 the session and keep everything else.

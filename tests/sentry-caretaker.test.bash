@@ -375,6 +375,9 @@ REEVE_NO_CARETAKER=1 dispatch optout
 eq  "3 a real dispatch under the opt-out succeeds" "$RC" 0
 eq  "3 and starts nothing"                   "$([ -e "$LOG" ] && echo present || echo absent)" absent
 eq  "3 and locks nothing"                    "$([ -e "$LOCK" ] && echo present || echo absent)" absent
+# And says so on the errand itself, which is what every caretaker reads: the
+# one the next dispatch starts below included, so it must leave this hand up.
+eq  "3 the opt-out is recorded on the errand" "$(meta_of optout keep)" REEVE_NO_CARETAKER
 # That dispatch was real, so this home now holds a hand nobody is tending. Finish
 # it here: the case below asserts that a caretaker ENDS when nothing is left, and
 # a hand left working forever is a hand it would be right to keep tending.
@@ -416,6 +419,12 @@ if waitfor 10 '[ -f "$LOCK" ]'; then
   else
     bad "3 and the caretaker then ends itself, leaving nothing running" "pid $CARE is still alive"
   fi
+  # The opt-out's hand finished too, before this caretaker existed, and is the
+  # whole point of the switch: kept up, by a caretaker it did not start.
+  eq  "3 the kept hand beside it was left running" \
+      "$(meta_of optout tornDown)|$(meta_of optout target)" "|stub:1"
+  eq  "3 with its copy" \
+      "$([ -d "$SCRATCH/holding.worktrees/artificer-optout" ] && echo present || echo absent)" present
   eq  "3 the lock is gone with it" "$([ -e "$LOCK" ] && echo present || echo absent)" absent
   eq  "3 it wrote nothing to its log, having nothing to report" \
       "$([ -s "$LOG" ] && cat "$LOG" || echo '')" ""

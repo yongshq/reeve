@@ -7,7 +7,11 @@
 #
 # When an errand finishes it is cleaned up automatically: the session is freed
 # always, and the copy is removed only when nothing would be lost. --no-reap
-# leaves finished hands running, which you want only while debugging one.
+# makes THIS watch free nothing, and a caretaker then frees the hand within one
+# poll of the watch ending. To keep a finished hand running for good, which you
+# want only while debugging one, dispatch it with REEVE_NO_CARETAKER=1: that
+# records keep= on the errand, and no watch or caretaker frees it after that.
+# bin/reeve-teardown <id> still does, when you are finished with it.
 #
 # Prints exactly ONE reason line and exits when something needs the reeve. That
 # single line is the whole agent facing payload, so it has to be readable on its
@@ -86,9 +90,9 @@ done
 [ "$every" = yes ] && [ "$caretaker" != yes ] && reap=no
 
 # A caretaker cleans for the whole home rather than for one session, because it
-# exists precisely for errands whose reeve is gone. Ownership still decides what
-# it may touch, in reap_allowed; this only lets it SEE the orphans it is there
-# to find.
+# exists for errands whose reeve is not watching, gone or merely between
+# watches. Ownership still decides what it may touch, in reap_allowed; this only
+# lets it SEE the errands it is there to find.
 [ "$caretaker" = yes ] && every=yes
 
 # Everything this process prints is the one reason line the reeve reads, so the
@@ -286,6 +290,7 @@ REAP_UNDECIDED=no
 reap_one() {
   local i=$1 wt rc
   REAP_UNDECIDED=no
+  if kept "$i"; then say ' [session kept, %s]\n' "$(meta_get "$i" keep '')"; return; fi
   [ "$reap" = yes ] || { say '\n'; return; }
   wt=$(meta_get "$i" worktree '')
   "$BIN/reeve-teardown" "$i" ${2:+"$2"} >/dev/null 2>&1; rc=$?
@@ -303,6 +308,14 @@ reap_one() {
     say ' [session freed, copy removed]\n'
   fi
 }
+
+# Kept: dispatched with REEVE_NO_CARETAKER=1, which records keep= on the errand
+# itself. Per errand and on disk, never a property of whichever process happens
+# to run: the opt-out promises a finished hand stays up for debugging, and a
+# switch read only by the caretaker its own dispatch did not start stopped
+# working the moment any other dispatch's caretaker held the home. No watch and
+# no caretaker frees a kept hand; bin/reeve-teardown <id> still does, by hand.
+kept() { [ -n "$(meta_get "$1" keep '')" ]; }
 
 # The one rule for whether a finished hand may be cleaned up, so the watch and
 # the caretaker can never disagree about it. Both halves are load bearing: a
@@ -488,16 +501,25 @@ check_one() {
   # return 0, because an actionable event is the reeve's business, not this
   # process's.
   if [ "$caretaker" = yes ]; then
+    # A kept errand is never this process's to touch, finished or not, so it is
+    # tended from the first look: no line in a spool, since the errand stays in
+    # flight for its owner's watch to report, and no reason to keep polling it,
+    # which is what lets a caretaker end while a kept hand sits there.
+    if kept "$i"; then
+      tended="$tended$i
+"
+      return 1
+    fi
     if reap_allowed "$i" && reapable "$st" "$div"; then
       if wake_owed "$i"; then
         # Hand the report over before destroying the evidence for it. Freeing
         # the hand's session and blanking its target is the moment this line
         # stops being discoverable by anything: the pane is gone and, until the
         # in-flight rule above was corrected, so was the errand. A caretaker has
-        # no reeve to tell, but it knows which one briefed this errand, and a
-        # line left in that session's spool is delivered by the next
-        # bin/reeve-sentry or bin/reeve-status that reeve runs. Silent as ever
-        # on stdout: leaving a note is not printing a reason line.
+        # no watching reeve to tell, but it knows which one briefed this
+        # errand, and a line left in that session's spool is delivered by the
+        # next bin/reeve-sentry or bin/reeve-status that reeve runs. Silent as
+        # ever on stdout: leaving a note is not printing a reason line.
         #
         # Only on the reap path. That is the one place the report is destroyed
         # rather than delayed; an errand this caretaker may not touch keeps its

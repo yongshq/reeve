@@ -113,9 +113,10 @@ bin/reeve-sentry          # returns one reason line when something needs you
 ```
 
 Run it so that it comes back to you when it exits, not so that you sit blocked inside it. A
-dispatch leaves a *caretaker* running, and a caretaker cleans up after a finished hand and tells
-nobody: it has no reeve to tell. Without the watch, a hand can finish, report `done:` and have its
-session closed while you are still saying the work is in flight. If the dispatch ends with
+dispatch leaves a *caretaker* running, and a caretaker frees a finished hand unless its reeve is
+watching, and wakes nobody: it leaves the terminal line in that reeve's notifications, which only
+your next watch or listing delivers. Without the watch, a hand can finish, report `done:` and have
+its session closed while you are still saying the work is in flight. If the dispatch ends with
 `NOTHING IS WATCHING`, the dispatch is not finished.
 
 With the watch running, do not poll and do not narrate progress.

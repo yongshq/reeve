@@ -141,11 +141,11 @@ watch_live_for() { # watch_live_for <session>
 # A reeve is woken by bin/reeve-sentry and by nothing else, so a reeve that
 # dispatches and then sits idle has nothing watching on its behalf at all. What
 # a dispatch leaves running is a caretaker, and a caretaker is silent by
-# contract: it cleans up after a finished hand and tells nobody, because it has
-# no reeve to tell. That is the whole of the missed wake. The one `done:` line
-# the household exists to deliver was seen only by the process that then freed
-# the hand's session and blanked its target, which put the errand out of reach
-# of every watch that might have started afterwards.
+# contract. It used to clean up after a finished hand and tell nobody, because
+# it had no reeve to tell. That was the whole of the missed wake. The one
+# `done:` line the household exists to deliver was seen only by the process that
+# then freed the hand's session and blanked its target, which put the errand out
+# of reach of every watch that might have started afterwards.
 #
 # So a caretaker hands the line over instead of consuming it. One file per
 # OWNING session, because the home is shared and a wake belongs to the reeve
@@ -504,10 +504,12 @@ reeve_session() {
 
 session_dir() { printf '%s/state/sessions/%s\n' "$REEVE_HOME_D" "$1"; }
 
-# The heartbeat. A session that dies leaves errands nobody watches, and the
-# caretaker must not act against an owner that is still there, so something has
-# to say "still here" without a daemon and without a pid: a pid is reused, and a
-# reused pid would hand one session's errands to a stranger.
+# The heartbeat. A session that dies leaves errands nobody watches, and
+# reeve-adopt and `reeve-status --orphans` must not take them from an owner that
+# is still there, so something has to say "still here" without a daemon and
+# without a pid: a pid is reused, and a reused pid would hand one session's
+# errands to a stranger. The caretaker no longer reads it: it asks whether an
+# owner is WATCHING, by that session's watch marker, not whether it is alive.
 #
 # Called from the commands that mean a reeve is actually working (brief, status,
 # adopt, doctor) and from the sentry's poll loop, plus the statusline gauge,

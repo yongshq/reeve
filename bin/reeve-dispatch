@@ -17,7 +17,10 @@
 # --caretaker, detached, one per home), so a hand that finishes is cleaned up
 # even when no reeve session is alive, and the line it reported is left where
 # the reeve that briefed it will find it. Set REEVE_NO_CARETAKER=1 to skip it,
-# which you want while debugging a hand you do not want torn down.
+# which you want while debugging a hand you do not want torn down: it also
+# records keep= on the errand, so no watch and no caretaker, this home's or one
+# another dispatch started, frees the finished hand. bin/reeve-teardown <id>
+# frees it when you are done.
 #
 # A caretaker is not a watch, though. Nothing reports a finished hand to a reeve
 # except bin/reeve-sentry run by that reeve, so this says NOTHING IS WATCHING,
@@ -350,6 +353,11 @@ meta_set "$id" cwd "$cwd"
 meta_set "$id" model_from "$model_from"
 meta_set "$id" effort_from "$effort_from"
 meta_set "$id" dispatched "$(date +%Y-%m-%dT%H:%M:%S)"
+# The opt-out belongs to the errand, not to this process. Skipping the caretaker
+# alone kept nothing up: any other dispatch's caretaker on this home freed the
+# hand within one poll of it finishing. Recorded here, it is read by every
+# cleaner, see kept() in bin/reeve-sentry.
+if [ -n "${REEVE_NO_CARETAKER:-}" ]; then meta_set "$id" keep REEVE_NO_CARETAKER; fi
 touch "$(status_file "$id")"
 
 # --- the caretaker ---------------------------------------------------------
