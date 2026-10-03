@@ -303,10 +303,11 @@ if [ "$writes" != home ] && [ -n "$wt" ] && [ -d "$wt" ]; then
   op=$(copy_operation)
   if [ -n "$op" ]; then
     case $op in
-      bisect) how="git -C $wt bisect reset" ;;
-      *)      how="git -C $wt $op --continue, or git -C $wt $op --abort" ;;
+      bisect) how="git -C '$wt' bisect reset" ;;
+      *)      how="git -C '$wt' $op --continue, or git -C '$wt' $op --abort" ;;
     esac
-    refuse "this copy has a $op in progress: finish or abort it in $wt first." \
+    case $op in am) a=an ;; *) a=a ;; esac
+    refuse "this copy has $a $op in progress: finish or abort it in $wt first." \
            "Run $how, then tear down again." \
            "Removing the copy now deletes that $op's state with it, and its tree can look clean."
   fi

@@ -110,14 +110,15 @@ clean() { [ -z "$(git -C "$1" status --porcelain)" ] && printf 'clean\n' || prin
 # survived it, then runs the cleanup in the copy and asserts the same errand
 # now tears down.
 refuses_then_passes() {
-  local n=$1 id=$2 kind=$3 tree=$4 head=$5 at; shift 5
+  local n=$1 id=$2 kind=$3 tree=$4 head=$5 at a=a; shift 5
+  [ "$kind" = am ] && a=an
   ck_eq  "$n the $kind leaves the tree $tree"           "$(clean "$wt")" "$tree"
   at=moved
   git -C "$repo" merge-base --is-ancestor "$(git -C "$wt" rev-parse HEAD)" main && at=landed
   ck_eq  "$n the $kind leaves HEAD $head"               "$at" "$head"
   run_teardown "$id"
-  ck_eq  "$n a $kind in progress refuses"               "$RC" 1
-  ck_has "$n it names the $kind and where"              "$OUT" "this copy has a $kind in progress: finish or abort it in $wt first"
+  ck_eq  "$n $a $kind in progress refuses"               "$RC" 1
+  ck_has "$n it names the $kind and where"              "$OUT" "this copy has $a $kind in progress: finish or abort it in $wt first"
   ck_not "$n it does not report the checks passed"      "$OUT" "landed-work checks passed"
   ck_eq  "$n the copy is kept"                          "$(gone "$wt")" present
   "$@" >/dev/null 2>&1 || bad "$n the cleanup ran: $*"
