@@ -5,8 +5,9 @@
 # a default branch that does not exist, a tag shadowing it, content that only a
 # merge commit carries. These prove each one is now `not proven`, and that the
 # cases the grant exists for still prove. The grant covers only a branch an
-# errand record names for that holding, so every scene records br; case 13
-# takes the record away.
+# errand's dispatch made for that holding and nothing since dropped, so every
+# scene records br as made; case 13 takes the record away, 14 and 15 the made
+# and the not dropped.
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 
 # --- safety -----------------------------------------------------------------
@@ -47,7 +48,8 @@ ck_has() { case $2 in *"$3"*) ok "$1" ;; *) bad "$1" "output [$2] did not mentio
 # the very same commit id.
 G() { git -C "$repo" "$@" >/dev/null 2>&1; }
 record() { # record <id> <repo> <branch>: the errand record the scope check reads
-  printf 'office=artificer\nrepo=%s\nbranch=%s\n' "$2" "$3" > "$REEVE_HOME/state/$1.meta"
+  printf 'office=artificer\nrepo=%s\nbranch=%s\nbranchMade=2026-01-01T00:00:00\n' "$2" "$3" \
+    > "$REEVE_HOME/state/$1.meta"
 }
 scene() { # scene <name> [trunk]
   repo="$SCRATCH/$1"; local trunk=${2:-main}
@@ -174,6 +176,31 @@ ck_eq  "13 recorded for another holding does not prove" "$RC" 1
 record scope-other "$repo" other-branch
 prove "$repo" br
 ck_eq  "13 a record for another branch does not prove"  "$RC" 1
+
+# 14 a record only a brief wrote: dispatch never made the branch, and refuses one
+# that already exists, so br may be the liege's own. Reproduces the review's scene.
+scene briefonly; G cherry-pick br
+printf 'office=artificer\nrepo=%s\nbranch=br\n' "$repo" > "$REEVE_HOME/state/briefonly.meta"
+prove "$repo" br
+ck_eq  "14 a brief-only record does not prove"         "$RC" 1
+ck_has "14 says no record shows it made"               "$OUT" "no errand record names br"
+
+# 15 a dropped branch: torn down with --drop-branch, the record is marked, and a
+# liege branch later reusing the name does not prove on it.
+scene dropped; G merge --no-edit br
+printf 'repo=%s\nbranch=br\nbase=main\nwrites=yes\n' "$repo" >> "$REEVE_HOME/state/dropped.meta"
+mkdir -p "$REEVE_HOME/errands/dropped"
+printf 'done: finished\n' > "$REEVE_HOME/errands/dropped/status"
+OUT=$("$ROOT/bin/reeve-teardown" dropped --drop-branch 2>&1); RC=$?
+ck_eq  "15 setup: teardown --drop-branch succeeds"     "$RC" 0
+ck_eq  "15 the branch is gone"                         "$(git -C "$repo" branch --list br)" ""
+ck_has "15 the record is marked dropped"               "$(cat "$REEVE_HOME/state/dropped.meta")" \
+       "branchDropped="
+G checkout -b br; echo l > "$repo/l"; G add l; G commit -m liege; G checkout main
+G cherry-pick br
+prove "$repo" br
+ck_eq  "15 a liege branch reusing the name does not prove" "$RC" 1
+ck_has "15 says no record shows it made"               "$OUT" "no errand record names br"
 
 # 12 usage errors are not verdicts.
 OUT=$("$ROOT/bin/reeve-teardown" --prove-landed only-one 2>&1); RC=$?

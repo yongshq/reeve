@@ -151,6 +151,10 @@ else
   run mkdir -p "$(dirname "$worktree")"
   if [ -n "$branch" ]; then
     run git -C "$repo" worktree add "$worktree" -b "$branch" "$base" || die "git worktree add failed"
+    # The household made this branch, said the moment it exists and before
+    # anything below can fail. `--prove-landed` counts only a record carrying
+    # it: a brief alone names a branch that may be the liege's own.
+    [ "$dry" = yes ] || meta_set "$id" branchMade "$(date +%Y-%m-%dT%H:%M:%S)"
   else
     # read-only offices get a detached checkout so an investigation never
     # leaves a branch behind that nobody will ever merge

@@ -170,6 +170,8 @@ if cmp -s "$STUB/offices/artificer.settings.json" "$settings"
 then ok "3 and is a copy of the office's own"
 else bad "3 and is a copy of the office's own" "the two files differ"; fi
 eq  "3 the endpoint is recorded"              "$(grep -m1 '^target=' "$REEVE_HOME/state/real.meta")" "target=stub:1"
+has "3 the record says the household made the branch" \
+    "$(grep -m1 '^branchMade=' "$REEVE_HOME/state/real.meta")" "branchMade=2"
 eq  "3 the copy was really created"           "$([ -d "$WORKTREES/artificer-real" ] && echo present || echo absent)" present
 
 # --- 4. and a dry run after a real one changes nothing either ----------------

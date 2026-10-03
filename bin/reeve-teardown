@@ -132,10 +132,14 @@ BIN=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # lost. Proven needs ALL of these, and anything git cannot answer is not proven:
 #
 # - an errand record names the branch for this holding: some state/<id>.meta,
-#   torn down or not, whose branch= is the branch and whose repo= is the same
-#   repository. The grant covers only branches the household's own errands
-#   created. The liege's, one from a session outside the household, or one no
-#   record names is never proven, whatever git says, and goes to the liege.
+#   torn down or not, whose branch= is the branch, whose repo= is the same
+#   repository, that carries branchMade= (written by reeve-dispatch right after
+#   its `worktree add -b`) and no branchDropped= (written by this script's
+#   --drop-branch). The grant covers only branches the household's own errands
+#   created. The liege's, one from a session outside the household, one only a
+#   brief names (dispatch refuses a branch that already exists, so the name may
+#   be the liege's), one reusing a dropped errand's name, or one no record
+#   names is never proven, whatever git says, and goes to the liege.
 # - the default branch exists as refs/heads/<default>, resolved the way
 #   resolve_default below resolves it (the holding's base: in manors.md, else
 #   main), a branch and only a branch, and never the branch being proved. Asked
@@ -165,13 +169,16 @@ prove_landed() { # prove_landed <holding> <branch> -> one verdict line
     [ -f "$f" ] || continue
     i=$(basename "$f" .meta)
     [ "$(meta_get "$i" branch '')" = "$br" ] || continue
+    [ -n "$(meta_get "$i" branchMade '')" ] || continue
+    [ -z "$(meta_get "$i" branchDropped '')" ] || continue
     rp=$(meta_get "$i" repo '')
     [ -n "$rp" ] && [ "$(cd "$rp" 2>/dev/null && pwd -P)" = "$repo_p" ] \
       && { recorded=$i; break; }
   done
-  [ -n "$recorded" ] || { no "no errand record names $br for $repo; the grant covers only" \
-                             "branches the household's errands created, so bring it to the" \
-                             "liege"; return; }
+  [ -n "$recorded" ] || { no "no errand record names $br for $repo as a branch its dispatch" \
+                             "made and nothing since dropped; the grant covers only branches" \
+                             "the household's errands created, so bring it to the liege"
+                          return; }
   # The default is the holding's base:, so a holding given by path is matched to
   # its manors.md line by that path. Unmatched, it is main, and a main that does
   # not exist is refused below rather than guessed at.
@@ -916,7 +923,11 @@ if [ "$copy_examined" = directory ] && [ -d "$wt" ]; then
 fi
 if [ "$drop_branch" = yes ] && [ -n "$br" ]; then
   # -d only, never -D. -d refuses an unmerged branch, which is the whole point.
-  run git -C "$repo" branch -d "$br" || warn "git refused to delete '$br' (it is not merged). Leaving it."
+  # Once gone, the name is free for anyone to reuse, so the record stops
+  # vouching for it: `--prove-landed` refuses a record marked branchDropped.
+  if run git -C "$repo" branch -d "$br"; then
+    [ "$dry" = yes ] || meta_set "$id" branchDropped "$(date +%Y-%m-%dT%H:%M:%S)"
+  else warn "git refused to delete '$br' (it is not merged). Leaving it."; fi
 fi
 
 if [ "$dry" = yes ]; then info "dry run, nothing changed"; exit 0; fi
