@@ -733,6 +733,17 @@ meta_write() {
   mv "$tmp" "$f"
 }
 
+# branch_birth <repo> <branch> -> "<sha> <unix time>" of the branch's oldest
+# reflog entry, or nothing. The identity of one ref rather than of its name:
+# deleting a branch, by any route, deletes its reflog with it (files and
+# reftable alike), so a later branch of the same name starts a reflog of its
+# own and is born again. Nothing when there is no reflog, it expired, or
+# core.logAllRefUpdates is off; a caller reads that as no identity.
+branch_birth() {
+  git -C "$1" reflog show --date=unix --format='%H %gd' "refs/heads/$2" -- 2>/dev/null \
+    | tail -n 1 | sed -n 's/^\([0-9a-f]\{40,\}\) .*@{\([0-9]\{1,\}\)}$/\1 \2/p'
+}
+
 # errand_session <id> <bin dir>
 #
 # The hand's session as the errand records it, for a command about to type into

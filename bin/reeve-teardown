@@ -13,8 +13,9 @@
 #
 # --delete-proven is the grant's delete, and the only one: the same proof, then
 # `git branch -D`, then branchDropped= on every record that vouched for the
-# branch, so a later branch reusing the name never proves on them. Not proven
-# changes nothing and exits 1.
+# branch. A later branch reusing the name never proves on them, as after any
+# other delete: a record vouches for the ref its dispatch made, by that ref's
+# reflog birth, never for the name. Not proven changes nothing and exits 1.
 #
 # Two separate jobs with different safety conditions. DISMISSING a finished
 # hand's session loses nothing and happens as soon as it reports a terminal
@@ -139,13 +140,20 @@ BIN=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 #
 # - an errand record names the branch for this holding: some state/<id>.meta,
 #   torn down or not, whose branch= is the branch, whose repo= is the same
-#   repository, that carries branchMade= (written by reeve-dispatch right after
-#   its `worktree add -b`) and no branchDropped= (written by this script's
-#   --drop-branch and --delete-proven). The grant covers only branches the household's own errands
-#   created. The liege's, one from a session outside the household, one only a
-#   brief names (dispatch refuses a branch that already exists, so the name may
-#   be the liege's), one reusing a dropped errand's name, or one no record
-#   names is never proven, whatever git says, and goes to the liege.
+#   repository, and whose branchMade= is the birth of the ref there now. Dispatch
+#   writes branchMade= right after its `worktree add -b`: branch_birth, the sha
+#   and time of the branch's oldest reflog entry. A record vouches for that ref,
+#   not for the name. Any delete, this script's or a plain `git branch -d` or
+#   `-D` by hand, takes the reflog with it, so a later branch of the same name
+#   is born again and matches no record. branchDropped= (written by
+#   --drop-branch and --delete-proven) still refuses a record outright. The
+#   grant covers only branches the household's own errands created. The
+#   liege's, one from a session outside the household, one only a brief names
+#   (dispatch refuses a branch that already exists, so the name may be the
+#   liege's), any later branch of a name an errand once made, or one no record
+#   names is never proven, whatever git says, and goes to the liege. So is a
+#   household branch whose reflog is gone or expired, or never kept: no birth
+#   to compare is no proof.
 # - the default branch exists as refs/heads/<default>, resolved the way
 #   resolve_default below resolves it (the holding's base: in manors.md, else
 #   main), a branch and only a branch, and never the branch being proved. Asked
@@ -157,7 +165,7 @@ BIN=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 #   the branch, another way when it landed) passes as all `-`. Always a stop.
 # - `git cherry` exits 0, prints at least one line, and every line is `-`.
 #   Empty means the branch holds nothing the default lacks: nothing to prove,
-#   and plain `git branch -d` is the tool for it.
+#   and `reeve-teardown <id> --drop-branch` is the tool for it.
 # - the branch is checked out in no copy. A copy holding it goes by this
 #   script's own teardown or not at all, and its refusal goes to the liege.
 #
@@ -166,7 +174,7 @@ BIN=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # whitespace proves.
 prove_landed() { # prove_landed <holding> <branch> -> one verdict line
   local holding=$1 br=$2 repo repo_p name='' h p f i rp default_ref default_sha
-  local br_sha at merges cherry total plus
+  local br_sha born at merges cherry total plus
   # What --delete-proven acts on, set only as far as the proof got: every
   # record that vouches for the branch, the repository, and the tip proved.
   PL_RECORDS=() PL_REPO='' PL_SHA=''
@@ -174,19 +182,21 @@ prove_landed() { # prove_landed <holding> <branch> -> one verdict line
   repo=$(resolve_holding_path "$holding") \
     || { no "'$holding' is not a registered holding or a git repository"; return; }
   repo_p=$(cd "$repo" && pwd -P)
+  born=$(branch_birth "$repo" "$br")
   for f in "$REEVE_HOME_D"/state/*.meta; do
     [ -f "$f" ] || continue
     i=$(basename "$f" .meta)
     [ "$(meta_get "$i" branch '')" = "$br" ] || continue
-    [ -n "$(meta_get "$i" branchMade '')" ] || continue
+    [ -n "$born" ] && [ "$(meta_get "$i" branchMade '')" = "$born" ] || continue
     [ -z "$(meta_get "$i" branchDropped '')" ] || continue
     rp=$(meta_get "$i" repo '')
     [ -n "$rp" ] && [ "$(cd "$rp" 2>/dev/null && pwd -P)" = "$repo_p" ] \
       && PL_RECORDS+=("$i")
   done
-  [ "${#PL_RECORDS[@]}" -gt 0 ] || { no "no errand record names $br for $repo as a branch its dispatch" \
-                             "made and nothing since dropped; the grant covers only branches" \
-                             "the household's errands created, so bring it to the liege"
+  [ "${#PL_RECORDS[@]}" -gt 0 ] || { no "no errand record names $br for $repo as the very ref its" \
+                             "dispatch made (born ${born:-unknown, no reflog}) and nothing since" \
+                             "dropped; the grant covers only branches the household's errands" \
+                             "created, so bring it to the liege"
                           return; }
   # The default is the holding's base:, so a holding given by path is matched to
   # its manors.md line by that path. Unmatched, it is main, and a main that does
@@ -222,7 +232,8 @@ prove_landed() { # prove_landed <holding> <branch> -> one verdict line
   cherry=$(git -C "$repo" cherry "$default_sha" "$br_sha" 2>/dev/null) \
     || { no "git cherry failed on $br against $default_ref"; return; }
   [ -n "$cherry" ] || { no "nothing to prove: $br holds no commit $default_ref lacks, so" \
-                           "git branch -d is the tool, not this grant"; return; }
+                           "reeve-teardown ${PL_RECORDS[0]} --drop-branch is the tool, not this" \
+                           "grant"; return; }
   total=$(printf '%s\n' "$cherry" | wc -l | tr -d ' ')
   plus=$(printf '%s\n' "$cherry" | grep -cv '^- ')
   [ "$plus" -eq 0 ] || { no "$plus of $total commit(s) on $br have no patch equivalent on" \
@@ -233,11 +244,12 @@ prove_landed() { # prove_landed <holding> <branch> -> one verdict line
   PL_REPO=$repo PL_SHA=$br_sha
 }
 
-# --delete-proven: the proof, then the delete, then the records. A branch the
-# grant deleted by hand left its records vouching for a name now free for anyone,
-# so the delete lives here, where it can mark them. The tip is asked again just
-# before the delete: a commit landing on the branch after the proof was never
-# proved, and git branch -D would take it.
+# --delete-proven: the proof, then the delete, then the records. The delete
+# takes the ref's reflog, so its birth already matches nothing; the records are
+# marked branchDropped= as well, so each says what became of its branch, and a
+# backend that kept a deleted branch's reflog still finds them refused. The tip
+# is asked again just before the delete: a commit landing on the branch after
+# the proof was never proved, and git branch -D would take it.
 delete_proven() { # delete_proven <holding> <branch>
   local br=$2 i now
   prove_landed "$1" "$br" || return 1
@@ -960,8 +972,9 @@ if [ "$copy_examined" = directory ] && [ -d "$wt" ]; then
 fi
 if [ "$drop_branch" = yes ] && [ -n "$br" ]; then
   # -d only, never -D. -d refuses an unmerged branch, which is the whole point.
-  # Once gone, the name is free for anyone to reuse, so the record stops
-  # vouching for it: `--prove-landed` refuses a record marked branchDropped.
+  # Once gone, the name is free for anyone to reuse. The reflog went with the
+  # ref, so a reuse is born again and matches no branchMade=; the record is
+  # marked branchDropped= too, which `--prove-landed` refuses outright.
   if run git -C "$repo" branch -d "$br"; then
     [ "$dry" = yes ] || meta_set "$id" branchDropped "$(date +%Y-%m-%dT%H:%M:%S)"
   else warn "git refused to delete '$br' (it is not merged). Leaving it."; fi

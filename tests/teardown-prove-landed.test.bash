@@ -4,10 +4,12 @@
 # own, and a review reproduced each case below in which it passed unlanded work:
 # a default branch that does not exist, a tag shadowing it, content that only a
 # merge commit carries. These prove each one is now `not proven`, and that the
-# cases the grant exists for still prove. The grant covers only a branch an
-# errand's dispatch made for that holding and nothing since dropped, so every
-# scene records br as made; case 13 takes the record away, 14 and 15 the made
-# and the not dropped. 16 and 17 are --delete-proven, the grant's own delete.
+# cases the grant exists for still prove. The grant covers only the very ref an
+# errand's dispatch made for that holding, by its reflog birth, and nothing since
+# dropped, so every scene records br's birth as made; case 13 takes the record
+# away, 14 and 15 the made and the not dropped. 16 and 17 are --delete-proven,
+# the grant's own delete. 18 to 20 are a name reused after a delete by hand, and
+# a reflog gone.
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 
 # --- safety -----------------------------------------------------------------
@@ -43,23 +45,25 @@ ck_has() { case $2 in *"$3"*) ok "$1" ;; *) bad "$1" "output [$2] did not mentio
 # --- scene builder ----------------------------------------------------------
 # A repository with one commit on <trunk> and a branch `br` off it holding one
 # commit that adds file a, then one more commit on <trunk>, and an errand record
-# naming br for it. Each case then lands br, or not, its own way. The trunk moves
+# naming br, as born, for it. Each case then lands br, or not, its own way. The trunk moves
 # first because a cherry-pick onto the same parent in the same second recreates
 # the very same commit id.
 G() { git -C "$repo" "$@" >/dev/null 2>&1; }
 record() { # record <id> <repo> <branch>: the errand record the scope check reads
-  printf 'office=artificer\nrepo=%s\nbranch=%s\nbranchMade=2026-01-01T00:00:00\n' "$2" "$3" \
-    > "$REEVE_HOME/state/$1.meta"
+  local made
+  made=$(. "$ROOT/bin/reeve-lib.sh"; branch_birth "$2" "$3")
+  printf 'office=artificer\nrepo=%s\nbranch=%s\nbranchMade=%s\n' "$2" "$3" \
+    "${made:-0000000000000000000000000000000000000000 0}" > "$REEVE_HOME/state/$1.meta"
 }
 scene() { # scene <name> [trunk]
   repo="$SCRATCH/$1"; local trunk=${2:-main}
   mkdir -p "$repo"
-  record "$1" "$repo" br
   git -C "$repo" init -q -b "$trunk"
   G config user.email tester@example.invalid; G config user.name tester
   G config commit.gpgsign false
   echo base > "$repo/base"; G add base; G commit -m base
   G checkout -b br
+  record "$1" "$repo" br
   echo a > "$repo/a"; G add a; G commit -m a
   G checkout "$trunk"
   echo t > "$repo/t"; G add t; G commit -m trunk
@@ -130,7 +134,8 @@ ck_has "7 names the merge commit"                "$OUT" "1 merge commit(s)"
 scene ancestor; G merge --no-edit br
 prove "$repo" br
 ck_eq  "8 ancestor does not prove under -D"     "$RC" 1
-ck_has "8 points at plain -d"                   "$OUT" "nothing to prove"
+ck_has "8 says nothing to prove"                "$OUT" "nothing to prove"
+ck_has "8 points at the drop that marks the record" "$OUT" "reeve-teardown ancestor --drop-branch"
 
 # 9 checked out in a copy, and in the primary checkout.
 scene wt; G cherry-pick br; G worktree add "$SCRATCH/wt-copy" br
@@ -233,6 +238,55 @@ case $(cat "$REEVE_HOME/state/delunproven.meta") in
   *branchDropped=*) bad "17 the record is not marked" ;;
   *) ok "17 the record is not marked" ;;
 esac
+
+# 18 the review's scene: a household branch fast-forward landed, so nothing to
+# prove, then dropped with plain `git branch -d` as git allows, which marks no
+# record. A liege branch reusing the name, landed but for whitespace, must not
+# prove on the old record: it is another ref, born again.
+scene handd; G merge --no-edit br
+born_before=$(. "$ROOT/bin/reeve-lib.sh"; branch_birth "$repo" br)
+G branch -d br
+ck_eq  "18 setup: br dropped by hand"                  "$(git -C "$repo" branch --list br)" ""
+case $(cat "$REEVE_HOME/state/handd.meta") in
+  *branchDropped=*) bad "18 setup: the record is not marked" ;;
+  *) ok "18 setup: the record is not marked" ;;
+esac
+G checkout -b br; printf 'y =  2\n' > "$repo/y.py"; G add y.py; G commit -m y
+G checkout main; printf 'y = 2\n' > "$repo/y.py"; G add y.py; G commit -m y
+ck_eq  "18 setup: the reuse is born again" \
+       "$( [ "$(. "$ROOT/bin/reeve-lib.sh"; branch_birth "$repo" br)" != "$born_before" ] \
+           && echo yes)" yes
+prove "$repo" br
+ck_eq  "18 a name reused after a plain -d does not prove" "$RC" 1
+ck_has "18 says no record names that ref"              "$OUT" "no errand record names br"
+OUT=$("$ROOT/bin/reeve-teardown" --delete-proven "$repo" br 2>&1); RC=$?
+ck_eq  "18 nor does it delete"                         "$RC" 1
+ck_eq  "18 the liege's branch is untouched"            "$(git -C "$repo" branch --list br)" "  br"
+
+# 19 the same with -D by hand: a cherry-picked household branch, deleted by the
+# liege, the name reused by a branch of their own that also lands by pick.
+scene handforce; G cherry-pick br
+G branch -D br
+G checkout -b br; echo l > "$repo/l"; G add l; G commit -m liege; G checkout main
+G cherry-pick br
+prove "$repo" br
+ck_eq  "19 a name reused after a -D by hand does not prove" "$RC" 1
+ck_has "19 says no record names that ref"              "$OUT" "no errand record names br"
+
+# 20 the reflog gone: expired, then its file removed. No birth, no proof, even
+# for the very ref the record names; and the original ref, reflog intact, still
+# proves (case 1 too, every scene does).
+scene noreflog; G cherry-pick br
+prove "$repo" br
+ck_eq  "20 setup: the original ref proves"             "$RC" 0
+G reflog expire --expire=now --expire-unreachable=now refs/heads/br
+prove "$repo" br
+ck_eq  "20 an expired reflog does not prove"           "$RC" 1
+ck_has "20 says it has no birth"                       "$OUT" "no reflog"
+rm -f "$repo/.git/logs/refs/heads/br"
+prove "$repo" br
+ck_eq  "20 a removed reflog does not prove"            "$RC" 1
+ck_eq  "20 the branch is untouched"                    "$(git -C "$repo" branch --list br)" "  br"
 
 # 12 usage errors are not verdicts.
 OUT=$("$ROOT/bin/reeve-teardown" --prove-landed only-one 2>&1); RC=$?
