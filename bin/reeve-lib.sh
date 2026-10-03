@@ -1150,8 +1150,9 @@ stale_look() {
 # `working` hand silent past `hand-stale` whose attention reads `unknown`. That
 # is every hand on a backend or harness that cannot tell idle from busy, tmux
 # without herdr among them, where `settled` never comes and the check above can
-# never fire. Prints the silence in seconds when that is the case, so the caller
-# can say the check is blind here rather than let it read as quiet.
+# never fire, nor `working`, so the wedged check below cannot either. Prints the
+# silence in seconds when that is the case, so the caller can say both checks
+# are blind here rather than let it read as quiet.
 stale_unseen() {
   local quiet age
   [ "$2" = working ] && [ "$3" = unknown ] || return 1
@@ -1204,13 +1205,20 @@ stale_unseen() {
 #
 #   blank lines and trailing blanks go, everywhere: a tip or a hint line comes
 #     and goes and moves everything under it
-#   the composer and everything under it go: from the first rule line, a run of
-#     `─` or the box's `╭`, among the bottom fifteen lines, to the end
-#   in the bottom twelve lines left, a running turn's chrome: a spinner line (a
-#     glyph, then a word ending in an ellipsis), the tip hung under it, and any
-#     line carrying the interrupt hint go whole, then every number with the unit
-#     letters stuck to it, so `1m 3s` and `2h 0m 2s` read alike, every spinner
-#     or bullet glyph, and every space, since what they leave is spacing too
+#   the composer and everything under it go: from its top rule, a run of `─`
+#     or the box's `╭` with the prompt's `>` on the line under it, the last such
+#     pair on the screen, to the end. However tall the panel under the composer
+#     grows, the pair is still found. With no such pair, from the first rule
+#     line among the bottom fifteen
+#   from twelve lines above the last spinner or interrupt hint line down to the
+#     end, or in the bottom twelve lines when there is neither, a running turn's
+#     chrome: a spinner line (a glyph, then a word ending in an ellipsis), the
+#     tip hung under it, and any line carrying the interrupt hint go whole, then
+#     every number with the unit letters stuck to it, so `1m 3s` and `2h 0m 2s`
+#     read alike, every spinner or bullet glyph, and every space, since what
+#     they leave is spacing too. Anchored at the spinner and not at the bottom,
+#     because claude draws its todo list under the spinner, and a long one would
+#     push the running tool's own timers up out of a window counted from below
 #
 # Checked against a real claude pane mid tool call: two captures forty seconds
 # apart differed in the tool's elapsed time, its output's elapsed time and the
@@ -1218,9 +1226,11 @@ stale_unseen() {
 # into a call claude adds a background hint under the command once, which is
 # one restart of the clock and not a moving one.
 #
-# Above those twelve lines nothing is touched, so a digit that changes in the
+# Above that window nothing is touched, so a digit that changes in the
 # transcript is a change. A transcript that grows scrolls the whole capture, so
-# a hand getting on with it never prints the same twice.
+# a hand getting on with it never prints the same twice. Inside it a change that
+# is only digits is not, so a running tool whose only news is its line count
+# reads as still: what counts is anything new above the running tool's line.
 #
 # Glyphs as alternations and never as bracket expressions: an awk that reads
 # bytes takes `[✢✳]` as a set of single bytes, several of them lead bytes that
@@ -1231,16 +1241,22 @@ pane_print() {
       g = "(·|✢|✳|✶|✻|✽|\\*|∗|⏺|●|•|◦|⠋|⠙|⠹|⠸|⠼|⠴|⠦|⠧|⠇|⠏)"
       spin = "^[ \t]*" g "[ \t]+[^ \t]+(…|\\.\\.\\.)"
       rule = "^[ \t]*(╭|─|━|═)(─|━|═)(─|━|═)"
+      prompt = "^[ \t]*(│[ \t]*)?(>|❯)"
       tip = "^[ \t]*⎿[ \t]+Tip:"
     }
     { sub(/\r$/, ""); sub(/[ \t]+$/, ""); if ($0 != "") L[++n] = $0 }
     END {
       cut = n + 1
-      for (i = n; i > 0 && i > n - 15; i--) if (L[i] ~ rule) cut = i
+      for (i = n; i > 1; i--)
+        if (L[i - 1] ~ rule && L[i] ~ prompt) { cut = i - 1; break }
+      if (cut > n) for (i = n; i > 0 && i > n - 15; i--) if (L[i] ~ rule) cut = i
       n = cut - 1
+      top = n
+      for (i = n; i > 0; i--) if (L[i] ~ spin || L[i] ~ /esc to interrupt/) { top = i; break }
+      top -= 12
       for (i = 1; i <= n; i++) {
         s = L[i]
-        if (i > n - 12) {
+        if (i > top) {
           if (s ~ spin || s ~ /esc to interrupt/ || s ~ tip) continue
           gsub(/[0-9]+[A-Za-z]*/, "", s); gsub(g, "", s); gsub(/[ \t]+/, "", s)
         }

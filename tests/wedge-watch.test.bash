@@ -15,13 +15,15 @@
 #   5. a screen that moves re-arms it
 #   6. a steer through bin/reeve-steer re-arms it, and a late write cannot undo that
 #   7. blocked, done, failed and an open decision never wedge; nor does a
-#      session that is settled, waiting or unknown
+#      session that is settled, waiting or unknown, and unknown is said on stderr
 #   8. a screen that cannot be read: no wake, said once per watch, latch kept
 #   9. no listing form writes the latch, and the listing agrees with the wake
 #  10. the threshold is config, and a bad value fails closed and is said
 #  11. it reports and never acts
 #  12. the widest age stays inside the PROCESS column
 #  13. the normaliser, one rule at a time, so a mutation of any one fails here
+#  14. a long todo list under the spinner, or a tall agent panel under the
+#      composer, cannot push the running tool's timers out of what is stripped
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 
 PASS=0; FAIL=0
@@ -93,6 +95,9 @@ latched() { [ -f "$LATCH" ] && echo kept || echo gone; }
 # A claude pane mid turn. <lines> transcript lines above the running tool, then
 # the turn's chrome: the tool's bullet, which blinks, its own timer, the spinner
 # with its glyph, verb, timer and token count, the composer, and a statusline.
+# TODOS, when set, is how many todo items claude draws under the spinner, and
+# AGENTS how many background agents it lists under the composer, each with its
+# own ticking counters: both push the running tool up the screen.
 # pane <lines> <elapsed> [glyph] [verb] [bullet] [footer]
 pane() {
   local n
@@ -101,11 +106,18 @@ pane() {
     for n in $(seq 1 "$1"); do printf '  line %s of the transcript\n' "$n"; done
     printf '\n%s Bash(bash tests/run-all.bash)\n' "${5:-⏺}"
     printf '  ⎿  Running… (%s)\n\n' "$2"
-    printf '%s %s… (%s · ↓ 3.1k tokens · esc to interrupt)\n\n' "${3:-✻}" "${4:-Brewing}" "$2"
-    printf '────────────────────────────────────────────────────────────\n'
+    printf '%s %s… (%s · ↓ 3.1k tokens · esc to interrupt)\n' "${3:-✻}" "${4:-Brewing}" "$2"
+    for n in $(seq 1 "${TODOS:-0}"); do
+      [ "$n" = 1 ] && printf '  ⎿  ' || printf '     '
+      printf '☐ Fix failure %s of the suite\n' "$n"
+    done
+    printf '\n────────────────────────────────────────────────────────────\n'
     printf '> \n'
     printf '────────────────────────────────────────────────────────────\n'
     printf '  %s\n' "${6:-? for shortcuts}"
+    for n in $(seq 1 "${AGENTS:-0}"); do
+      printf '  ⏺ scout-%s · %s tool uses · %s.2k tokens · %s\n' "$n" "${#2}" "${#2}" "$2"
+    done
   } > "$STUB_PANE"
 }
 
@@ -264,7 +276,9 @@ for a in settled waiting unknown; do
   ck_not "7 a session reading $a is never wedged"          "$OUT" "wedged:"
   ck_not "7 nor in the listing when $a"                    "$(row $(( T + 2 * W )))" "wedged"
   case $a in
-    unknown) ck_eq "7 unknown re-arms nothing"             "$(latched)" kept ;;
+    unknown) ck_eq "7 unknown re-arms nothing"             "$(latched)" kept
+             ck_has "7 and the watch says no wedged wake can come" \
+               "$OUT" "cannot be judged stale or wedged and no idle or wedged wake will come for it" ;;
     *)       ck_eq "7 $a ends the turn, and the clock"     "$(latched)" gone ;;
   esac
   printf 'working\n' > "$STUB_ATTN"
@@ -522,6 +536,82 @@ $composer" \
   "$body
   ⎿  3 failed
 $composer"
+
+# --- 14. what claude draws around the running tool ---------------------------
+# Ten todos under the spinner, or fourteen background agents under the
+# composer, each push the running tool's own timer far up the screen. Wedged,
+# it must still wake; thinking, it still must not.
+for extra in TODOS=10 AGENTS=14; do
+  export "${extra?}"
+  say 'working: running the suite'
+  backdate 7300
+  T=$(( NOW + 1400000 ))
+  pane 20 '1m 3s' '✻' Brewing '⏺'
+  sentry "$T"
+  pane 20 '1h 0m 12s' '✢' Brewing ' '
+  sentry $(( T + 3600 ))
+  pane 20 '2h 0m 2s' '✶' Brewing '⏺'
+  sentry $(( T + W - 1 ))
+  ck_eq  "14 $extra: inside the window, no wake"          "$RC" 4
+  sentry $(( T + W ))
+  ck_eq  "14 $extra: a frozen transcript wakes"            "$RC" 0
+  ck_has "14 $extra: as wedged"                            "$OUT" "wedged: hung has been silent"
+  say 'working: running the suite'
+  backdate 86400
+  T=$(( NOW + 1500000 ))
+  fired=no
+  for k in $(seq 0 12); do
+    pane $(( 20 + k )) "$k""h 0m" '✻' Brewing '⏺'
+    sentry $(( T + k * 1800 ))
+    [ "$RC" = 0 ] && fired=yes
+  done
+  ck_eq  "14 $extra: a growing transcript never wakes"     "$fired" no
+  ck_eq  "14 $extra: nor reads wedged in the listing"      "$(row $(( T + 12 * 1800 )))" "alive/working"
+  unset "${extra%%=*}"
+done
+# The same two shapes against the normaliser alone, with a todo ticked off as
+# the change that must still count.
+same() { ck_eq "14 $1" "$(pp "$2")" "$(pp "$3")"; }
+differ() { ck_ne "14 $1" "$(pp "$2")" "$(pp "$3")"; }
+todos() { local n; printf '  ⎿  %s Fix failure 1\n' "$1"; for n in $(seq 2 10); do printf '     ☐ Fix failure %s\n' "$n"; done; }
+same "ten todos do not hide the tool's timers" \
+  "$body
+⏺ Bash(bash tests/run-all.bash)
+  ⎿  Running… (1m 3s · 9 lines)
+✻ Brewing… (1m 3s · ↓ 3.1k tokens)
+$(todos ☐)
+$composer" \
+  "$body
+  Bash(bash tests/run-all.bash)
+  ⎿  Running… (2h 0m 59s · 9 lines)
+✶ Brewing… (2h 0m 59s · ↓ 3.1k tokens)
+$(todos ☐)
+$composer"
+differ "a todo ticked off is a change" \
+  "$body
+⏺ Bash(bash tests/run-all.bash)
+✻ Brewing… (1m 3s)
+$(todos ☐)
+$composer" \
+  "$body
+⏺ Bash(bash tests/run-all.bash)
+✻ Brewing… (1m 3s)
+$(todos ☒)
+$composer"
+agents() { local n; for n in $(seq 1 16); do printf '  ⏺ scout-%s · %s tool uses · %s\n' "$n" "$1" "$2"; done; }
+same "a tall agent panel under the composer is chrome" \
+  "$body
+⏺ Bash(bash tests/run-all.bash)
+  ⎿  Running… (1m 3s)
+✻ Brewing… (1m 3s)
+$composer
+$(agents 3 '1m 3s')" \
+  "$body
+⏺ Bash(bash tests/run-all.bash)
+  ⎿  Running… (2h 0m 59s)
+✻ Brewing… (2h 0m 59s)
+$composer
+$(agents 41 '2h 0m 59s')"
 
 echo
 echo "passed=$PASS failed=$FAIL"

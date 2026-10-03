@@ -757,13 +757,14 @@ check_one() {
   fi
 
   # The one case the probe is blind to, said rather than left to read as quiet:
-  # a backend or harness that cannot tell idle from busy never reads `settled`,
-  # so the wake above can never come for this hand. Stderr, once per watch.
+  # a backend or harness that cannot tell idle from busy never reads `settled`
+  # nor `working`, so neither the idle nor the wedged wake above can ever come
+  # for this hand. Stderr, once per watch.
   if [ "$live" = alive ] && ! lines_has "$i" "$unseen" \
      && stale=$(stale_unseen "$i" "$st" "$attn"); then
     unseen="$unseen$i
 "
-    warn "$i has been silent for $(silence_say "$stale") but its session reads unknown on backend $bk, so it cannot be judged stale and no idle wake will come for it"
+    warn "$i has been silent for $(silence_say "$stale") but its session reads unknown on backend $bk, so it cannot be judged stale or wedged and no idle or wedged wake will come for it"
   fi
   return 1
 }
