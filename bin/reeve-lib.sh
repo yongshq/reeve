@@ -999,7 +999,9 @@ stale_file() { printf '%s/state/.stale-%s\n' "$REEVE_HOME_D" "$1"; }
 # back just after, carrying the old silence's `since` and `woke=yes`, and that
 # late write would swallow the wake for the steered turn's death. Every latch a
 # pass starts after the steer has a `since` at or past this time, so stale_latch
-# takes one from before it as no latch at all.
+# takes one from before it as no latch at all. A steer cannot be in the future,
+# so one dated past attn_now, a clock stepped back since, is ignored rather than
+# holding every fresh latch back until the clock catches up.
 steered_file() { printf '%s/state/.steered-%s\n' "$REEVE_HOME_D" "$1"; }
 
 steered_get() { # steered_get <id>   prints the time, or nothing and rc 1
@@ -1070,7 +1072,8 @@ stale_latch() {
   read -r since sl sm woke < "$sf" || return 1
   case $since in ''|*[!0-9]*) return 1 ;; esac
   [ "$sl $sm" = "$2" ] || return 1
-  if steered=$(steered_get "$1") && [ "$since" -lt "$steered" ]; then return 1; fi
+  if steered=$(steered_get "$1") && [ "$since" -lt "$steered" ] \
+    && [ "$steered" -le "$(attn_now)" ]; then return 1; fi
   printf '%s %s\n' "$since" "${woke:-no}"
 }
 

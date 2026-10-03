@@ -258,8 +258,8 @@ Escalate when, and only when:
 - The sentry said an errand is `waiting`. Nobody can answer that but the liege, in the session
   itself, so say where it is running and what it last reported.
 - The sentry said an errand is `idle`. Look at the session first. If its turn died, steer it
-  back to its brief with `bin/reeve-steer`, then tell the liege what the silence cost. Never reap it:
-  the session is still holding the work, and steering is what recovers it.
+  back to its brief with `bin/reeve-steer`, then tell the liege what the silence cost. Never reap
+  it: the session is still holding the work, and steering is what recovers it.
 - Something breached a hard rule, or a teardown refused.
 
 Do not escalate progress. "The artificer is at 60 percent" is noise. Silence means work is

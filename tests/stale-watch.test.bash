@@ -558,6 +558,22 @@ ck_eq  "20 a dwell started in the steer's second holds"    "$RC" 4
 dsentry $(( T + 590 ))
 ck_eq  "20 and wakes at its end"                           "$RC" 0
 
+# --- 21. a steer dated in the future holds nothing back ----------------------
+# The clock was ahead when the steer was recorded and has stepped back since.
+# Taken at its word, every latch a pass starts reads as older than the steer, is
+# rewritten as fresh, and the dwell never accrues until the clock catches up.
+say 'working: rewriting the parser'
+backdate 86400
+T=$(( NOW + 20000 ))
+printf '%s\n' $(( T + 600 )) > "$REEVE_HOME/state/.steered-hung"
+dsentry "$T"
+ck_eq  "21 the dwell starts"                               "$RC" 4
+dsentry $(( T + 89 ))
+ck_eq  "21 and does not wake inside it"                    "$RC" 4
+dsentry $(( T + 90 ))
+ck_eq  "21 the future steer does not hold the wake back"   "$RC" 0
+ck_has "21 as an idle line"                                "$OUT" "idle: hung has been silent"
+
 echo
 echo "passed=$PASS failed=$FAIL"
 [ "$FAIL" -eq 0 ]
