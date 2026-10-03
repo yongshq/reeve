@@ -118,5 +118,17 @@ done
 rows=$(printf '%s\n' "$out" | tail -n +2 | grep -c . | tr -d ' ')
 ck "every seeded errand is in the table" "9" "$rows"
 
+printf '\n--- copy falls through an empty cwd ---\n'
+
+# After the table, so its row count stays the nine seeded above.
+seed emptycwd office=artificer repo=/nowhere cwd= worktree=/x
+ck "an empty cwd falls through to worktree" "/x" "$(field copy "$(run emptycwd)")"
+seed nocopy office=artificer repo=/nowhere
+ck "no cwd and no worktree prints a mark" "?" "$(field copy "$(run nocopy)")"
+seed bothempty office=artificer repo=/nowhere cwd= worktree=
+ck "an empty cwd and worktree print a mark" "?" "$(field copy "$(run bothempty)")"
+seed hascwd office=artificer repo=/nowhere cwd=/c worktree=/x
+ck "a set cwd still wins over worktree" "/c" "$(field copy "$(run hascwd)")"
+
 printf '\npassed=%s failed=%s\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

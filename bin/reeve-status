@@ -210,7 +210,8 @@ one() {
     [ -n "$tu" ] && tk="$tk $tu"
     printf 'ticket    %s\n' "$tk"
   fi
-  local c; c=$(meta_get "$i" cwd "$(meta_get "$i" worktree '?')"); printf 'copy      %s\n' "${c:-?}"
+  # cwd, then worktree, then a mark, each step taken on empty as well as absent.
+  local c; c=$(meta_show "$i" cwd "$(meta_get "$i" worktree '')"); printf 'copy      %s\n' "$c"
   local br; br=$(meta_get "$i" branch '')
   printf 'branch    %s\n' "${br:-none, detached at $(meta_show "$i" base)}"
   printf 'reported  %s\n' "$st"
