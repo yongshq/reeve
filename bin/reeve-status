@@ -138,9 +138,9 @@ live_state() { # live_state <id> [long]
     # says so, so this cell and the `idle:` wake turn on together, and the
     # silence without the word before that, so a hand dead for a day shows on
     # the first look at a home no watch has seen. It writes nothing, in any
-    # form. The idle cell takes the place of `settled`, which idle already
-    # implies, because the column is sixteen wide; the single errand form keeps
-    # both and says why.
+    # form. Either word takes the place of `settled`, which both imply, because
+    # the column is sixteen wide and `settled` beside an age ran past it into
+    # OPEN; the single errand form keeps both and says why.
     if stale=$(stale_look "$i" "$(status_field "$i" state)" "${attn:-unknown}" "$tgt" "$bk" "$BIN"); then
       word=${stale##* }; stale=${stale% *}
       if [ "${2:-}" = long ]; then
@@ -148,10 +148,8 @@ live_state() { # live_state <id> [long]
         [ "${stale#* }" = error ] && how="$how after an API error"
         [ "$word" = idle ] && how="idle: $how"
         printf '%s/%s, %s\n' "$st" "$attn" "$how"
-      elif [ "$word" = idle ]; then
-        printf '%s/idle %s\n' "$st" "$(silence_short "${stale%% *}")"
       else
-        printf '%s/%s %s\n' "$st" "$attn" "$(silence_short "${stale%% *}")"
+        printf '%s/%s %s\n' "$st" "$word" "$(silence_short "${stale%% *}")"
       fi
       return
     fi

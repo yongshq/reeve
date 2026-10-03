@@ -1100,7 +1100,10 @@ stale_unseen() {
 }
 
 # How long, for a human. The long form for a reason line, the short one for a
-# table cell that has sixteen characters to hold the whole process state.
+# table cell that has sixteen characters to hold the whole process state:
+# `alive/silent ` leaves it three, so the short form never prints a fourth.
+# Weeks past ninety nine days, years past ninety nine weeks, and a status file
+# cannot be older than the epoch, so three is the most it can ever need.
 silence_say() {
   local s=${1:-0}
   if   [ "$s" -lt 60 ];     then printf '%ss\n' "$s"
@@ -1112,7 +1115,9 @@ silence_short() {
   local s=${1:-0}
   if   [ "$s" -lt 3600 ];   then printf '%sm\n' $(( s / 60 ))
   elif [ "$s" -lt 172800 ]; then printf '%sh\n' $(( s / 3600 ))
-  else printf '%sd\n' $(( s / 86400 )); fi
+  elif [ "$s" -lt 8640000 ]; then printf '%sd\n' $(( s / 86400 ))
+  elif [ "$s" -lt 60480000 ]; then printf '%sw\n' $(( s / 604800 ))
+  else printf '%sy\n' $(( s / 31536000 )); fi
 }
 
 # --- offices ---------------------------------------------------------------

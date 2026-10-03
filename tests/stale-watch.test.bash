@@ -25,6 +25,7 @@
 #  15. no listing form writes the latch
 #  16. the sentry's latch writes are atomic
 #  17. a read only home: the listing still shows the silence, the sentry says why
+#  18. the widest age of each kind stays inside the PROCESS column
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 
 PASS=0; FAIL=0
@@ -85,9 +86,11 @@ say() {
   rm -f "$REEVE_HOME/state/.stale-hung"
 }
 sentry() { OUT=$("$ROOT/bin/reeve-sentry" --once --no-reap 2>&1); RC=$?; }
-# The PROCESS cell by position, since an idle cell holds a space of its own, and
-# a silent one can run a character past the column into OPEN.
-row()    { "$ROOT/bin/reeve-status" --all --no-wake 2>/dev/null | grep '^hung ' | cut -c55- | sed -E 's/ +(-|[0-9]+ waiting)$//'; }
+# The PROCESS cell by position, since an idle cell holds a space of its own. The
+# column exactly, so a cell that ran past sixteen into OPEN would fail here.
+row()    { "$ROOT/bin/reeve-status" --all --no-wake 2>/dev/null | grep '^hung ' | cut -c55-70 | sed 's/ *$//'; }
+# What follows the column: one space, then OPEN, wherever the cell ended.
+open()   { "$ROOT/bin/reeve-status" --all --no-wake 2>/dev/null | grep '^hung ' | cut -c71-; }
 single() { "$ROOT/bin/reeve-status" hung 2>/dev/null | sed -n 's/^process  *//p'; }
 
 printf 'settled\n' > "$STUB_ATTN"
@@ -351,14 +354,14 @@ LATCH="$REEVE_HOME/state/.stale-hung"
 latched() { [ -f "$LATCH" ] && echo kept || echo gone; }
 say 'working: rewriting the parser'
 backdate 86400
-ck_eq  "14 a fresh home's first listing shows the silence" "$(drow "$NOW")" "alive/settled 24h"
+ck_eq  "14 a fresh home's first listing shows the silence" "$(drow "$NOW")" "alive/silent 24h"
 ck_eq  "14 and the single form says how long"              "$(dsingle "$NOW")" "alive/settled, silent 24h 0m"
 ck_not "14 without calling it idle"                        "$(dsingle "$NOW")" "idle"
 ck_eq  "14 and starts no clock"                            "$(latched)" gone
 dsentry "$NOW"
 ck_eq  "14 the sentry's first look only starts the clock"  "$RC" 4
 ck_eq  "14 in its latch"                                   "$(latched)" kept
-ck_eq  "14 at 89s the listing still shows only silence"    "$(drow $(( NOW + 89 )))" "alive/settled 24h"
+ck_eq  "14 at 89s the listing still shows only silence"    "$(drow $(( NOW + 89 )))" "alive/silent 24h"
 dsentry $(( NOW + 89 ))
 ck_eq  "14 as the sentry has not woken"                    "$RC" 4
 ck_eq  "14 at 90s the listing calls it idle"               "$(drow $(( NOW + 90 )))" "alive/idle 24h"
@@ -373,7 +376,7 @@ ck_eq  "14 leaves the sentry's latch alone"                "$(latched)" kept
 dsentry $(( NOW + 300 ))
 ck_eq  "14 the sentry's working reading stops the clock"   "$(latched)" gone
 printf 'settled\n' > "$STUB_ATTN"
-ck_eq  "14 so the listing is back to silence alone"        "$(drow $(( NOW + 400 )))" "alive/settled 24h"
+ck_eq  "14 so the listing is back to silence alone"        "$(drow $(( NOW + 400 )))" "alive/silent 24h"
 say 'working: rewriting the parser'
 backdate 7100
 ck_eq  "14 inside the threshold no silence is shown"       "$(drow "$NOW")" "alive/settled"
@@ -426,7 +429,7 @@ ck_eq  "16 the last write is what is there"                "$(cat "$LATCH")" "40
 say 'working: rewriting the parser'
 backdate 86400
 chmod a-w "$REEVE_HOME/state"
-ck_eq  "17 the listing still shows the silence"            "$(drow "$NOW")" "alive/settled 24h"
+ck_eq  "17 the listing still shows the silence"            "$(drow "$NOW")" "alive/silent 24h"
 lerr=$(REEVE_ATTN_DWELL=90 "$ROOT/bin/reeve-status" --all --no-wake 2>&1 >/dev/null)
 ck_eq  "17 and has nothing to complain about"              "$lerr" ""
 dsentry "$NOW"
@@ -458,6 +461,31 @@ chmod u+w "$REEVE_HOME/state"
 ck_eq  "17 with no dwell it wakes"                         "$RC" 0
 ck_not "17 without claiming no wake will come"             "$OUT" "no idle wake will come"
 ck_has "17 and says it will be said again"                 "$OUT" "will be said again"
+
+# --- 18. the cell stays in its column ---------------------------------------
+# `alive/settled 24h` is seventeen characters, and pushed OPEN a column right for
+# every silence of ten hours to two days and every API error silence from its
+# first visible minute. The widest age the short form prints in each unit, quiet
+# and after an error, silent and idle, the oldest a status file can be included.
+for age in 172799 8639999 60479999 $(( NOW - 86400 )); do
+  say 'working: rewriting the parser'
+  backdate "$age"
+  w=$(bash -c '. "$1/bin/reeve-lib.sh"; silence_short "$2"' _ "$ROOT" "$age")
+  ck_eq  "18 silent $w fits the column"                    "$(row)" "alive/silent $w"
+  ck_eq  "18 and OPEN stays where it was"                  "$(open)" " -"
+  sentry
+  ck_eq  "18 idle $w fits the column"                      "$(row)" "alive/idle $w"
+  ck_eq  "18 and OPEN stays where it was"                  "$(open)" " -"
+done
+printf '  ⎿  API Error: overloaded\n ❯\n' > "$STUB_PANE"
+say 'working: rewriting the parser'
+backdate 3599
+ck_eq  "18 an API error silence of 59m fits the column"    "$(row)" "alive/silent 59m"
+ck_eq  "18 and OPEN stays where it was"                    "$(open)" " -"
+sentry
+ck_eq  "18 idle after it too"                              "$(row)" "alive/idle 59m"
+ck_eq  "18 and OPEN stays where it was"                    "$(open)" " -"
+: > "$STUB_PANE"
 
 echo
 echo "passed=$PASS failed=$FAIL"
