@@ -106,7 +106,7 @@ pane() {
     for n in $(seq 1 "$1"); do printf '  line %s of the transcript\n' "$n"; done
     printf '\n%s Bash(bash tests/run-all.bash)\n' "${5:-⏺}"
     printf '  ⎿  Running… (%s)\n\n' "$2"
-    printf '%s %s… (%s · ↓ 3.1k tokens · esc to interrupt)\n' "${3:-✻}" "${4:-Brewing}" "$2"
+    printf '%s %s… (%s · ↓ 3.1k tokens)\n' "${3:-✻}" "${4:-Brewing}" "$2"
     for n in $(seq 1 "${TODOS:-0}"); do
       [ "$n" = 1 ] && printf '  ⎿  ' || printf '     '
       printf '☐ Fix failure %s of the suite\n' "$n"
@@ -569,6 +569,52 @@ for extra in TODOS=10 AGENTS=14; do
   ck_eq  "14 $extra: nor reads wedged in the listing"      "$(row $(( T + 12 * 1800 )))" "alive/working"
   unset "${extra%%=*}"
 done
+# claude takes any string as a spinner verb, several words included, and draws
+# no interrupt hint, so the verb alone has to carry the anchor over ten todos.
+export TODOS=10
+say 'working: running the suite'
+backdate 7300
+T=$(( NOW + 1600000 ))
+pane 20 '1m 3s' '✻' 'Nebulizing gently' '⏺'
+sentry "$T"
+pane 20 '2h 0m 2s' '✶' 'Nebulizing gently' ' '
+sentry $(( T + W - 1 ))
+ck_eq  "14 a two-word verb: inside the window, no wake"   "$RC" 4
+sentry $(( T + W ))
+ck_eq  "14 a two-word verb: a frozen transcript wakes"     "$RC" 0
+ck_has "14 a two-word verb: as wedged"                     "$OUT" "wedged: hung has been silent"
+unset TODOS
+
+# A harness whose own composer is no rule-and-prompt pair, codex's `›`, with a
+# claude pane quoted high in its transcript: the quote's composer is indented
+# under its tool and is not the cut, so what the hand adds under it still counts.
+# codex <lines> <elapsed>
+codex() {
+  local n
+  {
+    printf '• Ran cat /tmp/pane.txt\n'
+    printf '  └ ✻ Brewing… (3s · ↓ 1.2k tokens)\n\n'
+    printf '    ────────────────────────────────────────────────────────\n'
+    printf '    ❯ \n'
+    printf '    ────────────────────────────────────────────────────────\n'
+    printf '      ? for shortcuts\n\n'
+    for n in $(seq 1 "$1"); do printf '• step %s of the fix\n' "$n"; done
+    printf '\n• Working (%s • esc to interrupt)\n\n' "$2"
+    printf '› Ask Codex to do anything\n\n'
+    printf '  ⏎ send   ⌃J newline   ⌃T transcript   ⌃C quit\n'
+  } > "$STUB_PANE"
+}
+say 'working: running the suite'
+backdate 86400
+T=$(( NOW + 1700000 ))
+fired=no
+for k in $(seq 0 12); do
+  codex $(( 16 + k )) "$k""h 0m"
+  sentry $(( T + k * 1800 ))
+  [ "$RC" = 0 ] && fired=yes
+done
+ck_eq  "14 a quoted composer: a growing transcript never wakes" "$fired" no
+ck_eq  "14 a quoted composer: nor reads wedged in the listing"  "$(row $(( T + 12 * 1800 )))" "alive/working"
 # The same two shapes against the normaliser alone, with a todo ticked off as
 # the change that must still count.
 same() { ck_eq "14 $1" "$(pp "$2")" "$(pp "$3")"; }
@@ -587,6 +633,43 @@ $composer" \
 ✶ Brewing… (2h 0m 59s · ↓ 3.1k tokens)
 $(todos ☐)
 $composer"
+same "a two-word verb over ten todos still anchors" \
+  "$body
+⏺ Bash(bash tests/run-all.bash)
+  ⎿  Running… (1m 3s · 9 lines)
+✻ Nebulizing gently… (1m 3s · ↓ 3.1k tokens)
+$(todos ☐)
+$composer" \
+  "$body
+  Bash(bash tests/run-all.bash)
+  ⎿  Running… (2h 0m 59s · 9 lines)
+✶ Nebulizing gently… (2h 0m 59s · ↓ 3.1k tokens)
+$(todos ☐)
+$composer"
+quoted='• Ran cat /tmp/pane.txt
+  └ ✻ Brewing… (3s)
+    ────────────────────────────────────────
+    ❯
+    ────────────────────────────────────────
+      ? for shortcuts'
+differ "a line under a quoted composer is a change" \
+  "$quoted
+$(seq 1 16 | sed 's/^/• step /')
+› Ask Codex to do anything" \
+  "$quoted
+$(seq 1 17 | sed 's/^/• step /')
+› Ask Codex to do anything"
+differ "so is one under a composer with no bottom border" \
+  "$body
+────────────────────────────────────────
+> quoted
+$(seq 1 16 | sed 's/^/• step /')
+› Ask Codex to do anything" \
+  "$body
+────────────────────────────────────────
+> quoted
+$(seq 1 17 | sed 's/^/• step /')
+› Ask Codex to do anything"
 differ "a todo ticked off is a change" \
   "$body
 ⏺ Bash(bash tests/run-all.bash)

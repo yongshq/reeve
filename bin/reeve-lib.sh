@@ -1208,17 +1208,24 @@ stale_unseen() {
 #   the composer and everything under it go: from its top rule, a run of `─`
 #     or the box's `╭` with the prompt's `>` on the line under it, the last such
 #     pair on the screen, to the end. However tall the panel under the composer
-#     grows, the pair is still found. With no such pair, from the first rule
-#     line among the bottom fifteen
+#     grows, the pair is still found. Only a whole composer counts: both rules
+#     at the left edge, and the next rule under the prompt is its bottom border,
+#     `─` or the box's `╰`, at the left edge too. A composer quoted in the
+#     transcript is indented under its tool, so it is never taken for the real
+#     one, and what follows it is never thrown away. With no such pair, from
+#     the first rule line among the bottom fifteen
 #   from twelve lines above the last spinner or interrupt hint line down to the
 #     end, or in the bottom twelve lines when there is neither, a running turn's
-#     chrome: a spinner line (a glyph, then a word ending in an ellipsis), the
-#     tip hung under it, and any line carrying the interrupt hint go whole, then
-#     every number with the unit letters stuck to it, so `1m 3s` and `2h 0m 2s`
-#     read alike, every spinner or bullet glyph, and every space, since what
-#     they leave is spacing too. Anchored at the spinner and not at the bottom,
-#     because claude draws its todo list under the spinner, and a long one would
-#     push the running tool's own timers up out of a window counted from below
+#     chrome: a spinner line (a glyph, then a verb up to its ellipsis, then
+#     nothing or its parenthesis), the tip hung under it, and any line carrying
+#     the interrupt hint go whole, then every number with the unit letters
+#     stuck to it, so `1m 3s` and `2h 0m 2s` read alike, every spinner or bullet
+#     glyph, and every space, since what they leave is spacing too. Anchored at
+#     the spinner and not at the bottom, because claude draws its todo list
+#     under the spinner, and a long one would push the running tool's own
+#     timers up out of a window counted from below. The verb may be several
+#     words, since claude takes any string in its `spinnerVerbs` setting, and
+#     current claude draws no interrupt hint to anchor on instead
 #
 # Checked against a real claude pane mid tool call: two captures forty seconds
 # apart differed in the tool's elapsed time, its output's elapsed time and the
@@ -1239,16 +1246,21 @@ pane_print() {
   printf '%s\n' "$1" | awk '
     BEGIN {
       g = "(·|✢|✳|✶|✻|✽|\\*|∗|⏺|●|•|◦|⠋|⠙|⠹|⠸|⠼|⠴|⠦|⠧|⠇|⠏)"
-      spin = "^[ \t]*" g "[ \t]+[^ \t]+(…|\\.\\.\\.)"
+      spin = "^[ \t]*" g "[ \t]+[^ \t(][^(]*(…|\\.\\.\\.)([ \t]+\\(.*)?$"
       rule = "^[ \t]*(╭|─|━|═)(─|━|═)(─|━|═)"
+      edge = "^(╭|─|━|═)(─|━|═)(─|━|═)"
+      foot = "^(╰|─|━|═)(─|━|═)(─|━|═)"
       prompt = "^[ \t]*(│[ \t]*)?(>|❯)"
       tip = "^[ \t]*⎿[ \t]+Tip:"
     }
     { sub(/\r$/, ""); sub(/[ \t]+$/, ""); if ($0 != "") L[++n] = $0 }
     END {
       cut = n + 1
-      for (i = n; i > 1; i--)
-        if (L[i - 1] ~ rule && L[i] ~ prompt) { cut = i - 1; break }
+      shut = 0
+      for (i = n; i > 1; i--) {
+        if (L[i - 1] ~ edge && L[i] ~ prompt && shut) { cut = i - 1; break }
+        if (L[i] ~ foot) shut = 1; else if (L[i] ~ rule) shut = 0
+      }
       if (cut > n) for (i = n; i > 0 && i > n - 15; i--) if (L[i] ~ rule) cut = i
       n = cut - 1
       top = n

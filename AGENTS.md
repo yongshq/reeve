@@ -216,6 +216,28 @@ Rules you must hold to:
   sentry says so on stderr, once per watch, for a hand silent past `config/hand-stale`. And a
   threshold set to anything but a whole number of seconds turns its half of the check off, which
   the sentry and the listing both say on stderr.
+- **Working and frozen is not progress either.** A hand stuck inside one command, a test that
+  hangs or a network call that never returns, keeps its session reading `working` for as long as
+  it is stuck, so the idle check never sees it, and a timeout on silence alone would cry wolf at
+  every long turn. The sentry calls it `wedged` once its status file has been silent past
+  `config/hand-wedged` (default two hours) with its session working and its screen unchanged for
+  that same window. The screen is compared with its ticking chrome taken out: the spinner and its
+  verb, the tip under it, the composer and everything under it, and around the running tool and
+  its spinner, timers, counts and blinking bullets. So a turn that puts anything new on screen
+  above the running tool's own line resets the clock, while a tool whose only news is its own
+  timer or line count reads as still, and so does a single thinking block that shows nothing new
+  for the whole window: that is the price. Its line opens `wedged:`, and it is only ever reported:
+  never reaped, never prodded. Once per silence, re-armed when the hand writes a line, when its
+  screen moves, when its session reads settled or waiting, or when it is steered with
+  `bin/reeve-steer`. The clock starts the first time a watch sees the screen, so time with no
+  watch running is not counted before then. `bin/reeve-status` shows it as `wedged` in its process
+  column on the same second the sentry wakes, reading the screen again and writing nothing; before
+  that a working hand shows as working. Three limits. A backend or harness that cannot tell idle
+  from busy, tmux without herdr among them, never reads working, so the check cannot fire there:
+  the sentry says so on stderr, once per watch, alongside the idle limit. A screen that cannot be
+  read, or a backend that cannot capture, cannot be judged: no wake, said on stderr once per watch
+  for a hand silent past the window. And a threshold that is not a whole number turns the check
+  off, which the sentry and the listing both say on stderr; 0 turns it off silently.
 - When the sentry wakes you, handle every actionable errand before you reply to the liege. Do not
   report on one and leave two.
 - **You supervise your own errands and nobody else's.** Several reeves share one home, and an
@@ -278,6 +300,10 @@ Escalate when, and only when:
 - The sentry said an errand is `idle`. Look at the session first. If its turn died, steer it
   back to its brief with `bin/reeve-steer`, then tell the liege what the silence cost. Never reap
   it: the session is still holding the work, and steering is what recovers it.
+- The sentry said an errand is `wedged`. Look at the session: the command it is stuck in is on
+  its screen. Then bring it to the liege, saying where it is running, what it appears stuck on, how
+  long, and what it last reported. Never interrupt, kill or reap it yourself: the liege looks at it
+  and decides. If the liege clears it, steer the hand back to its brief with `bin/reeve-steer`.
 - Something breached a hard rule, or a teardown refused.
 
 Do not escalate progress. "The artificer is at 60 percent" is noise. Silence means work is
@@ -487,12 +513,12 @@ fact per line, because you are the one reading it.
 | `bin/reeve-survey --register ...` | record the liege's answer about which manor a repo belongs to |
 | `bin/reeve-brief <id> <holding> --office <o>` | write a brief with the two seams |
 | `bin/reeve-dispatch <id>` | worktree, endpoint, launch. `--dry-run` changes nothing |
-| `bin/reeve-status <id>` / `--all` | the reconciled state, never the last line of the log, and `idle` in the process column for a hand idle and silent past its threshold, on the rule the sentry wakes on. Bare lists yours, `--all` the machine's. A listing also delivers anything a caretaker left you, on stderr so a filter over the table cannot eat it, and a script asking a different question passes `--no-wake` |
+| `bin/reeve-status <id>` / `--all` | the reconciled state, never the last line of the log, and `idle` in the process column for a hand idle and silent past its threshold, or `wedged` for a working hand whose status file and screen have both held still past its threshold, each on the rule the sentry wakes on. Bare lists yours, `--all` the machine's. A listing also delivers anything a caretaker left you, on stderr so a filter over the table cannot eat it, and a script asking a different question passes `--no-wake` |
 | `bin/reeve-status --orphans` | errands whose owning session is provably gone |
 | `bin/reeve-adopt <id>` | take an orphaned errand on, so this session watches it |
 | `bin/reeve-answer <id> <key> <answer>` | close an open question, durably, then tell the hand |
-| `bin/reeve-steer <id> <text>` | tell a live hand what to do next, and re-arm its idle alarm. Refuses a session at a dialog, or one it cannot tell is not |
-| `bin/reeve-sentry` | stand watch, print one reason line, exit. A hand idle and silent past its threshold is one of them, opening `idle:` |
+| `bin/reeve-steer <id> <text>` | tell a live hand what to do next, and re-arm its idle and wedged alarms. Refuses a session at a dialog, or one it cannot tell is not |
+| `bin/reeve-sentry` | stand watch, print one reason line, exit. A hand idle and silent past its threshold is one of them, opening `idle:`, and a working hand whose screen has not moved past its threshold another, opening `wedged:` |
 | `bin/reeve-teardown <id>` | remove a finished errand's copy, refusing on unlanded work |
 | `bin/reeve-memory` | the mechanics behind `/inscribe`, `/strike`, `/recall`, `/glean` |
 | `bin/reeve-handoff new <manor>` | scaffold a handoff, with the factual parts already filled in |
