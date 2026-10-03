@@ -53,4 +53,6 @@ Never the worktree path unless the liege asks: they cannot act on it and it is n
 
 ## After the table
 
-One line on the single most useful next action, and then stop. Do not propose five.
+Muster keeps its table in place of the contract's report shape, but closes the same way: the
+Waiting on you block, everything put to the liege and not yet addressed, each in full enough to
+answer without scrolling, then one Next action line (section 8). Then stop. Do not propose five.

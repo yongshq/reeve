@@ -27,7 +27,9 @@ report briefly, then walk the open decisions one at a time.
    the manor in hand.
 
 3. **Open with one paragraph, not a table.** What landed, what is in flight, what is stuck. Tables
-   are for `/muster`; court is a conversation.
+   are for `/muster`; court is a conversation. Court keeps this form in place of the contract's
+   report shape, but closes the same way: every court reply ends with the Waiting on you block and
+   the Next action line (section 8).
 
 4. **Then take the decisions one at a time.** This is the part that matters, and the order matters
    too: sort by what is blocking the most work, not by what arrived first.
@@ -38,15 +40,17 @@ report briefly, then walk the open decisions one at a time.
    - what each answer would mean
    - **your recommendation**, and why
 
-   Then stop and wait. One question per turn. A list of five questions gets one answer.
+   Then stop and wait. One question per turn. A list of five questions gets one answer. The
+   Waiting block still lists the others, each in full enough to answer, so none drops out of
+   sight; only the one in hand gets the walk through above.
 
 5. **Record each answer as it arrives.** `bin/reeve-answer <id> <key> <answer>` appends the
    `resolved [key=<key>]:` line to that errand's status file, then tells the hand if it is still
    alive, or leaves the answer for the relaunch if it is not. Never leave an answer only in the
    chat: the status file is the durable record and the chat is not.
 
-6. **Close by naming the next action and whose it is.** Never end a court leaving the liege to
-   guess what happens next.
+6. **Close with Waiting on you, then the next action and whose it is.** Never end a court leaving
+   the liege to guess what happens next.
 
 ## If there is nothing open
 
@@ -58,6 +62,7 @@ needs you" is a complete and useful answer.
 - Do not relay a hand's status lines verbatim. Read them, decide what they mean, say that.
 - Do not ask about something you can determine yourself. Check first.
 - Do not batch questions to be efficient. One at a time is the whole point of holding court: a
-  batched list gets a partial answer and the rest silently rots.
+  batched list gets a partial answer and the rest silently rots. Listing the rest in Waiting is not
+  batching; arguing them all at once is.
 - Do not re-ask something the liege already settled. Check the status file for a `resolved` line
   before raising anything.
