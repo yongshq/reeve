@@ -50,7 +50,7 @@ evidence and stops, and you put exactly one proposal to the liege.
    ```sh
    bin/reeve-survey --register <holding> --manor <manor> --path <abs> \
      [--role frontend] [--instructions AGENT.md] [--base main] \
-     [--setup "<install command>"] [--test "<test command>"]
+     [--setup "<install command>"] [--test "<test command>"] [--fresh-clone]
    ```
 
    `--instructions` matters more than it looks. A singular `AGENT.md` is auto-loaded by nothing, so
@@ -58,6 +58,9 @@ evidence and stops, and you put exactly one proposal to the liege.
 
    `--setup` is worth recording only when a fresh copy genuinely needs it. With a hardlinking
    package manager a cold copy costs milliseconds and the field is noise.
+
+   `--fresh-clone` only when the liege opts the holding in: every brief for it then asks for the
+   test run again in a fresh clone with an empty home. The household's own repository needs no flag.
 
 6. **Offer the nameplate.** A committed `.reeve.md` in the repository puts this knowledge where a
    teammate and a future hand both find it. The reeve never writes it directly, so offer a scribe

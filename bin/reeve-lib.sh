@@ -1257,6 +1257,8 @@ tier_resolve() {
 #
 # `setup` is optional and runs once in a fresh worktree before the hand starts.
 # `test` is passed through to the brief so a hand knows how to validate itself.
+# `fresh-clone: yes` is optional, appended last, and makes every brief for the
+# holding ask for that test run again in a fresh clone with an empty home.
 #
 # One file, not a markdown copy plus a machine index, because two
 # representations of the same registry drift and then nobody knows which is true.

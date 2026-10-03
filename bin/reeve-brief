@@ -139,6 +139,29 @@ instructions=$(holding_field "$holding" instructions '')
 setup_cmd=$(holding_field "$holding" setup '')
 test_cmd=$(holding_field "$holding" test '')
 
+# --- a holding that must reproduce elsewhere ---------------------------------
+# Hard rule 2 in AGENTS.md: for the household's own repository, and for any
+# holding whose manor line says `fresh-clone: yes`, the test run is repeated in a
+# fresh clone with an empty home before a branch counts as ready. Written into
+# the brief here rather than left to the spec, because a requirement that holds
+# only when the reeve remembers to type it is one some brief will omit.
+#
+# "Own repository" is decided by object store, not by path: the reeve may run
+# from a linked worktree of the very clone it is briefing, and the two share one
+# common git dir while their toplevels differ. A code root that is no repository
+# at all, a plugin cache say, matches nothing, and the manor line still applies.
+git_common() { # git_common <dir> -> the absolute common git dir, or fails
+  local d
+  d=$(git -C "$1" rev-parse --git-common-dir 2>/dev/null) || return 1
+  (cd "$1" && cd -P "$d" && pwd)
+}
+fresh_clone=no
+[ "$(holding_field "$holding" fresh-clone '')" = yes ] && fresh_clone=yes
+if [ "$fresh_clone" = no ] && own=$(git_common "$REEVE_ROOT_D") \
+   && [ "$own" = "$(git_common "$repo")" ]; then
+  fresh_clone=yes
+fi
+
 # --- an instruction file that is a role contract ----------------------------
 # Some repositories' instruction file does not give house rules, it casts its
 # reader as somebody: this one opens "You are the reeve", and a reeve never
@@ -393,6 +416,38 @@ fi
 cat <<ROLE
 
 $(sed 's/^#/##/' "$office_file")
+ROLE
+
+# Hard rule 1 says "nowhere else on disk", and a fresh-clone run writes a clone
+# somewhere else. Without this carve-out a literal hand must either skip the run,
+# so its branch can never be ready, or break its brief. Every office with a copy
+# gets it, since a warden's spec may ask for the run too; the steward has none.
+rule1_clone=''
+if [ "$writes" != home ]; then
+  rule1_clone=", save a throwaway clone under a temporary directory when this brief"
+  rule1_clone="$rule1_clone$nl   asks for a fresh-clone run"
+fi
+
+# Only an office that commits has a branch to clone. A reader's spec may still
+# ask for the run, and hard rule 1 below leaves room for it either way.
+if [ "$fresh_clone" = yes ] && [ "$writes" = yes ]; then
+cat <<FRESH
+
+## Fresh-clone run
+
+This holding must reproduce on another machine. Part of your Done when: after your last commit, the
+test command passes in a fresh clone of your branch with an empty \`REEVE_HOME\`, and \`done:\` says
+so. Clone under a temporary directory, never anywhere else:
+
+\`\`\`sh
+tmp=\$(mktemp -d) && mkdir "\$tmp/home"
+git clone -q --branch $branch "$copy" "\$tmp/clone"
+cd "\$tmp/clone" && REEVE_HOME="\$tmp/home" ${test_cmd:-<the test command your spec names>}
+\`\`\`
+FRESH
+fi
+
+cat <<ROLE
 
 ## Reporting
 
@@ -422,7 +477,7 @@ Rules:
 ## Hard rules
 
 1. Write only inside \`$copy\`. Never the primary checkout, never another errand's copy, never
-   anywhere else on disk.
+   anywhere else on disk$rule1_clone.
 ROLE
 
 if [ "$writes" = yes ]; then

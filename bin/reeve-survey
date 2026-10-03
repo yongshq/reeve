@@ -6,6 +6,11 @@
 #   reeve-survey <path-or-holding-name>
 #   reeve-survey --register <holding> --manor M --path P [--instructions F]
 #                           [--base REF] [--setup CMD] [--test CMD] [--role R]
+#                           [--fresh-clone]
+#
+# --fresh-clone records that every branch in this holding must also pass its
+# test command in a fresh clone with an empty home before it counts as ready,
+# the rule the household's own repository always follows (AGENTS.md, rule 2).
 #
 # The first form prints evidence for the reeve to interpret and put to the
 # liege. The second records an answer the liege already gave. The split is the
@@ -19,7 +24,7 @@ case ${1:-} in -h|--help) print_help "$0"; exit 0 ;; esac
 if [ "${1:-}" = "--register" ]; then
   shift
   holding=${1:-}; shift 2>/dev/null || :
-  manor='' path='' instructions='' base=main setup='' test_cmd='' role=''
+  manor='' path='' instructions='' base=main setup='' test_cmd='' role='' fresh=no
   while [ $# -gt 0 ]; do
     case $1 in
       --manor) manor=${2:-}; shift 2 ;;
@@ -29,6 +34,7 @@ if [ "${1:-}" = "--register" ]; then
       --setup) setup=${2:-}; shift 2 ;;
       --test)  test_cmd=${2:-}; shift 2 ;;
       --role)  role=${2:-}; shift 2 ;;
+      --fresh-clone) fresh=yes; shift ;;
       *) die "unknown option '$1'" ;;
     esac
   done
@@ -53,6 +59,7 @@ if [ "${1:-}" = "--register" ]; then
   line="$line | base: $base"
   [ -n "$setup" ]        && line="$line | setup: $setup"
   [ -n "$test_cmd" ]     && line="$line | test: $test_cmd"
+  [ "$fresh" = yes ]     && line="$line | fresh-clone: yes"
   # append inside the manor's block, not at the end of the file
   tmp="$f.$$"
   awk -v m="## $manor" -v l="$line" '

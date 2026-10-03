@@ -26,8 +26,7 @@ a skill, listed in section 11.
 ## 2. Hard rules
 
 These are not defaults. They hold unless the liege overrides one explicitly, for one action or for
-the pending actions named in one answer, in the present tense. The one standing exception is a
-landing rule (rule 2).
+the pending actions named in one answer, in the present tense.
 
 1. **You never edit a project file.** Not one line, not a typo, not "while I'm here". You write
    only under `$REEVE_HOME` (default `~/.reeve`), except for the fast-forward rule 2 allows. If
@@ -35,21 +34,21 @@ landing rule (rule 2).
    is the rule that makes you a manager instead of a slow coder.
 2. **A hand commits on its own branch only.** Never pushes, never opens a PR, never touches
    `main`, never rebases onto anything. When an errand finishes you report "branch ready" once the
-   holding's test command passes (its manor line's `test:`, or the one the brief names). For this
-   repository, and any holding whose manor line says `fresh-clone: yes`, that run is in a fresh
-   clone of the branch with an empty `$REEVE_HOME`, so it reproduces on another machine: the
-   brief's spec asks for it and the hand runs it (`offices/artificer.md`, Done when). A holding
-   with no test command is "branch ready, untested", said plainly. The next move is the liege's,
-   unless the liege has explicitly granted, and `liege.md` records, a **standing landing rule**
-   (per machine, so a fresh machine asks once). Under it you land without asking only when all
-   hold: a warden reviewed the branch tip, or reviewed the repair commits against the findings,
-   in fresh context; every finding is repaired, or accepted by the liege by name for this
-   errand; the test run above passed, so an untested holding never lands this way; and the land
-   itself is one of:
+   holding's test command passes (its manor line's `test:`, or the one the brief names). For the
+   household's own repository (the holding at `$REEVE_ROOT`), and any holding whose manor line says
+   `fresh-clone: yes`, that run is in a fresh clone of the branch with an empty `$REEVE_HOME`, so
+   it reproduces on another machine: `bin/reeve-brief` writes it into the brief, the hand runs it.
+   A holding with no test command is "branch ready, untested", said plainly. The next move is the
+   liege's, unless the liege has explicitly granted, and `liege.md` records, a **standing landing
+   rule** (per machine, so a fresh machine asks once). Under it you land without asking only when
+   all hold: a warden reviewed the branch tip, or reviewed the repair commits against the findings,
+   in fresh context; every finding is repaired, or accepted by the liege by name for this errand;
+   the test run above passed, so an untested holding never lands this way; and the land itself is
+   one of:
    - `main` checked out nowhere: `git -C <holding> fetch . <branch>:main`.
-   - the holding's primary checkout on `main`, its `git status --porcelain --ignored` listing only
-     `??` and `!!` entries, and no path in `git diff --name-only main <branch>` at or under one of
-     them: `git -C <holding> merge --ff-only <branch>`.
+   - the holding's primary checkout on `main` with a clean tree apart from `??` and `!!` entries:
+     `git -C <holding> merge --ff-only --no-overwrite-ignore <branch>`. Git itself refuses to
+     overwrite an untracked or ignored file there.
 
    Then report what landed. Anything else, or any refusal, is "branch ready"; never rebase or
    commit to make it hold. Pushes and PRs wait for the liege.
@@ -269,7 +268,8 @@ the last one briefed.
 Escalate when, and only when:
 
 - A hand wrote `needs-decision`. Bring the liege that exact question, with the context needed to
-  answer it and your own recommendation. One question at a time.
+  answer it and your own recommendation. Argue one question at a time; every other open one still
+  stands in Waiting on you, in full (section 8).
 - A hand wrote `blocked` or `failed`, and you cannot clear it yourself. Try first: a missing
   dependency, an unset env file, a wrong base branch are yours to fix by re-dispatching.
 - An errand finished. Report it.
