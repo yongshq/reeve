@@ -20,8 +20,10 @@
 # What it guarantees, mechanically. A copy is removed only when the work it
 # holds has landed: its own HEAD, and its recorded branch if it has one, are
 # each reachable from the recorded base or from the holding's default branch.
-# Both facts are asked whenever they apply, never one or the other. Nothing
-# else is asked, and the rest of this block is what that leaves open.
+# Both facts are asked whenever they apply, never one or the other. And a copy
+# that is there to remove holds no git operation stopped halfway and no refs of
+# its own (check 2c). Nothing else is asked, and the rest of this block is what
+# that leaves open.
 #
 # What it deliberately does not guarantee. These are chosen edges, not
 # oversights, and the reason is the load-bearing half of each: a limit reported
@@ -38,16 +40,16 @@
 #   deliberately threw away, and a guard that noisy gets worked around. This
 #   script has no --force, so that workaround would be worse than the hole.
 #
-# - In-progress rebase, merge, cherry-pick and revert state, and the
+# - In-progress rebase, merge, cherry-pick, revert and bisect state, and the
 #   per-worktree ref namespaces refs/worktree, refs/bisect and refs/rewritten.
-#   OPEN AND RECOMMENDED, not an accepted limit. A warden judged these worth
-#   closing where the reflog is not, because they hold work in flight rather
-#   than discarded work, and measured their false-refusal rate at zero over
-#   every clean case in its state space. Nothing catches them today: a stopped
-#   rebase leaves the tree clean, so check 3 does not see it and `git worktree
-#   remove` does not object either. The liege has not decided them. Whatever
-#   closes them wants its own refusal text, because "this copy has a rebase in
-#   progress" is actionable where "moved off main" is not.
+#   CLOSED, by check 2c, and listed here because it is the boundary of the
+#   reflog entry above: these hold work in flight where the reflog holds work
+#   thrown away, and a warden measured their false-refusal rate at zero over
+#   every clean case in its state space. Each operation refuses in its own name
+#   ("this copy has a rebase in progress"), which is actionable where "moved off
+#   main" is not. ORIG_HEAD is not asked, for the reflog's reason. A copy whose
+#   directory is gone is not asked either, since there is nothing to finish and
+#   nothing to remove. --dismiss-only is never refused over it.
 #
 # - A copy git knows by a different path than the record does. Where the copy's
 #   directory is absent the gate below asks git rather than reading that
@@ -240,6 +242,83 @@ case $writes in
        "leaves the script unable to say what would be safe. Correct the writes= line in" \
        "$(meta_file "$id")." ;;
 esac
+
+# 2c. no git operation stopped halfway in the copy.
+#
+# A rebase, merge, cherry-pick or revert that stopped on a conflict or a
+# `break`, and a bisect left running, keep their state in the copy's own git
+# directory, and removing the copy deletes it. A stopped rebase leaves the tree
+# clean, so check 3 does not see it and `git worktree remove` does not object
+# either. HEAD covers the commits already replayed, at best: the original branch
+# position, the todo list and every commit not yet replayed go with the copy,
+# without a word. That is work in flight, not work thrown away, so it refuses in
+# the operation's own name. Asked before check 3 because a conflicted merge is
+# dirty as well, and "commit them or discard them" is the wrong advice for it:
+# finishing or aborting the operation is the right one.
+#
+# The per-worktree ref namespaces are asked here too. refs/worktree and
+# refs/rewritten belong to this copy alone and are deleted with it, nothing in
+# the household creates them, so when one is there something put it there.
+# refs/bisect is the bisect's own and is reported as one.
+#
+# Removal only. --dismiss-only has exited above, because freeing a session keeps
+# the copy and everything in it. A copy whose directory is gone has no operation
+# to finish here and nothing to remove, so it is left to check 4 as before.
+copy_git_path() { # copy_git_path <name> -> that path in the copy's own git dir
+  local p
+  # --git-path resolves per worktree: a linked copy's MERGE_HEAD lives under
+  # .git/worktrees/<name>/, never in the shared directory. It can print a path
+  # relative to the copy, so that is anchored to it.
+  p=$(git -C "$wt" rev-parse --git-path "$1" 2>/dev/null) || return 1
+  case $p in /*) ;; *) p="$wt/$p" ;; esac
+  printf '%s\n' "$p"
+}
+copy_operation() { # -> rebase|am|merge|cherry-pick|revert|bisect, or nothing
+  local p
+  if p=$(copy_git_path rebase-merge) && [ -d "$p" ]; then echo rebase; return; fi
+  # `git am` keeps its state in the same directory and marks it, and naming it a
+  # rebase would send the reader to the wrong --abort.
+  if p=$(copy_git_path rebase-apply) && [ -d "$p" ]; then
+    if [ -e "$p/applying" ]; then echo am; else echo rebase; fi; return
+  fi
+  if p=$(copy_git_path MERGE_HEAD) && [ -e "$p" ]; then echo merge; return; fi
+  if p=$(copy_git_path CHERRY_PICK_HEAD) && [ -e "$p" ]; then echo cherry-pick; return; fi
+  if p=$(copy_git_path REVERT_HEAD) && [ -e "$p" ]; then echo revert; return; fi
+  # A multi-commit pick or revert whose conflict was resolved and committed has
+  # no *_HEAD left, a clean tree, and the rest of its list still to apply. Only
+  # the sequencer says so, and its todo says which of the two it is.
+  if p=$(copy_git_path sequencer) && [ -d "$p" ]; then
+    case $(sed -n '1s/[[:space:]].*//p' "$p/todo" 2>/dev/null) in
+      revert) echo revert ;;
+      *) echo cherry-pick ;;
+    esac
+    return
+  fi
+  if { p=$(copy_git_path BISECT_START) && [ -e "$p" ]; } \
+     || { p=$(copy_git_path BISECT_LOG) && [ -e "$p" ]; } \
+     || [ -n "$(git -C "$wt" for-each-ref --format='%(refname)' refs/bisect 2>/dev/null)" ]
+  then echo bisect; return; fi
+}
+if [ "$writes" != home ] && [ -n "$wt" ] && [ -d "$wt" ]; then
+  op=$(copy_operation)
+  if [ -n "$op" ]; then
+    case $op in
+      bisect) how="git -C $wt bisect reset" ;;
+      *)      how="git -C $wt $op --continue, or git -C $wt $op --abort" ;;
+    esac
+    refuse "this copy has a $op in progress: finish or abort it in $wt first." \
+           "Run $how, then tear down again." \
+           "Removing the copy now deletes that $op's state with it, and its tree can look clean."
+  fi
+  own_refs=$(git -C "$wt" for-each-ref --format='%(refname)' refs/worktree refs/rewritten \
+             2>/dev/null)
+  if [ -n "$own_refs" ]; then
+    refuse "this copy holds refs of its own, which are deleted with it:" \
+           "$(printf '%s' "$own_refs" | head -5 | sed 's/^/    /')" \
+           "Give what they hold a branch, or delete them deliberately yourself in $wt, then tear" \
+           "down again. This script will not."
+  fi
+fi
 
 # 3. nothing uncommitted in the copy
 if [ "$writes" != home ] && [ -n "$wt" ] && [ -d "$wt" ]; then
