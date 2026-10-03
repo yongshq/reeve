@@ -4,7 +4,9 @@
 # own, and a review reproduced each case below in which it passed unlanded work:
 # a default branch that does not exist, a tag shadowing it, content that only a
 # merge commit carries. These prove each one is now `not proven`, and that the
-# cases the grant exists for still prove.
+# cases the grant exists for still prove. The grant covers only a branch an
+# errand record names for that holding, so every scene records br; case 13
+# takes the record away.
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 
 # --- safety -----------------------------------------------------------------
@@ -39,13 +41,18 @@ ck_has() { case $2 in *"$3"*) ok "$1" ;; *) bad "$1" "output [$2] did not mentio
 
 # --- scene builder ----------------------------------------------------------
 # A repository with one commit on <trunk> and a branch `br` off it holding one
-# commit that adds file a, then one more commit on <trunk>. Each case then lands
-# br, or not, its own way. The trunk moves first because a cherry-pick onto the
-# same parent in the same second recreates the very same commit id.
+# commit that adds file a, then one more commit on <trunk>, and an errand record
+# naming br for it. Each case then lands br, or not, its own way. The trunk moves
+# first because a cherry-pick onto the same parent in the same second recreates
+# the very same commit id.
 G() { git -C "$repo" "$@" >/dev/null 2>&1; }
+record() { # record <id> <repo> <branch>: the errand record the scope check reads
+  printf 'office=artificer\nrepo=%s\nbranch=%s\n' "$2" "$3" > "$REEVE_HOME/state/$1.meta"
+}
 scene() { # scene <name> [trunk]
   repo="$SCRATCH/$1"; local trunk=${2:-main}
   mkdir -p "$repo"
+  record "$1" "$repo" br
   git -C "$repo" init -q -b "$trunk"
   G config user.email tester@example.invalid; G config user.name tester
   G config commit.gpgsign false
@@ -149,6 +156,24 @@ G checkout main; G cherry-pick "br~1"
 printf 'def z():\n    return 1\n' > "$repo/p.py"; G add p.py; G commit -m p
 prove "$repo" br
 ck_eq  "11 a whitespace-only difference still proves (named limit)" "$RC" 0
+
+# 13 scope: only a branch an errand record names for this holding. A torn-down
+# record still counts, since a kept branch outlives its copy.
+scene scope; G cherry-pick br
+printf 'tornDown=2026-01-01T00:00:00\n' >> "$REEVE_HOME/state/scope.meta"
+prove "$repo" br
+ck_eq  "13 recorded branch proves"                     "$RC" 0
+rm -f "$REEVE_HOME/state/scope.meta"
+prove "$repo" br
+ck_eq  "13 unrecorded branch does not prove"           "$RC" 1
+ck_has "13 says no errand record names it"             "$OUT" "no errand record names br"
+mkdir -p "$SCRATCH/other"; git -C "$SCRATCH/other" init -q
+record scope-other "$SCRATCH/other" br
+prove "$repo" br
+ck_eq  "13 recorded for another holding does not prove" "$RC" 1
+record scope-other "$repo" other-branch
+prove "$repo" br
+ck_eq  "13 a record for another branch does not prove"  "$RC" 1
 
 # 12 usage errors are not verdicts.
 OUT=$("$ROOT/bin/reeve-teardown" --prove-landed only-one 2>&1); RC=$?

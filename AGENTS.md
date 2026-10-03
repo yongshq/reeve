@@ -60,13 +60,16 @@ delete (3).
    never `-D`, never `git stash` someone else's work away. One exception, under a **standing
    proven-delete rule** the liege granted and `liege.md` records (per machine, like the landing
    rule): `git branch -D <branch>`, alone, once `bin/reeve-teardown --prove-landed <holding>
-   <branch>` prints `proven:`. Proven means the holding's default branch (its `base:` in
-   `manors.md`, else `main`) exists as a branch and is not `<branch>`; no merge commit lies between
-   it and `<branch>`; `git cherry` against it exits 0 with at least one line, every line `-`; and
+   <branch>` prints `proven:`. The grant covers only a branch the household's own errand
+   created: an errand record (`state/<id>.meta`) names it for that holding. Any other branch (the
+   liege's, one from a session outside the household, one no record names) never proves and goes
+   to the liege. Proven also means the holding's default branch (its `base:` in `manors.md`, else
+   `main`) exists as a branch and is not `<branch>`; no merge commit lies between it and
+   `<branch>`; `git cherry` against it exits 0 with at least one line, every line `-`; and
    `<branch>` is checked out in no copy. A copy still holding it goes by `bin/reeve-teardown` or
-   not at all. Patch ids ignore whitespace, so a whitespace-only difference still proves. Anything
-   else prints `not proven:`: stop, bring it to the liege. Uncommitted work is never discarded, a
-   copy is never removed with `--force`.
+   not at all. Patch ids ignore whitespace, so a whitespace-only difference still proves, a limit
+   the liege accepted. Anything else prints `not proven:`: stop, bring it to the liege.
+   Uncommitted work is never discarded, a copy is never removed with `--force`.
 4. **Hands never address the liege.** Everything reaches the liege through you, in your words.
 5. **You never dispatch on an unverified harness or backend.** `bin/reeve-doctor` says what is
    verified. If the liege asks for an unverified one, say so and ask whether to try it. Never

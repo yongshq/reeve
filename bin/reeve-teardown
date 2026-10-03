@@ -131,6 +131,11 @@ BIN=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # rebased and fast-forwarded), so `-d` refuses over ancestry while nothing is
 # lost. Proven needs ALL of these, and anything git cannot answer is not proven:
 #
+# - an errand record names the branch for this holding: some state/<id>.meta,
+#   torn down or not, whose branch= is the branch and whose repo= is the same
+#   repository. The grant covers only branches the household's own errands
+#   created. The liege's, one from a session outside the household, or one no
+#   record names is never proven, whatever git says, and goes to the liege.
 # - the default branch exists as refs/heads/<default>, resolved the way
 #   resolve_default below resolves it (the holding's base: in manors.md, else
 #   main), a branch and only a branch, and never the branch being proved. Asked
@@ -146,14 +151,27 @@ BIN=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # - the branch is checked out in no copy. A copy holding it goes by this
 #   script's own teardown or not at all, and its refusal goes to the liege.
 #
-# The limit left open: patch ids ignore whitespace, so `-` is not byte equality.
-# A commit that differs from its landed copy only in whitespace proves.
+# The limit left open, accepted by the liege: patch ids ignore whitespace, so `-`
+# is not byte equality. A commit that differs from its landed copy only in
+# whitespace proves.
 prove_landed() { # prove_landed <holding> <branch> -> one verdict line
-  local holding=$1 br=$2 repo name='' h p default_ref default_sha br_sha at merges cherry
-  local total plus
+  local holding=$1 br=$2 repo repo_p name='' h p f i rp recorded='' default_ref default_sha
+  local br_sha at merges cherry total plus
   no() { printf 'not proven: %s\n' "$*"; return 1; }
   repo=$(resolve_holding_path "$holding") \
     || { no "'$holding' is not a registered holding or a git repository"; return; }
+  repo_p=$(cd "$repo" && pwd -P)
+  for f in "$REEVE_HOME_D"/state/*.meta; do
+    [ -f "$f" ] || continue
+    i=$(basename "$f" .meta)
+    [ "$(meta_get "$i" branch '')" = "$br" ] || continue
+    rp=$(meta_get "$i" repo '')
+    [ -n "$rp" ] && [ "$(cd "$rp" 2>/dev/null && pwd -P)" = "$repo_p" ] \
+      && { recorded=$i; break; }
+  done
+  [ -n "$recorded" ] || { no "no errand record names $br for $repo; the grant covers only" \
+                             "branches the household's errands created, so bring it to the" \
+                             "liege"; return; }
   # The default is the holding's base:, so a holding given by path is matched to
   # its manors.md line by that path. Unmatched, it is main, and a main that does
   # not exist is refused below rather than guessed at.
@@ -161,7 +179,7 @@ prove_landed() { # prove_landed <holding> <branch> -> one verdict line
   else
     for h in $(holding_names); do
       p=$(holding_field "$h" path '')
-      [ -n "$p" ] && [ "$(cd "$p" 2>/dev/null && pwd -P)" = "$(cd "$repo" && pwd -P)" ] \
+      [ -n "$p" ] && [ "$(cd "$p" 2>/dev/null && pwd -P)" = "$repo_p" ] \
         && { name=$h; break; }
     done
   fi
