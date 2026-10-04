@@ -72,11 +72,21 @@ orphan_name_hint() {
   if [ "$n" = "$me" ]; then
     info "these are $n's, which is this reeve: reeve-adopt --mine takes them"
   elif ! name_live_elsewhere "$n" "$(reeve_pane)" "$(reeve_session)" >/dev/null; then
+    # One owner per /clear: newest heartbeat first, one resume line each.
     sids=$(printf '%s\n' "$1" | while read -r i; do
       [ -n "$i" ] && meta_get "$i" session ''
-    done | grep . | sort -u | tr '\n' ' ' | sed 's/ $//')
+    done | grep . | sort -u | while read -r sid; do
+      printf '%s %s\n' "$(tr -dc '0-9' 2>/dev/null < "$(session_dir "$sid")/seen")" "$sid"
+    done | sort -rn | awk '{ print $NF }')
     info "every orphan is $n's and no live reeve holds that name: if this reeve is $n come back, reeve-name claim $n, then reeve-adopt --mine"
-    info "  or restore that reeve whole, in a fresh pane: claude --resume $sids"
+    printf '%s\n' "$sids" | while read -r sid; do
+      [ -n "$sid" ] || continue
+      if [ "$(head -n 1 "$(session_dir "$sid")/harness" 2>/dev/null)" = claude ]; then
+        info "  or restore that reeve whole, in a fresh pane: claude --resume $sid"
+      else
+        info "  or restore that reeve whole, in a fresh pane: resume session $sid with its harness's own resume command"
+      fi
+    done
   fi
 }
 

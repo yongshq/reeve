@@ -491,11 +491,12 @@ Read, in order:
    what it called the last reeve. If the claim refuses, a live reeve holds that name: tell the
    liege, and retry once that reeve's pane has closed rather than take a pool name; run it bare
    only if the liege agrees. With no handoff, read `bin/reeve-status --orphans` first: when every
-   orphan carries one name no live reeve holds, it says so, and `bin/reeve-name claim <that>` takes
-   it back. Otherwise `bin/reeve-name`, bare. Inside herdr or tmux, every form also labels your
-   own workspace with the name, unless another reeve holds it, when you get your own. A reeve
-   holds its workspace for as long as its pane is open, however quiet it has been: only a pane
-   that is provably closed frees the workspace, and one that cannot be checked does not.
+   orphan carries one name no live reeve holds, it says so: take it with `bin/reeve-name claim
+   <that>` and say so in your opening line. Otherwise `bin/reeve-name`, bare. Inside herdr or
+   tmux, every form also labels your own workspace with the name, unless another reeve holds it,
+   when you get your own. A reeve holds its workspace for as long as its pane is open, however
+   quiet it has been: only a pane that is provably closed frees the workspace, and one that cannot
+   be checked does not.
 3. `$REEVE_HOME/liege.md`, `$REEVE_HOME/manors.md`, and `manors/<manor>.md` for the manor in hand.
 4. `bin/reeve-status --all` for anything still in flight, then `bin/reeve-status --orphans`. A
    reset gives you a new session id, so errands the last reeve briefed are no longer yours to
@@ -503,13 +504,14 @@ Read, in order:
    or nothing will ever wake you for them. It lists the rest: bring those to the liege. After a
    reboot they are other reeves' errands, and which reeve takes them is the liege's call.
 
-**After a crash or a restart.** `claude --resume <sid>`, with the owner id that `--orphans` or
-`reeve-adopt --mine` prints, brings a crashed reeve back as the same session: its name, its errands and their ownership, with
-only the watch to restart. That is the full recovery; a handoff or the orphans' name is the
-fallback. A reeve relaunched in its restored herdr pane keeps its name by that pane, since herdr
-restores panes with their ids. After a tmux server restart it does not, since tmux reuses pane ids
-for new panes. A reeve outside herdr and tmux has no pane to key on, so each `/clear` gives it a
-new name: accepted, and a handoff carries the name across.
+**After a crash or a restart.** Resuming the owner session, with the id that `--orphans` or
+`reeve-adopt --mine` prints (`claude --resume <sid>` under claude, the harness's own resume form
+under another), brings a crashed reeve back as the same session: its name, its errands and their
+ownership, with only the watch to restart. That is the full recovery; a handoff or the orphans'
+name is the fallback. A reeve relaunched in its restored herdr pane keeps its name by that pane,
+since herdr restores panes with their ids. After a tmux server restart it does not, since tmux
+reuses pane ids for new panes. A reeve outside herdr and tmux has no pane to key on, so each
+`/clear` gives it a new name: accepted, and a handoff carries the name across.
 
 If a file is absent, that means absent, not empty: `liege.md` absent means you have learned nothing
 about the liege yet, and `manors.md` absent means rebuild it with `bin/reeve-survey`.

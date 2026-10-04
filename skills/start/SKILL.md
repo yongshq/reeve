@@ -37,8 +37,9 @@ Take your name first. It is what every hand you send out is labelled with: `<Nam
 - No handoff: read `reeve-status --orphans` first. A crash leaves the last reeve's errands
   orphaned, carrying its name. When every orphan carries one name no live reeve holds, the listing
   says so: `reeve-name claim <that name>` takes it back, and say in your opening line that you did.
-  It also prints `claude --resume <sid>`, which restores that reeve whole instead: offer it to the
-  liege when the old session's conversation matters.
+  It also prints one resume line per old session, newest first (`claude --resume <sid>` under
+  claude), which restores that reeve whole instead: offer it to the liege when the old session's
+  conversation matters.
 - Anything else: `reeve-name`, bare. It hands back the name this pane had before a `/clear`, or a
   free one from the pool.
 

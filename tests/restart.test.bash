@@ -255,9 +255,23 @@ fresh
 record deadB Bran dead
 errand b1 deadB Bran
 errand b2 deadB Bran
+printf 'claude\n' > "$SESS/deadB/harness"
 out=$(REEVE_SESSION=new "$ROOT/bin/reeve-status" --orphans --no-wake 2>/dev/null)
 has "7 the name every orphan carries"  "$out" "reeve-name claim Bran, then reeve-adopt --mine"
 has "7 and the full recovery"          "$out" "claude --resume deadB"
+# Errands briefed before and after a /clear have two owners: one valid line
+# each, newest first, never one command naming both.
+record deadB2 Bran dead
+printf '%s\n' "$(( NOW - 50000 ))" > "$SESS/deadB2/seen"
+errand b3 deadB2 Bran
+out=$(REEVE_SESSION=new "$ROOT/bin/reeve-status" --orphans --no-wake 2>/dev/null)
+eq  "7 one resume line per owner session" "$(printf '%s\n' "$out" | grep -c 'restore that reeve whole')" 2
+eq  "7 newest first" "$(printf '%s\n' "$out" | grep 'restore that reeve whole' | head -1 | grep -c deadB2)" 1
+nas "7 never two ids on one line"        "$out" "deadB2 deadB"
+has "7 a session of no known harness gets no claude command" "$out" \
+    "resume session deadB2 with its harness's own resume command"
+nas "7 and not claude's form"            "$out" "claude --resume deadB2"
+rm -rf "$SESS/deadB2" "$REEVE_HOME/state/b3.meta" "$REEVE_HOME/errands/b3"
 record liveB Bran alive
 out=$(REEVE_SESSION=new "$ROOT/bin/reeve-status" --orphans --no-wake 2>/dev/null)
 nas "7 never a name a live reeve holds" "$out" "reeve-name claim Bran"
@@ -339,6 +353,59 @@ record other Bran alive "w9:p1$S"
 out=$(REEVE_SESSION=new HERDR_PANE_ID=w3:p1 HERDR_SOCKET_PATH=$STUB_SOCK "$ROOT/bin/reeve-doctor" 2>&1)
 has "12 the other live reeve is listed"  "$out" "Bran (other)"
 nas "12 the replaced one is not"         "$out" "Aldric (old)"
+
+echo "--- 13. herdr: only a trailing identity is split off a target ---"
+export REEVE_IDENT_TRIES=1
+# A `#` inside an id, should a herdr ever hand one out, stays part of the id.
+STUB_PANES='w#1:p9' h kill "w#1|w#1:p9|w#1:t9"
+has "13 a target with no identity keeps every # in its ids" "$(calls)" "tab close w#1:t9"
+TH="w#1|w#1:p9|w#1:t9#$(ident_of "$SCRATCH" "Ab#c's scout: x")"
+STUB_PANES='w#1:p9' STUB_CWD=$SCRATCH h kill "$TH"
+has "13 and one with an identity acts on its own tab"       "$(calls)" "tab close w#1:t9"
+STUB_PANES='w#1:p9' STUB_CWD=/liege/notes h kill "$TH" 2>/dev/null
+nas "13 still refusing a stranger under that id"            "$(calls)" "tab close"
+eq  "13 the pane is read whole"  "$(STUB_PANES='w#1:p9' STUB_FG=claude h agent_state "$TH")" alive
+T13=$(STUB_PANES='w#1:p9' h relabel "$TH" "Bran#2's scout: x")
+eq  "13 a relabel to a label with a # keeps the ids whole" "$T13" \
+    "w#1|w#1:p9|w#1:t9#$(ident_of "$SCRATCH" "Bran#2's scout: x")"
+has "13 and renames that tab"                                "$(calls)" "tab rename w#1:t9"
+T13=$(STUB_PANES='w#1:p9' h relabel "w#1|w#1:p9|w#1:t9" "Bran's scout: x")
+eq  "13 a target with no identity is handed back as nothing new" "$T13" ""
+unset REEVE_IDENT_TRIES
+
+echo "--- 14. a resumed reeve's heartbeat moves its pane record ---"
+# Reeve A crashed in w1:p1, the liege resumed it in w2:p1, and reeve B starts
+# in the restored w1:p1. A only heartbeats, never asks its name.
+fresh
+record A Aldric alive "w1:p1$S"
+printf 'w1%s\n' "$S" > "$SESS/A/group.herdr"
+errand a14 A Aldric
+REEVE_SESSION=A HERDR_PANE_ID=w2:p1 HERDR_SOCKET_PATH=$STUB_SOCK "$ROOT/bin/reeve-status" --no-wake >/dev/null 2>&1
+eq  "14 the heartbeat rewrites the pane record" "$(cat "$SESS/A/pane")" "w2:p1$S"
+B14() { REEVE_SESSION=B HERDR_PANE_ID=w1:p1 HERDR_SOCKET_PATH=$STUB_SOCK STUB_PANES='w1:p1 w2:p1' STUB_FG=claude "$@"; }
+got=$(B14 "$ROOT/bin/reeve-name" 2>/dev/null)
+eq  "14 B in A's old pane gets a pool name"           "$got" Bran
+out=$(B14 "$ROOT/bin/reeve-adopt" --mine 2>&1)
+eq  "14 B's --mine leaves A's errand"                  "$(grep '^session=' "$REEVE_HOME/state/a14.meta")" session=A
+out=$(B14 "$ROOT/bin/reeve-adopt" a14 2>&1); rc=$?
+eq  "14 and B cannot adopt it"                         "$rc" 1
+out=$(B14 "$ROOT/bin/reeve-status" --orphans --no-wake 2>/dev/null)
+nas "14 nor sees it as an orphan"                      "$out" "a14"
+got=$(B14 env HERDR_WORKSPACE_ID=w1 STUB_WS=w1 STUB_LABEL=Aldric bash -c ". \"\$0/bin/reeve-lib.sh\"; reeve_group \"\$0/bin\" herdr Bran" "$ROOT" 2>"$SCRATCH/err")
+eq  "14 nor takes A's workspace"                       "$got" "wNEW$S"
+has "14 which it says"                                 "$(cat "$SCRATCH/err")" "belongs to another live reeve"
+
+echo "--- 15. the refusal says when a crashed holder lets go ---"
+fresh
+record old Aldric alive "w3:p1$S"
+got=$(REEVE_SESSION=new STUB_PANES='w3:p1' STUB_FG=claude "$ROOT/bin/reeve-name" claim Aldric 2>&1)
+has "15 once its heartbeat is that old, not within it" "$got" "once its last heartbeat is 900s old"
+
+echo "--- 16. file mtime reads clean on this platform ---"
+touch "$SCRATCH/mt"
+m=$(lib file_mtime "$SCRATCH/mt")
+case $m in ''|*[!0-9]*) bad "16 file_mtime prints epoch seconds only" "got [$m]" ;; *) ok "16 file_mtime prints epoch seconds only" ;; esac
+d=$(( $(date +%s) - m )); [ "$d" -ge 0 ] && [ "$d" -lt 60 ] && ok "16 and the right ones" || bad "16 and the right ones" "off by $d"
 
 echo "--- L. live tmux, on a private socket ---"
 if [ -z "$REAL_TMUX" ]; then

@@ -45,10 +45,14 @@ _h() {
 # restored shell's startup files were measured leaving it in another directory,
 # and the liege may rename a tab. A target without one, from before, is trusted
 # as it always was.
-_h_base() { printf '%s\n' "${1%%#*}"; }
-_h_ws()   { local b=${1%%#*}; printf '%s\n' "${b%%|*}"; }
-_h_pane() { local b=${1%%#*} r; r=${b#*|}; printf '%s\n' "${r%%|*}"; }
-_h_tab()  { local b=${1%%#*} r; r=${b#*|}; case $r in *'|'*) printf '%s\n' "${r#*|}" ;; esac; }
+#
+# Only a trailing suffix of that exact shape is one, so a `#` anywhere else, in
+# an id a later herdr hands out, stays part of the id.
+_h_base() { if [[ $1 =~ ^(.*)#c[0-9]*l[0-9]*$ ]]; then printf '%s\n' "${BASH_REMATCH[1]}"; else printf '%s\n' "$1"; fi; }
+_h_want() { [[ $1 =~ \#(c[0-9]*l[0-9]*)$ ]] && printf '%s\n' "${BASH_REMATCH[1]}"; }
+_h_ws()   { local b; b=$(_h_base "$1"); printf '%s\n' "${b%%|*}"; }
+_h_pane() { local b r; b=$(_h_base "$1"); r=${b#*|}; printf '%s\n' "${r%%|*}"; }
+_h_tab()  { local b r; b=$(_h_base "$1"); r=${b#*|}; case $r in *'|'*) printf '%s\n' "${r#*|}" ;; esac; }
 
 _h_sum() { [ -n "$1" ] && printf '%s' "$1" | cksum | cut -d' ' -f1; } # nothing for nothing
 
@@ -73,7 +77,7 @@ _h_label_of() {
 # such reading would call the hand's own pane someone else's.
 _h_verified() {
   local want wc wl='' doc c l n=0
-  case $1 in *'#'*) want=${1##*#} ;; *) return 0 ;; esac
+  want=$(_h_want "$1") || return 0
   wc=${want#c}; wc=${wc%%l*}
   case $want in *l*) wl=${want##*l} ;; esac
   doc=${2:-}
@@ -557,6 +561,6 @@ reeve_backend_herdr_relabel() {
     [ -n "$ws" ] || return 1
     _h workspace rename "$ws" "$2" >/dev/null || return 1
   fi
-  case $1 in *'#'*l*) printf '%sl%s\n' "${1%l*}" "$(_h_sum "$2")" ;; esac
+  _h_want "$1" >/dev/null && printf '%sl%s\n' "${1%l*}" "$(_h_sum "$2")"
   return 0
 }

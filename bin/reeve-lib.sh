@@ -525,6 +525,13 @@ session_touch() {
   d=$(session_dir "$s"); mkdir -p "$d" 2>/dev/null || return 0
   printf '%s\n' "$(date +%s)" 2>/dev/null > "$d/seen.$$" || return 0
   mv -f "$d/seen.$$" "$d/seen" 2>/dev/null || rm -f "$d/seen.$$"
+  # And from where: a session resumed in another pane (`claude --resume`) would
+  # otherwise keep the old pane on record until something asked its name, and a
+  # new reeve in that old pane would read as this one replaced.
+  pane_store "$s"
+  # Which harness, where it says so, so a resume hint names its own command.
+  [ -f "$d/harness" ] || [ "$s" != "${CLAUDE_CODE_SESSION_ID:-}" ] \
+    || printf 'claude\n' > "$d/harness" 2>/dev/null || :
   # Saying "still here" is also the moment to clear out those who are not.
   sessions_prune_maybe
 }
@@ -589,7 +596,7 @@ sessions_prune() {
     # record that was created and never written is not immortal.
     seen=''
     [ -f "$d/seen" ] && seen=$(tr -dc '0-9' < "$d/seen" 2>/dev/null)
-    [ -n "$seen" ] || seen=$(stat -f %m "$d" 2>/dev/null || stat -c %Y "$d" 2>/dev/null || echo "$now")
+    [ -n "$seen" ] || seen=$(file_mtime "$d" || echo "$now")
     [ $(( now - seen )) -gt "$retain" ] || continue
     rm -rf "$d" 2>/dev/null && pruned=$((pruned + 1))
   done
@@ -1461,7 +1468,11 @@ status_lines() {
 }
 
 # The status file's mtime, BSD stat first, then GNU.
-status_mtime() { stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null; }
+# file_mtime <path>   its mtime in epoch seconds. GNU form first: GNU `stat -f`
+# is filesystem mode and prints to stdout before it fails, while BSD `stat -c`
+# fails with nothing on stdout (measured on macOS), so this order is clean on both.
+file_mtime() { stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null; }
+status_mtime() { file_mtime "$1"; }
 
 # Seconds since the status file last changed. The file's own mtime, because an
 # append is the only thing that changes it, and it needs no record of our own.
@@ -2047,7 +2058,7 @@ lock_acquire() {
   case $brk in *[!0-9]*) brk='' ;; esac
   while ! mkdir "$d" 2>/dev/null; do
     if [ -n "$brk" ] && [ -f "$d/pid" ] && ! kill -0 "$(cat "$d/pid" 2>/dev/null)" 2>/dev/null; then
-      age=$(stat -f %m "$d" 2>/dev/null || stat -c %Y "$d" 2>/dev/null || echo '')
+      age=$(file_mtime "$d" || echo '')
       age=$(printf '%s' "$age" | tr -dc '0-9')
       if [ -n "$age" ] && [ $(( $(date +%s) - age )) -ge "$brk" ] \
          && mv "$d" "$d.stale.$$" 2>/dev/null; then
