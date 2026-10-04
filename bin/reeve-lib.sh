@@ -655,7 +655,18 @@ valid_reeve_name() {
   [ ${#1} -le 12 ]
 }
 
-reeve_pane() { printf '%s' "${HERDR_PANE_ID:-${TMUX_PANE:-}}"; }
+# reeve_pane   this session's pane, as `<pane id>@<server socket>`. Pane ids are
+# per server, tmux's `%N` restarting at %0 on each and herdr's counted per
+# session, so the id alone would make two reeves on two servers one pane. Bare
+# id when the socket is unknown. Whitespace dropped: the key is one field.
+reeve_pane() {
+  local p sock=''
+  if [ -n "${HERDR_PANE_ID:-}" ]; then p=$HERDR_PANE_ID; sock=${HERDR_SOCKET_PATH:-}
+  elif [ -n "${TMUX_PANE:-}" ]; then p=$TMUX_PANE; sock=${TMUX:-}; sock=${sock%%,*}
+  else return 0
+  fi
+  printf '%s%s' "$p" "${sock:+@$sock}" | tr -d '[:space:]'
+}
 
 session_name() { # session_name <sid>   the stored name, or nothing
   local n=''
@@ -755,8 +766,14 @@ reeve_name() {
   pane=$(reeve_pane)
   n=$(session_name "$s")
   if [ -z "$n" ] && [ -n "${REEVE_NAME:-}" ]; then
-    if valid_reeve_name "$REEVE_NAME"; then n=$REEVE_NAME
-    else warn "REEVE_NAME '$REEVE_NAME' is not a name: letters and hyphens, a letter first, at most 12. ignored"; fi
+    if ! valid_reeve_name "$REEVE_NAME"; then
+      warn "REEVE_NAME '$REEVE_NAME' is not a name: letters and hyphens, a letter first, at most 12. ignored"
+    elif cand=$(name_live_elsewhere "$REEVE_NAME" "$pane" "$s"); then
+      # The same refusal claim and set give: two live reeves under one name
+      # would label their hands alike.
+      warn "REEVE_NAME '$REEVE_NAME' is held by live reeve $cand on another pane. ignored, taking one from the pool"
+    else n=$REEVE_NAME
+    fi
   fi
   holders=$(name_holders "$s")
   if [ -z "$n" ] && [ -n "$pane" ]; then
@@ -840,22 +857,71 @@ group_known() { # group_known <sid> <backend>   the stored id, or nothing
   return 0
 }
 
+# group_held_elsewhere <sid> <backend>   one per line, the group ids other live
+# reeves hold on this backend. One reeve per workspace: a reeve never relabels
+# or nests into a group another is using. A holder on this same pane is the
+# session /clear replaced, so it is not a rival, the same as for a name. A gone
+# holder holds nothing, so its group may be taken over.
+group_held_elsewhere() {
+  local me=$1 b=$2 pane d k p g
+  pane=$(reeve_pane)
+  for d in "$REEVE_HOME_D"/state/sessions/*; do
+    [ -f "$d/group.$b" ] || continue
+    k=$(basename "$d"); [ "$k" = "$me" ] && continue
+    [ "$(session_state "$k")" = alive ] || continue
+    p=$(session_pane "$k" | tr -d '[:space:]')
+    [ -n "$pane" ] && [ "$p" = "$pane" ] && continue
+    g=$(head -n 1 "$d/group.$b" 2>/dev/null)
+    [ -n "$g" ] && printf '%s\n' "$g"
+  done
+  return 0
+}
+
+# group_of_name <sid> <backend> <name>   the group the newest other record under
+# this name kept, or nothing. How a group follows its name: through /clear,
+# which inherits the name by pane, and through claim, which takes it back from
+# a handoff. Without it each new session id made one more workspace under the
+# same name and nothing ever closed them.
+group_of_name() {
+  local me=$1 b=$2 n=$3 d k
+  for d in "$REEVE_HOME_D"/state/sessions/*; do
+    [ -f "$d/group.$b" ] || continue
+    k=$(basename "$d"); [ "$k" = "$me" ] && continue
+    [ "$(session_name "$k")" = "$n" ] || continue
+    printf '%s %s\n' "$(tr -dc '0-9' 2>/dev/null < "$d/seen")" "$(head -n 1 "$d/group.$b" 2>/dev/null)"
+  done | sort -n | tail -n 1 | sed 's/^[0-9]* *//'
+}
+
 # reeve_group <bin> <backend> <name>   ensure this session's group, store and
 # print its id. rc 1 with nothing printed when there is no session, no name, or
 # the backend has no ensure_group or it failed; the caller says so and carries
-# on. The backend's own refusal is not repeated, so the caller's note is the one.
+# on. The backend's own refusal is not repeated, so the caller's note is the
+# one; its notes on a group that worked, such as passing over a workspace
+# another reeve holds, are.
+#
+# The backend is handed this session's kept id, else the one its name kept, and
+# every id another live reeve holds, which it never relabels or reuses. Under a
+# lock, so two reeves starting in one workspace do not both take it.
 reeve_group() {
-  local bin=$1 b=$2 n=$3 s known g f
+  local bin=$1 b=$2 n=$3 s known g f lk err rc held
   s=$(reeve_session); [ -n "$s" ] && [ -n "$n" ] || return 1
+  lk=$(lock_acquire groups 15) || return 1
   known=$(group_known "$s" "$b")
-  g=$("$bin/reeve-backend" call ensure_group "$n" ${known:+"$known"} --backend "$b" 2>/dev/null) || return 1
+  [ -n "$known" ] || known=$(group_of_name "$s" "$b" "$n")
+  held=$(group_held_elsewhere "$s" "$b")
+  err=$(mktemp "${TMPDIR:-/tmp}/reeve-group.XXXXXX") || { lock_release "$lk"; return 1; }
+  # shellcheck disable=SC2086
+  g=$(IFS='
+'; "$bin/reeve-backend" call ensure_group "$n" "$known" $held --backend "$b" 2>"$err"); rc=$?
   g=$(printf '%s\n' "$g" | head -n 1)
-  [ -n "$g" ] || return 1
-  if [ "$g" != "$known" ]; then
+  if [ "$rc" -ne 0 ] || [ -z "$g" ]; then rm -f "$err"; lock_release "$lk"; return 1; fi
+  cat "$err" >&2; rm -f "$err"
+  if [ "$g" != "$(group_known "$s" "$b")" ]; then
     f=$(group_file "$s" "$b")
     mkdir -p "$(dirname "$f")" 2>/dev/null \
       && { printf '%s\n' "$g" > "$f.$$" 2>/dev/null && mv -f "$f.$$" "$f" || rm -f "$f.$$"; }
   fi
+  lock_release "$lk"
   printf '%s\n' "$g"
 }
 # --- output -----------------------------------------------------------------

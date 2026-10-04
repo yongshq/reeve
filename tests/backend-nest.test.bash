@@ -9,6 +9,12 @@
 # reeve's own workspace or window is what gets its name, never the liege's tmux
 # session. And a backend with no group to give leaves dispatch exactly as it was.
 #
+# One reeve per workspace. A workspace another live reeve holds is never
+# relabelled, nested into or reused; a gone one's may be taken over. A hand,
+# which sits in its reeve's workspace, never takes it as its own, and neither
+# does a reeve whose workspace id comes from a different herdr server. A group
+# follows its name through /clear and claim instead of a new one each session.
+#
 # herdr and tmux are stubs on PATH that record their argv, so nothing here
 # touches a real server. Scratch homes only.
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
@@ -30,18 +36,21 @@ export REEVE_NO_CARETAKER=1
 export CLAUDE_CONFIG="$SCRATCH/claude.json"
 # Nothing from the caller's own terminal may leak in: a real HERDR_WORKSPACE_ID
 # or TMUX_PANE is exactly what ensure_group would rename.
-unset HERDR_WORKSPACE_ID HERDR_PANE_ID HERDR_ENV TMUX TMUX_PANE REEVE_TMUX_SESSION \
-      REEVE_BACKEND CLAUDE_CODE_SESSION_ID REEVE_SESSION REEVE_NAME
+unset HERDR_WORKSPACE_ID HERDR_PANE_ID HERDR_ENV HERDR_SOCKET_PATH HERDR_TAB_ID TMUX TMUX_PANE \
+      REEVE_TMUX_SESSION REEVE_BACKEND CLAUDE_CODE_SESSION_ID REEVE_SESSION REEVE_NAME REEVE_HAND
 
 # --- stub binaries -----------------------------------------------------------
 FAKE="$SCRATCH/fakebin"; mkdir -p "$FAKE"
 LOG="$SCRATCH/argv"; export STUB_LOG="$LOG"
 # herdr: STUB_WS lists the workspaces that exist. tab create answers with a tab
 # and root pane in the workspace it was asked for, unless STUB_TAB_FAIL is set.
+# Its one session, `stub`, listens on $STUB_SOCK.
 cat > "$FAKE/herdr" <<'HERDR'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$STUB_LOG"
 case "$1 $2" in
+  'session list')
+    printf '{"sessions":[{"default":true,"name":"stub","socket_path":"%s"}]}\n' "$STUB_SOCK" ;;
   'workspace get')
     for w in ${STUB_WS:-}; do [ "$w" = "$3" ] && { printf '{"result":{"workspace":{"workspace_id":"%s"}}}\n' "$3"; exit 0; }; done
     printf '{"error":{"code":"workspace_not_found"}}\n'; exit 1 ;;
@@ -77,6 +86,7 @@ TMUX
 chmod +x "$FAKE/herdr" "$FAKE/tmux"
 export PATH="$FAKE:$PATH"
 export REEVE_HERDR_SESSION=stub
+export STUB_SOCK="$SCRATCH/herdr.sock"
 
 # h <fn> <args...>   one herdr backend function, in a subshell, its argv log fresh
 h() { : > "$LOG"; ( . "$ROOT/backends/herdr.sh"; "reeve_backend_herdr_$@" ); }
@@ -86,7 +96,7 @@ calls() { cat "$LOG"; }
 PLAIN="$SCRATCH/plain"; mkdir -p "$PLAIN"   # not a git checkout
 
 echo "--- 1. herdr ensure_group ---"
-out=$(HERDR_WORKSPACE_ID=w61 STUB_WS='w61 w7' h ensure_group Aldric w7)
+out=$(HERDR_SOCKET_PATH=$STUB_SOCK HERDR_WORKSPACE_ID=w61 STUB_WS='w61 w7' h ensure_group Aldric w7)
 eq  "1 the reeve's own workspace is preferred to a known one" "$out" w61
 has "1 and renamed to the reeve's name"                       "$(calls)" "workspace rename w61 Aldric --session stub"
 nas "1 and nothing is created"                                "$(calls)" "workspace create"
@@ -96,9 +106,31 @@ eq  "1 outside herdr, a known group still there is reused"   "$out" w7
 nas "1 without creating another"                             "$(calls)" "workspace create"
 nas "1 or renaming one it did not ask about"                 "$(calls)" "workspace rename"
 
-out=$(HERDR_WORKSPACE_ID=w99 STUB_WS='' h ensure_group Aldric w7)
+out=$(HERDR_SOCKET_PATH=$STUB_SOCK HERDR_WORKSPACE_ID=w99 STUB_WS='' h ensure_group Aldric w7)
 eq  "1 a gone own workspace and a gone known one: a new one" "$out" wNEW
 has "1 created under the reeve's name, unfocused"            "$(calls)" "workspace create --cwd $HOME --label Aldric --no-focus"
+
+# Workspace ids are per server. An id from another server's socket names some
+# other workspace on this one, perhaps the liege's.
+out=$(HERDR_SOCKET_PATH=/elsewhere.sock HERDR_WORKSPACE_ID=w61 STUB_WS='w61 w7' h ensure_group Aldric w7)
+eq  "1 an own workspace on another server is not this one"   "$out" w7
+nas "1 and the same-numbered one here is not renamed"        "$(calls)" "workspace rename"
+out=$(HERDR_WORKSPACE_ID=w61 STUB_WS='w61 w7' h ensure_group Aldric w7)
+eq  "1 nor when the socket is unknown"                       "$out" w7
+nas "1 still renaming nothing"                               "$(calls)" "workspace rename"
+
+# A hand sits in its reeve's workspace. It never takes it.
+out=$(REEVE_HAND=fix-auth HERDR_SOCKET_PATH=$STUB_SOCK HERDR_WORKSPACE_ID=w61 STUB_WS='w61' h ensure_group Bran)
+eq  "1 a hand never takes the workspace it sits in"          "$out" wNEW
+nas "1 and never renames its reeve's"                        "$(calls)" "workspace rename"
+
+# One reeve per workspace.
+out=$(HERDR_SOCKET_PATH=$STUB_SOCK HERDR_WORKSPACE_ID=w61 STUB_WS='w61 w7' h ensure_group Bran w7 w61 2>"$SCRATCH/err")
+eq  "1 an own workspace another live reeve holds is passed over" "$out" w7
+nas "1 and not renamed"                                      "$(calls)" "workspace rename"
+has "1 which it says in one line"                            "$(cat "$SCRATCH/err")" "workspace w61 belongs to another live reeve"
+out=$(STUB_WS='w7' h ensure_group Bran w7 w61 w7)
+eq  "1 a known one another live reeve holds is not reused"   "$out" wNEW
 
 echo "--- 2. herdr create_endpoint ---"
 out=$(h create_endpoint "$PLAIN" "Aldric's scout: x" w7)
@@ -149,6 +181,13 @@ nas "6 the session is never renamed"                       "$(calls)" "rename-se
 out=$(REEVE_TMUX_SESSION=mine TMUX_PANE=%3 t ensure_group Aldric)
 eq  "6 REEVE_TMUX_SESSION wins, as before"                 "$out" mine
 nas "6 and renames nothing"                                "$(calls)" "rename-window"
+out=$(TMUX_PANE=%3 t ensure_group Aldric '' work 2>"$SCRATCH/err")
+eq  "6 a session another live reeve holds is not nested into" "$out" reeve-aldric
+nas "6 and nothing in it is renamed"                       "$(calls)" "rename-window"
+has "6 which it says"                                      "$(cat "$SCRATCH/err")" "session work belongs to another live reeve"
+out=$(REEVE_HAND=fix-auth TMUX_PANE=%3 t ensure_group Bran)
+eq  "6 a hand never takes its reeve's session"             "$out" reeve-bran
+nas "6 or renames its window"                              "$(calls)" "rename-window"
 out=$(t ensure_group Aldric)
 eq  "6 outside tmux, a session named for the reeve"        "$out" reeve-aldric
 has "6 made detached"                                      "$(calls)" "new-session -d -s reeve-aldric"
@@ -215,14 +254,68 @@ go four nest --dry-run
 has "8 a dry run prints the ensure_group it would run"       "$OUT" "would run: reeve-backend call ensure_group Escanor \"grp1\" --backend nest"
 has "8 and the group it would pass"                          "$OUT" "\"<group>\" --backend nest"
 eq  "8 and calls nothing"                                    "$(calls)" ''
+# The hand's own environment marks it, and loses the two variables that would
+# make its reeve's workspace look like its own.
+has "8 the hand is launched marked, its workspace and pane unset" "$OUT" \
+    "env -u HERDR_WORKSPACE_ID -u TMUX_PANE REEVE_HAND='four' true"
 
 echo "--- 9. reeve-name labels the reeve's own group ---"
 : > "$LOG"
-out=$(REEVE_SESSION=lead REEVE_BACKEND=nest REEVE_ROOT="$STUB" "$ROOT/bin/reeve-name" 2>&1)
+out=$(HERDR_ENV=1 REEVE_SESSION=lead REEVE_BACKEND=nest REEVE_ROOT="$STUB" "$ROOT/bin/reeve-name" 2>&1)
 eq  "9 it still prints the name"                             "$out" Escanor
 has "9 and asks the backend for the group"                   "$(calls)" "ensure_group Escanor grp1"
-out=$(REEVE_SESSION=lead REEVE_BACKEND=bare REEVE_ROOT="$STUB" "$ROOT/bin/reeve-name" 2>/dev/null); rc=$?
+out=$(HERDR_ENV=1 REEVE_SESSION=lead REEVE_BACKEND=bare REEVE_ROOT="$STUB" "$ROOT/bin/reeve-name" 2>/dev/null); rc=$?
 eq  "9 a backend with no group is no failure"                "$rc:$out" "0:Escanor"
+: > "$LOG"
+out=$(REEVE_SESSION=lead REEVE_BACKEND=nest REEVE_ROOT="$STUB" "$ROOT/bin/reeve-name" 2>&1)
+eq  "9 outside any backend's session it prints the name"     "$out" Escanor
+eq  "9 and makes no group: only a dispatch does"             "$(calls)" ''
+out=$(REEVE_HAND=one HERDR_ENV=1 REEVE_SESSION=lead REEVE_BACKEND=nest REEVE_ROOT="$STUB" "$ROOT/bin/reeve-name" 2>&1)
+eq  "9 from inside a hand it prints the name"                "$out" Escanor
+eq  "9 and touches no group"                                 "$(calls)" ''
+
+echo "--- 10. one reeve per workspace, through reeve-name and herdr ---"
+# The real herdr backend over the stub, as a reeve inside herdr runs it.
+SESS="$REEVE_HOME/state/sessions"
+inherdr() { # inherdr <sid> <pane> <ws> [args...]   reeve-name inside herdr
+  local sid=$1 pane=$2 ws=$3; shift 3
+  : > "$LOG"
+  env HERDR_ENV=1 HERDR_SOCKET_PATH="$STUB_SOCK" HERDR_PANE_ID="$pane" ${ws:+HERDR_WORKSPACE_ID="$ws"} \
+    REEVE_SESSION="$sid" "$ROOT/bin/reeve-name" "$@" 2>"$SCRATCH/err"
+}
+export STUB_WS='w61 w7 w8'
+out=$(inherdr r1 w61:p1 w61)
+has "10 the first reeve takes its own workspace"             "$(calls)" "workspace rename w61 $out --session stub"
+eq  "10 and keeps it"                                        "$(cat "$SESS/r1/group.herdr")" w61
+out=$(inherdr r2 w61:p2 w61)
+nas "10 a second reeve in that workspace does not rename it" "$(calls)" "workspace rename w61"
+has "10 it gets a workspace of its own, under its own name"  "$(calls)" "workspace create --cwd $HOME --label $out --no-focus"
+eq  "10 kept as its own"                                     "$(cat "$SESS/r2/group.herdr")" wNEW
+eq  "10 and it says why, in one line"                        "$(grep -c 'belongs to another live reeve' "$SCRATCH/err")" 1
+# The first reeve is gone. Its workspace is free to take over.
+printf '1\n' > "$SESS/r1/seen"
+out=$(inherdr r3 w61:p3 w61)
+has "10 a gone reeve's workspace may be taken over"          "$(calls)" "workspace rename w61 $out --session stub"
+
+# /clear: a new session id on the same pane takes the name, and its group, even
+# where there is no own workspace to fall back on.
+mkdir -p "$SESS/old"; printf 'Merek\n' > "$SESS/old/name"; printf 'w9:p1@%s\n' "$STUB_SOCK" > "$SESS/old/pane"
+printf '%s\n' "$(date +%s)" > "$SESS/old/seen"; printf 'w7\n' > "$SESS/old/group.herdr"
+out=$(inherdr new w9:p1 '')
+eq  "10 /clear keeps the name"                               "$out" Merek
+nas "10 and makes no new workspace"                          "$(calls)" "workspace create"
+eq  "10 it keeps the group its name had"                     "$(cat "$SESS/new/group.herdr" 2>/dev/null)" w7
+
+# claim: a handoff's name brings the group that name kept.
+mkdir -p "$SESS/gone"; printf 'Wulf\n' > "$SESS/gone/name"; printf '1\n' > "$SESS/gone/seen"
+printf 'w8\n' > "$SESS/gone/group.herdr"
+out=$(inherdr heir w5:p1 '' claim Wulf)
+eq  "10 claim takes the name"                                "$out" Wulf
+nas "10 and makes no new workspace"                          "$(calls)" "workspace create"
+eq  "10 it takes the group the name kept"                    "$(cat "$SESS/heir/group.herdr" 2>/dev/null)" w8
+# set: a group kept under the old name goes with the old name.
+out=$(inherdr heir w5:p1 '' set Galen)
+has "10 set takes a group under the new name"                "$(calls)" "workspace create --cwd $HOME --label Galen --no-focus"
 
 echo "passed=$PASS failed=$FAIL"
 [ "$FAIL" -eq 0 ]

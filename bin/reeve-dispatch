@@ -361,7 +361,7 @@ fi
 # flags exist to close, arriving through a different door.
 #
 
-cmdline=$("$BIN/reeve-harness" render "$harness" "$brief" \
+cmdline=$("$BIN/reeve-harness" render "$harness" "$brief" --hand "$id" \
             ${errand_settings:+--settings "$errand_settings"} \
             ${sib_args+"${sib_args[@]}"} \
             ${model:+--model "$model"} ${effort:+--effort "$effort"}) \

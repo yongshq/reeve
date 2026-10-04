@@ -5,7 +5,7 @@
 #   reeve-harness resolve [--harness N] [--office O]
 #   reeve-harness list
 #   reeve-harness check <name>                 exit 0 only if installed and verified
-#   reeve-harness render <name> <brief-abs-path> --settings <path> [--model M] [--effort E]
+#   reeve-harness render <name> <brief-abs-path> --settings <path> [--model M] [--effort E] [--hand ID]
 #   reeve-harness detect                       which harness reeve is itself running under
 #   reeve-harness get <name> <key>             read one declared key, for inspection
 
@@ -90,7 +90,7 @@ harness_check() {
 }
 
 harness_render() {
-  local n=$1 brief=$2 model=${3:-} effort=${4:-} settings_path=${5:-} extra=${6:-}
+  local n=$1 brief=$2 model=${3:-} effort=${4:-} settings_path=${5:-} extra=${6:-} hand=${7:-}
   [ -n "$brief" ] || die "render needs an absolute brief path"
   case $brief in /*) ;; *) die "brief path must be absolute, got '$brief'" ;; esac
 
@@ -190,6 +190,12 @@ harness_render() {
   done <<EOS
 $(h_get "$n" env '')
 EOS
+  # A hand opens as a tab or window inside its reeve's own workspace, so it
+  # would inherit the variables that say which workspace and pane it sits in,
+  # and a reeve command run from inside the hand would take its reeve's
+  # workspace as its own and relabel it. So the hand is marked, and those two
+  # are taken away; everything else herdr or tmux set is left alone.
+  [ -n "$hand" ] && envs="-u HERDR_WORKSPACE_ID -u TMUX_PANE REEVE_HAND=$(shq "$hand") $envs"
   [ -n "$envs" ] && line="env $envs$line"
 
   if [ "$mode" = stdin ]; then
@@ -213,7 +219,7 @@ EOS
 
 # --- cli --------------------------------------------------------------------
 cmd=${1:-}; shift 2>/dev/null || :
-sel='' office='' model='' effort='' settings_path='' extra_dirs=''
+sel='' office='' model='' effort='' settings_path='' extra_dirs='' hand=''
 args=()
 while [ $# -gt 0 ]; do
   case $1 in
@@ -222,6 +228,8 @@ while [ $# -gt 0 ]; do
     --model)   model=${2:-}; shift 2 ;;
     --effort)  effort=${2:-}; shift 2 ;;
     --settings) settings_path=${2:-}; shift 2 ;;
+    # The errand id, so the hand's own environment says it is one.
+    --hand)    hand=${2:-}; shift 2 ;;
     # Repeatable. One more directory the hand may reach, beyond its own copy and
     # its errand directory.
     --add-dir) extra_dirs="$extra_dirs${extra_dirs:+ }${2:-}"; shift 2 ;;
@@ -239,7 +247,7 @@ case $cmd in
   check)   n=${1:-$(harness_resolve "$sel" "$office")}; harness_check "$n" ;;
   render)
     n=${1:-}; [ -n "$n" ] || die "render needs a harness name"
-    harness_render "$n" "${2:-}" "$model" "$effort" "$settings_path" "$extra_dirs" ;;
+    harness_render "$n" "${2:-}" "$model" "$effort" "$settings_path" "$extra_dirs" "$hand" ;;
   list)
     printf '%-10s %-10s %-9s %s\n' HARNESS INSTALLED VERIFIED BIN
     for n in $(harness_known); do

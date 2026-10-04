@@ -12,9 +12,14 @@
 # built in, or config/reeve-names, one per line. A name is letters and hyphens,
 # a letter first, at most 12.
 #
-# claim and set refuse a name a live reeve on another pane holds: two reeves
-# under one name would label their hands alike. On refusal, run it bare and
-# say which name you got instead.
+# claim, set and $REEVE_NAME all refuse a name a live reeve on another pane
+# holds: two reeves under one name would label their hands alike. On refusal,
+# run it bare and say which name you got instead; $REEVE_NAME just falls
+# through to the pool, with a warning.
+#
+# Inside herdr or tmux, every form also labels the reeve's own workspace or
+# window with the name, unless another live reeve already holds it, and never
+# from inside a hand. A pane is its id plus its server's socket.
 #
 # The session id stays the identity everywhere. A name is what the liege reads.
 #
@@ -31,20 +36,32 @@ session_touch
 s=$(reeve_session)
 [ -n "$s" ] || die "this session has no id, so it cannot hold a name. set REEVE_SESSION to name a reeve on a harness that exports none"
 
+# label_group <name>   label this reeve's own workspace or window with its
+# name, the group its hands will open inside. Presentation only, so a backend
+# that cannot is said once and ignored: the name is the answer here.
+#
+# Not from a hand: dispatch marks one with REEVE_HAND, and the workspace it sits
+# in is its reeve's. Not outside a backend's own session either (no HERDR_ENV,
+# no TMUX): there is no workspace of its own to label, and making one at every
+# session start left an empty one behind each time. Dispatch makes it then.
+label_group() {
+  local bin b
+  [ -z "${REEVE_HAND:-}" ] || return 0
+  [ "${HERDR_ENV:-}" = 1 ] || [ -n "${TMUX:-}" ] || return 0
+  bin=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+  if ! b=$("$bin/reeve-backend" resolve 2>/dev/null); then
+    warn "no backend resolved, so no workspace was labelled $1"
+  elif ! reeve_group "$bin" "$b" "$1" >/dev/null; then
+    warn "backend '$b' gave $1 no group, so its hands will open on their own"
+  fi
+}
+
 cmd=${1:-}
 case $cmd in
   '')
     n=$(reeve_name)
     [ -n "$n" ] || die "could not assign a name, check $(session_dir "$s")"
-    # Label the reeve's own workspace or window with its name at session start,
-    # the group its hands will open inside. Presentation only, so a backend
-    # that cannot is said once and ignored: the name is the answer here.
-    bin=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-    if ! b=$("$bin/reeve-backend" resolve 2>/dev/null); then
-      warn "no backend resolved, so no workspace was labelled $n"
-    elif ! reeve_group "$bin" "$b" "$n" >/dev/null; then
-      warn "backend '$b' gave $n no group, so its hands will open on their own"
-    fi
+    label_group "$n"
     info "$n" ;;
   claim|set)
     want=${2:-}
@@ -56,8 +73,14 @@ case $cmd in
     if rival=$(name_live_elsewhere "$want" "$(reeve_pane)" "$s"); then
       die "'$want' is held by live reeve $rival on another pane. run reeve-name bare for a free one"
     fi
+    # A group kept under another name is that name's, so it is let go: claim
+    # then finds the one its name kept, and set gets one under the new name.
+    [ "$(session_name "$s")" = "$want" ] || rm -f "$(session_dir "$s")"/group.*
     name_store "$s" "$want" || die "could not write $(session_dir "$s")/name"
     pane_store "$s"
+    lock_release "$lk"; trap - EXIT
+    # The workspace label follows the name now, not at the next dispatch.
+    label_group "$want"
     info "$want" ;;
   *) die "unknown command '$cmd'. try: reeve-name, reeve-name claim <Name>, reeve-name set <Name>" ;;
 esac

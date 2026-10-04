@@ -21,12 +21,23 @@ reeve_backend_tmux_ensure_group() {
   # where the reeve's OWN window takes its name; the session keeps the liege's
   # name, which other windows may be relying on. Else a detached session named
   # for the reeve. The known id is not needed: a session name is its own id.
-  local label=$1 ses='' win
+  #
+  # Every argument after the known id is a session another live reeve holds,
+  # and one reeve per session: a held one is neither renamed in nor nested into,
+  # and the reeve gets its own. A hand (REEVE_HAND, set by dispatch) never takes
+  # the session it sits in, which is its reeve's.
+  local label=$1 ses='' win h
+  shift; [ $# -gt 0 ] && shift
   if [ -n "${REEVE_TMUX_SESSION:-}" ]; then
     ses=$REEVE_TMUX_SESSION
-  elif [ -n "${TMUX_PANE:-}" ]; then
+  elif [ -n "${TMUX_PANE:-}" ] && [ -z "${REEVE_HAND:-}" ]; then
     ses=$(tmux display -p -t "$TMUX_PANE" '#{session_name}' 2>/dev/null) || ses=''
     win=$(tmux display -p -t "$TMUX_PANE" '#{window_id}' 2>/dev/null) || win=''
+    for h in "$@"; do
+      [ -n "$ses" ] && [ "$h" = "$ses" ] || continue
+      echo "tmux: session $ses belongs to another live reeve, so $label gets a session of its own" >&2
+      ses=''; break
+    done
     if [ -n "$ses" ] && [ -n "$win" ]; then
       tmux rename-window -t "$win" "$label" 2>/dev/null || :
       tmux set-window-option -t "$win" automatic-rename off >/dev/null 2>&1 || :

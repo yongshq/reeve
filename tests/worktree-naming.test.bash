@@ -9,9 +9,9 @@
 #
 # Two properties matter beyond the names themselves. The copy stays FLAT,
 # because an <office>/<id> segment would quietly create a directory per role.
-# The label is `<Name>'s <office>: <id>`, one quoted argument to the backend. And the steward keeps having no copy at all,
-# because dispatch runs it in the reeve's home and a recorded path it never
-# creates is a lie in the record.
+# The label is `<Name>'s <office>: <id>`, one quoted argument to the backend.
+# And the steward keeps having no copy at all, because dispatch runs it in the
+# reeve's home and a recorded path it never creates is a lie in the record.
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 PASS=0; FAIL=0
 eq() { # eq <name> <want> <got>

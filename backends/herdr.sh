@@ -48,6 +48,20 @@ reeve_backend_herdr_describe() {
   printf 'herdr %s (session %s)\n' "$(herdr --version 2>/dev/null | awk '{print $NF}')" "$(_h_session)"
 }
 
+# _h_own_server   0 when this shell runs inside the very herdr server _h talks
+# to. Workspace ids are short counters per server (w5 on one, w5 on another), so
+# HERDR_WORKSPACE_ID only names a workspace on the server whose socket set it.
+_h_own_server() {
+  local mine=${HERDR_SOCKET_PATH:-} ses sock
+  [ -n "$mine" ] || return 1
+  ses=$(_h_session); [ -n "$ses" ] || return 1
+  sock=$(herdr session list --json 2>/dev/null \
+    | jq -r --arg n "$ses" '.sessions[]? | select(.name == $n) | .socket_path // empty' 2>/dev/null | head -1)
+  [ -n "$sock" ] && [ "$sock" = "$mine" ]
+}
+
+_h_held() { local w=$1 h; shift; for h in "$@"; do [ "$h" = "$w" ] && return 0; done; return 1; }
+
 reeve_backend_herdr_ensure_group() {
   # Optional. The workspace a reeve's hands open in as tabs. Its own workspace
   # first, when it runs inside herdr on this same server: that is where the
@@ -55,14 +69,25 @@ reeve_backend_herdr_ensure_group() {
   # sidebar says whose it is. Then the one a previous call made, if it is still
   # there. Then a fresh one under the name. Identity is always an id herdr
   # returned, never a label: herdr does not enforce label uniqueness.
+  #
+  # Every id after the known one is held by another live reeve, and one reeve
+  # per workspace: a held one is never renamed, nested into or reused. And a
+  # hand (REEVE_HAND, set by dispatch) never takes the workspace it sits in,
+  # which is its reeve's.
   local label=$1 known=${2:-} ws out
+  shift; [ $# -gt 0 ] && shift
   ws=${HERDR_WORKSPACE_ID:-}
-  if [ -n "$ws" ] && _h workspace get "$ws" >/dev/null; then
-    _h workspace rename "$ws" "$label" >/dev/null || :
-    printf '%s\n' "$ws"; return 0
+  if [ -n "$ws" ] && [ -z "${REEVE_HAND:-}" ] && _h_own_server && _h workspace get "$ws" >/dev/null; then
+    if _h_held "$ws" "$@"; then
+      echo "herdr: workspace $ws belongs to another live reeve, so $label gets a workspace of its own" >&2
+    else
+      _h workspace rename "$ws" "$label" >/dev/null || :
+      printf '%s\n' "$ws"; return 0
+    fi
   fi
-  if [ -n "$known" ] && _h workspace get "$known" >/dev/null; then
-    printf '%s\n' "$known"; return 0
+  ws=$known
+  if [ -n "$ws" ] && ! _h_held "$ws" "$@" && _h workspace get "$ws" >/dev/null; then
+    printf '%s\n' "$ws"; return 0
   fi
   out=$(_h workspace create --cwd "${HOME:-$PWD}" --label "$label" --no-focus) || return 1
   ws=$(printf '%s' "$out" | jq -r '.result.workspace.workspace_id // .result.workspace_id // empty' 2>/dev/null)

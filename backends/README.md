@@ -33,13 +33,18 @@ and every caller treats that refusal as a no and carries on.
 | Function | Arguments | Must print | Exit |
 |---|---|---|---|
 | `relabel` | `<target> <label>` | nothing | 0 if the endpoint now shows `<label>`. Used by `bin/reeve-adopt`, so an adopted hand carries its new reeve's name |
-| `ensure_group` | `<label> [<known-id>]` | one line: a group id | 0 if the group exists and shows `<label>`. The reeve's own group: a herdr workspace, a tmux session. `<known-id>` is what an earlier call printed, to reuse while it is still there. Used by `bin/reeve-dispatch` and `bin/reeve-name` |
+| `ensure_group` | `<label> [<known-id> [<held-id>...]]` | one line: a group id | 0 if the group exists and shows `<label>`. The reeve's own group: a herdr workspace, a tmux session. `<known-id>` is what an earlier call printed, to reuse while it is still there; it may be empty. Each `<held-id>` is a group another live reeve holds, never relabelled, nested into or reused. Used by `bin/reeve-dispatch` and `bin/reeve-name` |
 
 A group is a reeve's own place, labelled with its name, and its hands open inside it: herdr tabs in
 its workspace, tmux windows in its session. The group id, like a target, is opaque to callers; only
 the backend that printed it reads it. A target made inside a group stays opaque too, and `kill` on
 it closes that endpoint only, **never the group**: the group is usually the workspace the reeve
 itself runs in, so closing it would kill the reeve and every hand beside it.
+
+One reeve per group. The workspace a reeve runs in is its group only when no other live reeve holds
+it, when the id really is on the server the backend talks to, and never from inside a hand:
+dispatch launches every hand with `REEVE_HAND=<id>` and with `HERDR_WORKSPACE_ID` and `TMUX_PANE`
+unset, since the workspace a hand sits in is its reeve's. Otherwise the reeve gets one of its own.
 
 ## The rules every backend obeys
 
