@@ -1,0 +1,129 @@
+#!/usr/bin/env bash
+# A Claude Code Stop hook: block a reeve's reply that is missing the report
+# shape of AGENTS.md section 8.
+#
+# Usage, from hooks/hooks.json (the plugin) and .claude/settings.json (a session
+# started inside the clone), never by hand:
+#   bin/reeve-format-guard < <Stop hook input JSON>
+#
+# Acts only on a reeve: REEVE_HAND unset, and the hook's session_id has a name
+# record under $REEVE_HOME/state/sessions/<sid>/name. Every other session, a
+# hand or a stranger, exits 0 with nothing said. A reeve's reply must carry both
+# a "Done this session" heading and a "Next action" line, in their bold markdown
+# forms (a `#` heading also counts). Missing either, it prints
+#   {"decision":"block","reason":"..."}
+# naming what is missing, and Claude Code sends the reeve back to fix the reply.
+#
+# The reply is the hook's last_assistant_message, else the final assistant text
+# of the turn read from transcript_path.
+#
+# Never wedges a session:
+#   - stop_hook_active true means this turn was already sent back once, so it
+#     passes, whatever the reply says. One block per turn, never a loop.
+#   - anything it cannot read or parse passes, with one note on stderr.
+#   - a session with both the plugin and the clone's project settings runs this
+#     twice on the same reply, because Claude Code deduplicates settings files
+#     but keeps a plugin's copy separate. The first to claim the reply blocks,
+#     the other passes, so the reeve is sent back once with one reason.
+#
+# Exit: always 0. The decision is the JSON on stdout.
+
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/reeve-lib.sh"
+
+case ${1:-} in -h|--help) print_help "$0"; exit 0 ;; esac
+
+# Fail open, said once.
+pass() { [ -n "${1:-}" ] && printf 'reeve-format-guard: %s, not checked\n' "$1" >&2; exit 0; }
+
+[ -z "${REEVE_HAND:-}" ] || exit 0
+command -v python3 >/dev/null 2>&1 || pass 'python3 not on PATH'
+
+input=$(cat) || pass 'could not read the hook input'
+
+# One python pass reads everything, one field per line: session id, whether a
+# stop hook is already active, then what the reply lacks, then the reply's hash.
+# The reply itself never crosses into the shell.
+out=$(printf '%s' "$input" | python3 -c '
+import hashlib, json, re, sys
+
+def text_of(content):
+    if isinstance(content, str):
+        return [content]
+    out = []
+    for b in content or []:
+        if isinstance(b, dict) and b.get("type") == "text" and isinstance(b.get("text"), str):
+            out.append(b["text"])
+    return out
+
+def from_transcript(path):
+    # The final assistant message: its entries at the tail of the transcript,
+    # back to the last user entry. Other entry kinds are skipped.
+    entries = []
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line:
+                entries.append(json.loads(line))
+    texts = []
+    for e in reversed(entries):
+        kind = e.get("type") if isinstance(e, dict) else None
+        if kind == "user":
+            break
+        if kind == "assistant":
+            texts = text_of((e.get("message") or {}).get("content")) + texts
+    return "\n".join(texts)
+
+h = json.loads(sys.stdin.read())
+if not isinstance(h, dict):
+    raise ValueError("hook input is not an object")
+sid = h.get("session_id")
+if not isinstance(sid, str) or not sid:
+    raise ValueError("no session_id")
+active = h.get("stop_hook_active") is True
+reply = h.get("last_assistant_message")
+if not isinstance(reply, str) or not reply.strip():
+    path = h.get("transcript_path")
+    reply = from_transcript(path) if (not active and isinstance(path, str) and path) else ""
+    if not active and not reply.strip():
+        raise ValueError("no assistant text found")
+
+missing = []
+if not re.search(r"^[ \t]*(\*\*Done this session\*\*|#{1,6}[ \t]+Done this session\b)", reply, re.M):
+    missing.append("Done this session")
+if not re.search(r"^[ \t]*(\*\*Next action\b[^*\n]*\*\*|#{1,6}[ \t]+Next action\b)", reply, re.M):
+    missing.append("Next action")
+print(sid)
+print("1" if active else "0")
+print(" and ".join("**%s**" % m for m in missing))
+print(hashlib.sha1(reply.encode("utf-8")).hexdigest())
+' 2>/dev/null) || pass 'could not parse the hook input or transcript'
+
+sid=$(printf '%s\n' "$out" | sed -n 1p)
+active=$(printf '%s\n' "$out" | sed -n 2p)
+missing=$(printf '%s\n' "$out" | sed -n 3p)
+key=$(printf '%s\n' "$out" | sed -n 4p)
+
+[ "$active" = 0 ] || exit 0
+# Only a reeve: a session that holds a reeve name. reeve_session's own rule
+# decides what a usable id is; anything else is a stranger's.
+sid=$(REEVE_SESSION=$sid reeve_session)
+[ -n "$sid" ] && [ -n "$(session_name "$sid")" ] || exit 0
+[ -n "$missing" ] || exit 0
+
+# One block per reply, however many copies of this hook run on it. A claim is a
+# directory, so exactly one copy creates it. Claims older than two minutes are
+# cleared first: the copies of one stop run together, so an older claim is a
+# past reply's, and an identical reply in a later turn is checked afresh.
+d=$(session_dir "$sid")
+now=$(date +%s)
+for c in "$d"/format-guard.*; do
+  [ -d "$c" ] || continue
+  m=$(file_mtime "$c") || continue
+  [ $((now - m)) -le 120 ] || rmdir "$c" 2>/dev/null
+done
+case $key in ''|*[!0-9a-f]*) pass 'no reply hash' ;; esac
+mkdir "$d/format-guard.$key" 2>/dev/null || exit 0
+
+reason="Reply is missing $missing. A reeve's reply to the liege takes the report shape of AGENTS.md section 8: a **Done this session** block, then the live blocks, closing with **Waiting on you** if anything waits and a **Next action.** line. Rewrite the reply in that shape."
+python3 -c 'import json, sys; print(json.dumps({"decision": "block", "reason": sys.argv[1]}))' "$reason" \
+  || pass 'could not write the block'

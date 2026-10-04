@@ -1,0 +1,16 @@
+{
+  "description": "Send a reeve back when its reply to the liege misses the AGENTS.md section 8 report shape",
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/bin/reeve-format-guard",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}
