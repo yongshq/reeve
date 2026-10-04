@@ -9,7 +9,8 @@
 # dropped, so every scene records br's birth as made; case 13 takes the record
 # away, 14 and 15 the made and the not dropped. 16 and 17 are --delete-proven,
 # the grant's own delete. 18 to 20 are a name reused after a delete by hand, and
-# a reflog gone.
+# a reflog gone. 21 is a forced rename or copy onto the name on reftable, which
+# keeps the overwritten ref's reflog.
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 
 # --- safety -----------------------------------------------------------------
@@ -55,10 +56,10 @@ record() { # record <id> <repo> <branch>: the errand record the scope check read
   printf 'office=artificer\nrepo=%s\nbranch=%s\nbranchMade=%s\n' "$2" "$3" \
     "${made:-0000000000000000000000000000000000000000 0}" > "$REEVE_HOME/state/$1.meta"
 }
-scene() { # scene <name> [trunk]
+scene() { # scene <name> [trunk] [ref format]
   repo="$SCRATCH/$1"; local trunk=${2:-main}
   mkdir -p "$repo"
-  git -C "$repo" init -q -b "$trunk"
+  git -C "$repo" init -q -b "$trunk" ${3:+--ref-format="$3"}
   G config user.email tester@example.invalid; G config user.name tester
   G config commit.gpgsign false
   echo base > "$repo/base"; G add base; G commit -m base
@@ -287,6 +288,33 @@ rm -f "$repo/.git/logs/refs/heads/br"
 prove "$repo" br
 ck_eq  "20 a removed reflog does not prove"            "$RC" 1
 ck_eq  "20 the branch is untouched"                    "$(git -C "$repo" branch --list br)" "  br"
+
+# 21 the reftable scene: a forced rename (-M) or copy (-C) of a liege branch onto
+# a live household branch keeps br's old reflog entries under the new ref, so the
+# oldest is still the household's birth. Any rename or copy onto the name is no
+# birth, so neither proves. Skipped where git has no reftable.
+if git init -q --ref-format=reftable "$SCRATCH/rtprobe" >/dev/null 2>&1; then
+  for how in M C; do
+    scene "rt$how" main reftable; G cherry-pick br
+    prove "$repo" br
+    ck_eq  "21 -$how setup: the household ref proves on reftable" "$RC" 0
+    G checkout -b mine; printf 'y =  2\n' > "$repo/y.py"; G add y.py; G commit -m y
+    G checkout main; printf 'y = 2\n' > "$repo/y.py"; G add y.py; G commit -m y
+    mine=$(git -C "$repo" rev-parse mine)
+    G branch "-$how" mine br
+    ck_eq  "21 -$how setup: br is now the liege's" "$(git -C "$repo" rev-parse br)" "$mine"
+    ck_eq  "21 -$how a rename or copy onto br has no birth" \
+           "$(. "$ROOT/bin/reeve-lib.sh"; branch_birth "$repo" br)" ""
+    prove "$repo" br
+    ck_eq  "21 -$how onto a household branch does not prove" "$RC" 1
+    ck_has "21 -$how says no record names that ref"         "$OUT" "no errand record names br"
+    OUT=$("$ROOT/bin/reeve-teardown" --delete-proven "$repo" br 2>&1); RC=$?
+    ck_eq  "21 -$how nor does it delete"                    "$RC" 1
+    ck_eq  "21 -$how the liege's branch is untouched"       "$(git -C "$repo" branch --list br)" "  br"
+  done
+else
+  printf 'skip  21 this git has no reftable (git init --ref-format=reftable refused)\n'
+fi
 
 # 12 usage errors are not verdicts.
 OUT=$("$ROOT/bin/reeve-teardown" --prove-landed only-one 2>&1); RC=$?

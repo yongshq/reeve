@@ -145,7 +145,9 @@ BIN=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 #   and time of the branch's oldest reflog entry. A record vouches for that ref,
 #   not for the name. Any delete, this script's or a plain `git branch -d` or
 #   `-D` by hand, takes the reflog with it, so a later branch of the same name
-#   is born again and matches no record. branchDropped= (written by
+#   is born again and matches no record. A rename or copy onto the name (`git
+#   branch -M/-C`) leaves no birth at all, since reftable keeps the overwritten
+#   ref's entries. branchDropped= (written by
 #   --drop-branch and --delete-proven) still refuses a record outright. The
 #   grant covers only branches the household's own errands created. The
 #   liege's, one from a session outside the household, one only a brief names
@@ -169,9 +171,10 @@ BIN=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # - the branch is checked out in no copy. A copy holding it goes by this
 #   script's own teardown or not at all, and its refusal goes to the liege.
 #
-# The limit left open, accepted by the liege: patch ids ignore whitespace, so `-`
-# is not byte equality. A commit that differs from its landed copy only in
-# whitespace proves.
+# The limits left open. Accepted by the liege: patch ids ignore whitespace, so
+# `-` is not byte equality. A commit that differs from its landed copy only in
+# whitespace proves. Known: a branch deleted and recreated at the same sha within
+# the same wall-clock second has the same birth, so the old record still vouches.
 prove_landed() { # prove_landed <holding> <branch> -> one verdict line
   local holding=$1 br=$2 repo repo_p name='' h p f i rp default_ref default_sha
   local br_sha born at merges cherry total plus

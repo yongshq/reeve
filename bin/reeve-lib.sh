@@ -738,10 +738,22 @@ meta_write() {
 # deleting a branch, by any route, deletes its reflog with it (files and
 # reftable alike), so a later branch of the same name starts a reflog of its
 # own and is born again. Nothing when there is no reflog, it expired, or
-# core.logAllRefUpdates is off; a caller reads that as no identity.
+# core.logAllRefUpdates is off; a caller reads that as no identity. Nothing
+# either when any entry is a `git branch -m/-M` rename or `-c/-C` copy onto the
+# name: on reftable a forced one keeps the overwritten ref's old entries, so
+# the oldest would still be the household's birth under another ref's content.
 branch_birth() {
-  git -C "$1" reflog show --date=unix --format='%H %gd' "refs/heads/$2" -- 2>/dev/null \
-    | tail -n 1 | sed -n 's/^\([0-9a-f]\{40,\}\) .*@{\([0-9]\{1,\}\)}$/\1 \2/p'
+  local log line
+  log=$(git -C "$1" reflog show --date=unix --format='%H %gd%x09%gs' "refs/heads/$2" -- 2>/dev/null) \
+    || return 0
+  while IFS= read -r line; do
+    case $line in
+      *"	"[Bb]"ranch: renamed refs/heads/"*" to refs/heads/$2" \
+      | *"	"[Bb]"ranch: copied refs/heads/"*" to refs/heads/$2") return 0 ;;
+    esac
+  done <<< "$log"
+  printf '%s\n' "$log" | tail -n 1 | cut -f 1 \
+    | sed -n 's/^\([0-9a-f]\{40,\}\) .*@{\([0-9]\{1,\}\)}$/\1 \2/p'
 }
 
 # errand_session <id> <bin dir>
