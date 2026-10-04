@@ -527,10 +527,12 @@ session_touch() {
   mv -f "$d/seen.$$" "$d/seen" 2>/dev/null || rm -f "$d/seen.$$"
   # And from where: a session resumed in another pane (`claude --resume`) would
   # otherwise keep the old pane on record until something asked its name, and a
-  # new reeve in that old pane would read as this one replaced.
-  pane_store "$s"
+  # new reeve in that old pane would read as this one replaced. Never from a
+  # hand: its tab is not a reeve's pane, and a hand that shares its reeve's
+  # session id would otherwise move the reeve's record into the hand's tab.
+  [ -n "${REEVE_HAND:-}" ] || pane_store "$s"
   # Which harness, where it says so, so a resume hint names its own command.
-  [ -f "$d/harness" ] || [ "$s" != "${CLAUDE_CODE_SESSION_ID:-}" ] \
+  [ -n "${REEVE_HAND:-}" ] || [ -f "$d/harness" ] || [ "$s" != "${CLAUDE_CODE_SESSION_ID:-}" ] \
     || printf 'claude\n' > "$d/harness" 2>/dev/null || :
   # Saying "still here" is also the moment to clear out those who are not.
   sessions_prune_maybe

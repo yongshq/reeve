@@ -383,14 +383,15 @@ errand a14 A Aldric
 REEVE_SESSION=A HERDR_PANE_ID=w2:p1 HERDR_SOCKET_PATH=$STUB_SOCK "$ROOT/bin/reeve-status" --no-wake >/dev/null 2>&1
 eq  "14 the heartbeat rewrites the pane record" "$(cat "$SESS/A/pane")" "w2:p1$S"
 B14() { REEVE_SESSION=B HERDR_PANE_ID=w1:p1 HERDR_SOCKET_PATH=$STUB_SOCK STUB_PANES='w1:p1 w2:p1' STUB_FG=claude "$@"; }
+# Before any adopt below, which would move a14 off A and pass this unearned.
+out=$(B14 "$ROOT/bin/reeve-status" --orphans --no-wake 2>/dev/null)
+nas "14 B does not see A's errand as an orphan"        "$out" "a14"
 got=$(B14 "$ROOT/bin/reeve-name" 2>/dev/null)
 eq  "14 B in A's old pane gets a pool name"           "$got" Bran
 out=$(B14 "$ROOT/bin/reeve-adopt" --mine 2>&1)
 eq  "14 B's --mine leaves A's errand"                  "$(grep '^session=' "$REEVE_HOME/state/a14.meta")" session=A
 out=$(B14 "$ROOT/bin/reeve-adopt" a14 2>&1); rc=$?
 eq  "14 and B cannot adopt it"                         "$rc" 1
-out=$(B14 "$ROOT/bin/reeve-status" --orphans --no-wake 2>/dev/null)
-nas "14 nor sees it as an orphan"                      "$out" "a14"
 got=$(B14 env HERDR_WORKSPACE_ID=w1 STUB_WS=w1 STUB_LABEL=Aldric bash -c ". \"\$0/bin/reeve-lib.sh\"; reeve_group \"\$0/bin\" herdr Bran" "$ROOT" 2>"$SCRATCH/err")
 eq  "14 nor takes A's workspace"                       "$got" "wNEW$S"
 has "14 which it says"                                 "$(cat "$SCRATCH/err")" "belongs to another live reeve"
@@ -406,6 +407,14 @@ touch "$SCRATCH/mt"
 m=$(lib file_mtime "$SCRATCH/mt")
 case $m in ''|*[!0-9]*) bad "16 file_mtime prints epoch seconds only" "got [$m]" ;; *) ok "16 file_mtime prints epoch seconds only" ;; esac
 d=$(( $(date +%s) - m )); [ "$d" -ge 0 ] && [ "$d" -lt 60 ] && ok "16 and the right ones" || bad "16 and the right ones" "off by $d"
+
+echo "--- 17. a hand's heartbeat writes no pane or harness record ---"
+fresh
+REEVE_HAND=x1 CLAUDE_CODE_SESSION_ID=handsid REEVE_SESSION=handsid HERDR_PANE_ID=w1:p3 \
+  HERDR_SOCKET_PATH=$STUB_SOCK "$ROOT/bin/reeve-status" --no-wake >/dev/null 2>&1
+[ -f "$SESS/handsid/seen" ] && ok "17 the hand still heartbeats" || bad "17 the hand still heartbeats" "no seen"
+[ -e "$SESS/handsid/pane" ] && bad "17 but stores no pane" "$(cat "$SESS/handsid/pane")" || ok "17 but stores no pane"
+[ -e "$SESS/handsid/harness" ] && bad "17 nor a harness" "$(cat "$SESS/handsid/harness")" || ok "17 nor a harness"
 
 echo "--- L. live tmux, on a private socket ---"
 if [ -z "$REAL_TMUX" ]; then
