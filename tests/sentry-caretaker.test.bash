@@ -277,9 +277,12 @@ if waitfor 10 '[ -f "$LOCK" ]'; then
   # Somebody else now holds this home, as a caretaker holds it: written whole,
   # and re-asserted every check. One write in place loses to a refresh the
   # caretaker already had in flight, and a real holder settles that next poll.
+  # Liveness first, and re-taken only from the caretaker, never from nobody: a
+  # lock gone missing is the caretaker removing what it no longer holds, which
+  # the check after this must still see rather than have papered over.
   take_lock() { marker "$$" 0 > "$LOCK.new.$$" && mv "$LOCK.new.$$" "$LOCK"; }
   take_lock
-  if waitfor 10 '{ [ "$(marker_pid "$LOCK")" = "$$" ] || take_lock; }; ! kill -0 "$CARE" 2>/dev/null'; then
+  if waitfor 10 '! kill -0 "$CARE" 2>/dev/null || { [ "$(marker_pid "$LOCK")" = "$CARE" ] && take_lock; false; }'; then
     ok "2 a caretaker whose lock was taken stands down"
   else
     bad "2 a caretaker whose lock was taken stands down" "pid $CARE is still alive"
