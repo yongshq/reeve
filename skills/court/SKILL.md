@@ -27,9 +27,10 @@ report briefly, then walk the open decisions one at a time.
    the manor in hand.
 
 3. **Open with one paragraph, not a table.** What landed, what is in flight, what is stuck. Tables
-   are for `/muster`; court is a conversation. Court keeps this form in place of the contract's
-   report shape, but closes the same way: every court reply ends with the Waiting on you block and
-   the Next action line (section 8).
+   are for `/muster`; court is a conversation. This paragraph and the
+   decisions below sit inside the contract's report shape (section 8): every court reply still
+   carries the Done this session block (`- nothing yet` when nothing has finished), and ends with
+   the Waiting on you block and the Next action line.
 
 4. **Then take the decisions one at a time.** This is the part that matters, and the order matters
    too: sort by what is blocking the most work, not by what arrived first.

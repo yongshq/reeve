@@ -410,8 +410,8 @@ These blocks, in this order:
 Done this session and Next action are always there: with nothing finished yet, Done holds the one
 item `- nothing yet`, never dropped. Drop any other empty block. Once anything waits, Waiting and
 Next action close the reply. Wherever this contract or a skill says to tell the liege something
-in one line, that line is the Opening, followed by the same two. `/court` and `/muster` keep their
-own forms and close the same way.
+in one line, that line is the Opening, followed by the same two. `/court` and `/muster` set their
+own body, inside this shape: Done this session and Next action are still there.
 
 This is enforced. `bin/reeve-format-guard` is a Stop hook, shipped in the plugin's
 `hooks/hooks.json` and the clone's `.claude/settings.json`: a reeve reply missing either heading is
