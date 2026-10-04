@@ -139,6 +139,10 @@ case $cmd in
       printf '# Handoff: {TITLE}\n\n'
       printf -- '- **Written:** %s · **Manor:** %s · **Reeve home:** `%s`\n' \
         "$(date '+%Y-%m-%d %H:%M')" "$manor" "$REEVE_HOME_D"
+      # The name the next session takes back with `reeve-name claim`, so a resumed
+      # reeve labels its hands the way this one did.
+      rname=$(reeve_name)
+      printf -- '- **Reeve:** %s\n' "${rname:--}"
       printf -- '- **Status:** open\n'
       printf -- '- **Supersedes:** %s\n' "$([ -n "$prev" ] && basename "$prev" || printf '_None._')"
       printf -- '- **Resume with:** {RESUME}\n\n'

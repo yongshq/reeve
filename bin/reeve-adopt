@@ -14,6 +14,9 @@
 #
 # `bin/reeve-status --orphans` lists the ones this will take without --force.
 #
+# The errand takes this reeve's name with it, and where the backend can, the
+# hand's label is renamed to match: `<Name>'s <office>: <id>`.
+#
 # Exit: 0 adopted, 1 refused.
 
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/reeve-lib.sh"
@@ -21,6 +24,7 @@
 # This session is doing something, so it is demonstrably still here. What the
 # caretaker reads to tell a reeve that is gone from one that is merely quiet.
 session_touch
+BIN=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
 force=no id=''
 while [ $# -gt 0 ]; do
@@ -58,6 +62,20 @@ fi
 
 meta_set "$id" session "$mine"
 
+# Whose hand it is changed, so what it is called changes with it: the record
+# first, then, best effort, the label the liege reads where the hand is running.
+# A backend without the optional relabel, or one that refuses, leaves the old
+# label up and costs nothing else: no label is ever authority.
+rname=$(reeve_name)
+meta_set "$id" reeve "$rname"
+relabeled=no
+tgt=$(meta_get "$id" target '')
+if [ -n "$tgt" ]; then
+  label=$(hand_label "$(meta_get "$id" office '')" "$id" "$rname")
+  "$BIN/reeve-backend" call relabel "$tgt" "$label" \
+      --backend "$(meta_get "$id" backend herdr)" >/dev/null 2>&1 && relabeled=yes
+fi
+
 # A wake is addressed to a session, so rewriting the owner leaves any pending
 # one in a spool belonging to the reeve this errand was just taken from: by the
 # rule adoption is allowed under, a reeve that is provably gone. Nothing would
@@ -68,5 +86,6 @@ case $moved in ''|*[!0-9]*) moved=0 ;; esac
 
 info "errand '$id' adopted${own:+, from session $own}"
 info "  this session now watches it and is the one that will clean up after it"
+[ "$relabeled" = yes ] && info "  relabelled where it is running: $label"
 [ "$moved" -gt 0 ] && info "  $moved pending notification(s) came with it"
 exit 0

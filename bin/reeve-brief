@@ -236,6 +236,10 @@ else
   copy_cell="\`$worktree\`"
 fi
 
+# The reeve briefing this errand, by name: the brief says whose hand this is,
+# and the record keeps it so the label a dispatch renders says the same.
+rname=$(reeve_name)
+
 status=$(status_file "$id")
 report=$(report_file "$id")
 say="$REEVE_ROOT_D/bin/reeve-say"
@@ -258,6 +262,7 @@ you, so never wait for input.
 | errand | \`$id\` |
 | office | \`$office\` |
 | manor | $manor |
+| reeve | ${rname:--} |
 | holding | \`$repo\` |
 | your copy | $copy_cell |
 | branch | ${branch:-none, detached at \`$base\`} |
@@ -559,6 +564,7 @@ meta_write "$id" \
   "writes=$writes" \
   "harness=$harness" \
   "session=$(reeve_session)" \
+  "reeve=$rname" \
   "created=$(today)" \
   ${ticket_meta+"${ticket_meta[@]}"}
 

@@ -93,8 +93,9 @@ sentry() { OUT=$("$ROOT/bin/reeve-sentry" --once --no-reap 2>&1); RC=$?; }
 # The PROCESS cell by position, since an idle cell holds a space of its own. The
 # column exactly, so a cell that ran past sixteen into OPEN would fail here.
 row()    { "$ROOT/bin/reeve-status" --all --no-wake 2>/dev/null | grep '^hung ' | cut -c55-70 | sed 's/ *$//'; }
-# What follows the column: one space, then OPEN, wherever the cell ended.
-open()   { "$ROOT/bin/reeve-status" --all --no-wake 2>/dev/null | grep '^hung ' | cut -c71-; }
+# What follows the column: one space, then OPEN, wherever the cell ended. OPEN
+# is ten wide in a whole-home listing, with REEVE after it, cut away here.
+open()   { "$ROOT/bin/reeve-status" --all --no-wake 2>/dev/null | grep '^hung ' | cut -c71-81 | sed 's/ *$//'; }
 single() { "$ROOT/bin/reeve-status" hung 2>/dev/null | sed -n 's/^process  *//p'; }
 
 printf 'settled\n' > "$STUB_ATTN"

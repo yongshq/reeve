@@ -27,6 +27,13 @@ Each is `reeve_backend_<name>_<fn>`, sourced only through `bin/reeve-backend`.
 | `wait_change` | `<target> <timeout_ms>` | nothing | 0 a change was observed, 1 timed out with no signal, 2 this backend cannot wait and the caller must poll |
 | `kill` | `<target>` | nothing | 0 |
 
+One optional function. A backend may leave it out; `bin/reeve-backend` then refuses the call, and
+every caller treats that refusal as a no and carries on.
+
+| Function | Arguments | Must print | Exit |
+|---|---|---|---|
+| `relabel` | `<target> <label>` | nothing | 0 if the endpoint now shows `<label>`. Used by `bin/reeve-adopt`, so an adopted hand carries its new reeve's name |
+
 ## The rules every backend obeys
 
 1. **A target is opaque to callers.** Only the backend parses it. herdr pane ids contain a colon

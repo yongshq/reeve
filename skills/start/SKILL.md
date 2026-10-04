@@ -28,7 +28,16 @@ knowing the rules that make dispatching safe.
 
 ## Then take up the session
 
-Do the session-start reading the contract names, in its order:
+Take your name first. It is what every hand you send out is labelled with: `<Name>'s scout: <id>`.
+
+- Resuming a handoff (`reeve-handoff newest <manor>` finds it) whose header carries a
+  `Reeve: <Name>` line: `reeve-name claim <Name>`, so you keep the name the last reeve had. If it
+  refuses, a live reeve holds that name: run `reeve-name` bare and tell the liege which name you
+  took instead.
+- Anything else: `reeve-name`, bare. It hands back the name this pane had before a `/clear`, or a
+  free one from the pool.
+
+Then do the session-start reading the contract names, in its order:
 
 ```sh
 reeve-doctor          # what is verified, who else is running, what is orphaned
@@ -55,5 +64,5 @@ and not a reason to start working on it; load `survey` if the liege asks about i
 
 ## Say one line, then stop
 
-Open with one short line of where things stand, as the contract says. Not a report. `/reeve:court`
-exists for the full recap.
+Open with one short line of where things stand, as the contract says, naming yourself. Not a
+report. `/reeve:court` exists for the full recap.

@@ -7,9 +7,9 @@
 # working on what. So each name has exactly one place it can go wrong, and both
 # are worth pinning.
 #
-# Two properties matter beyond the names themselves. Both stay FLAT, because an
-# <office>/<id> segment would quietly create a directory per role and is not a
-# session name a backend accepts. And the steward keeps having no copy at all,
+# Two properties matter beyond the names themselves. The copy stays FLAT,
+# because an <office>/<id> segment would quietly create a directory per role.
+# The label is `<Name>'s <office>: <id>`, one quoted argument to the backend. And the steward keeps having no copy at all,
 # because dispatch runs it in the reeve's home and a recorded path it never
 # creates is a lie in the record.
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
@@ -73,6 +73,10 @@ git init -q "$REPO"
 git -C "$REPO" symbolic-ref HEAD refs/heads/main
 git -C "$REPO" -c user.email=reeve@example.invalid -c user.name=reeve \
     -c commit.gpgsign=false commit -q --allow-empty -m init
+
+# No session id and no name from the caller's environment: the briefs below are
+# an unnamed reeve's unless a test names one.
+unset CLAUDE_CODE_SESSION_ID REEVE_SESSION REEVE_NAME HERDR_PANE_ID TMUX_PANE
 
 B="$ROOT/bin/reeve-brief"
 PARENT="$SCRATCH/holding.worktrees"
@@ -148,20 +152,28 @@ dry_label() { # dry_label <id>
   fill_seams "$1"
   REEVE_ROOT="$STUB" "$ROOT/bin/reeve-dispatch" "$1" \
       --backend stub --harness stub --dry-run 2>/dev/null \
-    | sed -n 's/^ *would run: reeve-backend call create_endpoint [^ ]* \([^ ]*\) --backend .*/\1/p'
+    | sed -n 's/^ *would run: reeve-backend call create_endpoint [^ ]* "\(.*\)" --backend .*/\1/p'
 }
 
 # The steward is included on purpose: it has no copy, so its label is the only
-# name it ever shows up under.
+# name it ever shows up under. These were briefed with no session id, so no
+# reeve name: the label falls back to `<office>: <id>`, and still names the
+# office.
 for office in artificer warden steward; do
   label=$(dry_label "e-$office")
-  eq "$office opens a session named $office-<id>" "$office-e-$office" "$label"
+  eq "$office opens a session labelled $office: <id>" "$office: e-$office" "$label"
   case $label in
-    */*) FAIL=$((FAIL+1)); printf 'FAIL  %s label is not a flat token: %s\n' "$office" "$label" ;;
+    */*) FAIL=$((FAIL+1)); printf 'FAIL  %s label nests a path: %s\n' "$office" "$label" ;;
     '')  FAIL=$((FAIL+1)); printf 'FAIL  %s dry run printed no label at all\n' "$office" ;;
-    *)   PASS=$((PASS+1)); printf 'ok    %s label is a flat token (%s)\n' "$office" "$label" ;;
+    *)   PASS=$((PASS+1)); printf 'ok    %s label holds no slash (%s)\n' "$office" "$label" ;;
   esac
 done
+
+# A reeve with a name puts it in front: whose hand, then which, then what for.
+REEVE_SESSION=namer REEVE_NAME=Godric "$B" e-named "$REPO" --office scout >/dev/null \
+  || { printf 'FAIL  reeve-brief refused for a named reeve\n'; FAIL=$((FAIL+1)); }
+eq "a named reeve's hand is labelled <Name>'s <office>: <id>" \
+   "Godric's scout: e-named" "$(dry_label e-named)"
 
 echo "passed=$PASS failed=$FAIL"
 [ "$FAIL" -eq 0 ]

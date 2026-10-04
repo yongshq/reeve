@@ -252,3 +252,12 @@ reeve_backend_herdr_kill() {
   fi
   _h pane close "$(_h_pane "$target")" >/dev/null 2>&1
 }
+
+reeve_backend_herdr_relabel() {
+  # Optional. Renames the workspace create_endpoint made, found by the id in the
+  # target and never by its old label. The label is one argument whatever it
+  # holds; herdr answers with JSON nobody here reads.
+  local ws; ws=$(_h_ws "$1")
+  [ -n "$ws" ] || return 1
+  _h workspace rename "$ws" "$2" >/dev/null
+}

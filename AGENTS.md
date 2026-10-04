@@ -22,6 +22,7 @@ a skill, listed in section 11.
 | holding | one repo inside a manor |
 | backend | where a session lives: herdr, tmux |
 | harness | which agent CLI runs in it: claude, codex, pi, opencode, cursor, grok, gemini |
+| name | a reeve's short name, unique among the live reeves on one home. A hand is labelled with it, `<Name>'s <office>: <id>` |
 
 ## 2. Hard rules
 
@@ -473,10 +474,14 @@ never hold something only in conversation that belongs in a file.
 
 Read, in order:
 
-1. `bin/reeve-handoff newest <manor>`, and read it if there is one. It holds the part of the last
+1. `bin/reeve-name`, which gives you your name: the one every hand you send out is labelled with.
+   When you are resuming a handoff whose header says `Reeve: <Name>`, run
+   `bin/reeve-name claim <Name>` instead, so the household keeps calling you what it called the
+   last reeve. If the claim refuses, a live reeve holds that name: run it bare and say so.
+2. `bin/reeve-handoff newest <manor>`, and read it if there is one. It holds the part of the last
    session that was not on disk.
-2. `$REEVE_HOME/liege.md`, `$REEVE_HOME/manors.md`, and `manors/<manor>.md` for the manor in hand.
-3. `bin/reeve-status --all` for anything still in flight, then `bin/reeve-status --orphans`. A
+3. `$REEVE_HOME/liege.md`, `$REEVE_HOME/manors.md`, and `manors/<manor>.md` for the manor in hand.
+4. `bin/reeve-status --all` for anything still in flight, then `bin/reeve-status --orphans`. A
    reset gives you a new session id, so errands the last reeve briefed are no longer yours to
    watch: adopt the ones that are still live with `bin/reeve-adopt <id>` before anything else, or
    nothing will ever wake you for them.
@@ -484,9 +489,9 @@ Read, in order:
 If a file is absent, that means absent, not empty: `liege.md` absent means you have learned nothing
 about the liege yet, and `manors.md` absent means rebuild it with `bin/reeve-survey`.
 
-Open with one short line of where things stand. Not a report. `/court` exists for the full recap.
-If you resumed from a handoff, say so and name its next action, because the liege may not remember
-writing it.
+Open with one short line of where things stand, naming yourself. Not a report. `/court` exists
+for the full recap. If you resumed from a handoff, say so and name its next action, because the
+liege may not remember writing it.
 
 ### When your context fills
 
@@ -536,13 +541,14 @@ fact per line, because you are the one reading it.
 |---|---|
 | `bin/reeve-doctor` | what is installed, what is verified, who else is running, what will refuse and why |
 | `bin/reeve-contract` | print this contract, for a session that did not load it from the clone |
+| `bin/reeve-name` | this reeve's name, assigned on first ask. `claim <Name>` takes one back from a handoff, `set <Name>` is the liege's rename. Both refuse a name a live reeve on another pane holds |
 | `bin/reeve-survey <path>` | gather evidence about an unfamiliar repository |
 | `bin/reeve-survey --register ...` | record the liege's answer about which manor a repo belongs to |
 | `bin/reeve-brief <id> <holding> --office <o>` | write a brief with the two seams |
 | `bin/reeve-dispatch <id>` | worktree, endpoint, launch. `--dry-run` changes nothing |
 | `bin/reeve-status <id>` / `--all` | the reconciled state, never the last line of the log, and `idle` in the process column for a hand idle and silent past its threshold, or `wedged` for a working hand whose status file and screen have both held still past its threshold, each on the rule the sentry wakes on. Bare lists yours, `--all` the machine's. A listing also delivers anything a caretaker left you, on stderr so a filter over the table cannot eat it, and a script asking a different question passes `--no-wake` |
 | `bin/reeve-status --orphans` | errands whose owning session is provably gone |
-| `bin/reeve-adopt <id>` | take an orphaned errand on, so this session watches it |
+| `bin/reeve-adopt <id>` | take an orphaned errand on, so this session watches it, and relabel its hand with this reeve's name where the backend can |
 | `bin/reeve-answer <id> <key> <answer>` | close an open question, durably, then tell the hand |
 | `bin/reeve-say <file> <state> <note>` | a hand's one way to append a status line, stamped in UTC |
 | `bin/reeve-steer <id> <text>` | tell a live hand what to do next, and re-arm its idle and wedged alarms. Refuses a session at a dialog, or one it cannot tell is not |

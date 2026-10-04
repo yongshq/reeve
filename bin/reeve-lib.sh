@@ -627,6 +627,201 @@ session_state() { # session_state <sid> -> alive | dead | unknown
     else printf 'dead\n'
   fi
 }
+
+# --- reeve names ------------------------------------------------------------
+# A session id is a uuid, which is identity and not something the liege can
+# read in a sidebar. So each reeve also carries a short name, and a hand it
+# sends out is labelled with it: `Aldric's scout: fix-auth`. The id stays the
+# authority everywhere; a name is presentation and is never matched to decide
+# anything destructive.
+#
+# Two files in the session's own record: `name`, and `pane`, the terminal pane
+# it runs in. The pane is what lets a name survive /clear: a pane runs one
+# harness at a time, so another record naming this same pane is the session
+# that this one replaced, and its name carries over.
+#
+# Unique among the reeves alive on this home, never globally: a session long
+# gone keeps its record, and refusing its name forever would empty the pool.
+
+REEVE_NAME_POOL="Aldric Bran Cedric Edric Osric Godric Alaric Elric Wulf Hugh Odo Garth Merek
+Roland Anselm Galen Ywain Leof Rowan Percy"
+
+valid_reeve_name() {
+  # ^[A-Za-z][A-Za-z-]{0,11}$, in negated classes under LC_COLLATE=C.
+  case $1 in
+    ''|*[!A-Za-z-]*) return 1 ;;
+    [!A-Za-z]*)      return 1 ;;
+  esac
+  [ ${#1} -le 12 ]
+}
+
+reeve_pane() { printf '%s' "${HERDR_PANE_ID:-${TMUX_PANE:-}}"; }
+
+session_name() { # session_name <sid>   the stored name, or nothing
+  local n=''
+  [ -n "${1:-}" ] && [ -f "$(session_dir "$1")/name" ] \
+    && n=$(head -n 1 "$(session_dir "$1")/name" 2>/dev/null | tr -d '[:space:]')
+  valid_reeve_name "$n" && printf '%s\n' "$n"
+  return 0
+}
+
+session_pane() { # session_pane <sid>
+  [ -f "$(session_dir "$1")/pane" ] && head -n 1 "$(session_dir "$1")/pane" 2>/dev/null
+  return 0
+}
+
+reeve_name_pool() {
+  # config/reeve-names, one per line, bad lines skipped. Read whole rather than
+  # through config_get, which squeezes a file into a single token.
+  local f n out=''
+  f=$(config_file reeve-names)
+  if [ -f "$f" ]; then
+    while IFS= read -r n || [ -n "$n" ]; do
+      n=$(printf '%s' "$n" | tr -d '[:space:]')
+      valid_reeve_name "$n" && out="$out$n
+"
+    done < "$f"
+  fi
+  # A file with no usable line is a mistake, not a request for no names at all.
+  [ -n "$out" ] || out=$(printf '%s\n' $REEVE_NAME_POOL)
+  printf '%s' "$out" | grep .
+}
+
+# name_holders [<except sid>]   "<name> <state> <pane> <sid>" per named record
+name_holders() {
+  local d sid n p
+  for d in "$REEVE_HOME_D"/state/sessions/*; do
+    [ -d "$d" ] || continue
+    sid=$(basename "$d")
+    [ "$sid" = "${1:-}" ] && continue
+    n=$(session_name "$sid"); [ -n "$n" ] || continue
+    # `-` for no pane, so the four fields always read back as four
+    p=$(session_pane "$sid" | tr -d '[:space:]')
+    printf '%s %s %s %s\n' "$n" "$(session_state "$sid")" "${p:--}" "$sid"
+  done
+}
+
+# name_live_elsewhere <name> <pane> [<except sid>]
+#   prints the live session holding <name> on another pane, rc 0 if there is one.
+#   A holder on this same pane is the session this one replaced, so not a rival.
+name_live_elsewhere() {
+  local want=$1 pane=$2 n st p sid
+  while read -r n st p sid; do
+    [ "$n" = "$want" ] && [ "$st" = alive ] || continue
+    [ -n "$pane" ] && [ "$p" = "$pane" ] && continue
+    printf '%s\n' "$sid"; return 0
+  done <<NAME_HOLDERS_EOF
+$(name_holders "${3:-}")
+NAME_HOLDERS_EOF
+  return 1
+}
+
+name_store() { # name_store <sid> <name>
+  local d; d=$(session_dir "$1")
+  mkdir -p "$d" 2>/dev/null || return 1
+  printf '%s\n' "$2" > "$d/name.$$" 2>/dev/null && mv -f "$d/name.$$" "$d/name" \
+    || { rm -f "$d/name.$$"; return 1; }
+}
+
+pane_store() { # pane_store <sid>   record the pane, when there is one and it moved
+  local d p; p=$(reeve_pane); [ -n "$p" ] || return 0
+  d=$(session_dir "$1")
+  [ "$(session_pane "$1")" = "$p" ] && return 0
+  mkdir -p "$d" 2>/dev/null || return 0
+  printf '%s\n' "$p" > "$d/pane.$$" 2>/dev/null && mv -f "$d/pane.$$" "$d/pane" || rm -f "$d/pane.$$"
+}
+
+# reeve_name_peek   this session's stored name, writing nothing. For a caller
+# that promised to change nothing, a dispatch --dry-run.
+reeve_name_peek() {
+  local s; s=$(reeve_session); [ -n "$s" ] || return 0
+  session_name "$s"
+}
+
+# reeve_name   this session's name, assigned on first ask. Nothing when the
+# session has no id: there is no record to hold a name, and a caller degrades.
+#
+# Order: the stored name; $REEVE_NAME; the name of the session this pane ran
+# before; the first pool name no live reeve holds, preferring one no record
+# holds at all; then <Name>-II and on, so the pool running out never fails.
+# Under a lock, so two reeves starting together never take the same name.
+reeve_name() {
+  local s n lk pane holders cand k d
+  s=$(reeve_session); [ -n "$s" ] || return 0
+  n=$(session_name "$s")
+  if [ -n "$n" ]; then pane_store "$s"; printf '%s\n' "$n"; return 0; fi
+
+  lk=$(lock_acquire names 15) || return 0
+  pane=$(reeve_pane)
+  n=$(session_name "$s")
+  if [ -z "$n" ] && [ -n "${REEVE_NAME:-}" ]; then
+    if valid_reeve_name "$REEVE_NAME"; then n=$REEVE_NAME
+    else warn "REEVE_NAME '$REEVE_NAME' is not a name: letters and hyphens, a letter first, at most 12. ignored"; fi
+  fi
+  holders=$(name_holders "$s")
+  if [ -z "$n" ] && [ -n "$pane" ]; then
+    # The most recently seen record on this pane, which is the one /clear replaced.
+    n=$(for d in "$REEVE_HOME_D"/state/sessions/*; do
+          [ -d "$d" ] || continue
+          k=$(basename "$d"); [ "$k" = "$s" ] && continue
+          [ "$(session_pane "$k" | tr -d '[:space:]')" = "$pane" ] || continue
+          cand=$(session_name "$k"); [ -n "$cand" ] || continue
+          printf '%s %s\n' "$(tr -dc '0-9' 2>/dev/null < "$d/seen")" "$cand"
+        done | sort -n | tail -n 1 | sed 's/^[0-9]* *//')
+    # Never inherit a name a live reeve on another pane has since claimed.
+    [ -n "$n" ] && name_live_elsewhere "$n" "$pane" "$s" >/dev/null && n=''
+  fi
+  if [ -z "$n" ]; then
+    local pool k2 suffix='' named alive
+    pool=$(reeve_name_pool)
+    named=$(printf '%s\n' "$holders" | cut -d' ' -f1)
+    alive=$(printf '%s\n' "$holders" | awk '$2 == "alive" { print $1 }')
+    # A spent pool runs on in numerals, <Name>-II and on: a name is letters and
+    # hyphens, so a digit would not pass, and the numeral suits the household.
+    for k2 in '' II III IV V VI VII VIII IX X; do
+      suffix=${k2:+-$k2}
+      # held by no record at all, then held by no live one
+      for cand in $pool; do
+        valid_reeve_name "$cand$suffix" || continue
+        lines_has "$cand$suffix" "$named" || { n=$cand$suffix; break; }
+      done
+      [ -n "$n" ] && break
+      for cand in $pool; do
+        valid_reeve_name "$cand$suffix" || continue
+        lines_has "$cand$suffix" "$alive" || { n=$cand$suffix; break; }
+      done
+      [ -n "$n" ] && break
+    done
+    # Ten full pools of live reeves on one home. Still never fail.
+    [ -n "$n" ] || n=Reeve
+  fi
+  name_store "$s" "$n"
+  pane_store "$s"
+  lock_release "$lk"
+  printf '%s\n' "$n"
+}
+
+# hand_label <office> <id> [<reeve name>]
+#   What a backend shows for a hand: config/hand-label, else `{reeve}'s
+#   {office}: {id}`. With no name, `{office}: {id}`, whatever the template.
+#   Read whole: config_get squeezes out the spaces this one is made of.
+#   Quotes, backslashes and control characters are dropped, so the label stays
+#   one argument a dry run can print inside double quotes.
+hand_label() {
+  local office=$1 id=$2 name=${3:-} t f
+  t="{office}: {id}"
+  if [ -n "$name" ]; then
+    t="{reeve}'s {office}: {id}"
+    f=$(config_file hand-label)
+    [ -f "$f" ] && f=$(head -n 1 "$f" 2>/dev/null) && [ -n "$f" ] && t=$f
+  fi
+  t=${t//'{reeve}'/$name}
+  t=${t//'{office}'/$office}
+  t=${t//'{id}'/$id}
+  t=$(printf '%s' "$t" | tr -d '"\\' | tr -d '\000-\037\177')
+  [ -n "$t" ] || t="$office: $id"
+  printf '%s\n' "$t"
+}
 # --- output -----------------------------------------------------------------
 # Everything a script prints is read by the reeve, so keep it one fact per line.
 

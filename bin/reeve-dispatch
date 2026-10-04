@@ -197,19 +197,25 @@ else
 fi
 
 # --- endpoint and launch ---------------------------------------------------
-# The label names the office, because it is what the liege reads in a backend's
-# session list. `reeve-<id>` said only that a reeve was involved, which every
-# session in the household shares, so the role was the one thing the list could
-# not tell them. This is the same name the local copy already carries, so a
-# glance lines the two up.
+# The label names the reeve that sent the hand, the office, and the errand, so
+# the liege reads `Aldric's scout: fix-auth` in a backend's session list and
+# knows whose it is and what it is for. config/hand-label overrides the shape,
+# with {reeve} {office} {id}; a reeve with no name gets `scout: fix-auth`.
 #
-# Flat <office>-<id>, never <office>/<id>: a backend takes this as a session
-# name, and nothing recomputes it later. An errand's meta records the target the
-# backend returned, not the label, so sessions already running under the old
-# name keep working untouched.
-label="$office-$id"
+# The name is the one the brief recorded, the reeve that briefed the errand, and
+# else this session's stored name, read and never assigned: a dry run promises
+# to change nothing.
+#
+# The label is presentation only. An errand's meta records the target the
+# backend returned, never the label, and nothing ever finds a session by it, so
+# sessions already running under an older label keep working untouched. It is
+# passed as one quoted argument, so its spaces are safe, and a dry run prints it
+# inside double quotes, which hand_label keeps out of it.
+rname=$(meta_get "$id" reeve '')
+valid_reeve_name "$rname" || rname=$(reeve_name_peek)
+label=$(hand_label "$office" "$id" "$rname")
 if [ "$dry" = yes ]; then
-  printf '  would run: reeve-backend call create_endpoint %s %s --backend %s\n' "$cwd" "$label" "$backend"
+  printf '  would run: reeve-backend call create_endpoint %s "%s" --backend %s\n' "$cwd" "$label" "$backend"
   target='<target>'
 else
   target=$("$BIN/reeve-backend" call create_endpoint "$cwd" "$label" --backend "$backend") \

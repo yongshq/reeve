@@ -146,3 +146,7 @@ reeve_backend_tmux_wait_change() {
 }
 
 reeve_backend_tmux_kill() { tmux kill-window -t "$(_t_target "$1")" 2>/dev/null; }
+
+# Optional. automatic-rename is off on every window create_endpoint made, so the
+# new name holds.
+reeve_backend_tmux_relabel() { tmux rename-window -t "$(_t_target "$1")" "$2" 2>/dev/null; }

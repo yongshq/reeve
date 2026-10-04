@@ -83,6 +83,15 @@ meta_show() {
   printf '%s\n' "${v:-${3:-?}}"
 }
 
+# The reeve an errand belongs to, by name: the one its brief recorded, else the
+# name its owning session holds now, which is how an errand briefed before names
+# existed still gets one. `?` when neither says.
+reeve_of() {
+  local n; n=$(meta_get "$1" reeve '')
+  valid_reeve_name "$n" || n=$(session_name "$(meta_get "$1" session '')")
+  printf '%s\n' "${n:-?}"
+}
+
 # --- the ticket -------------------------------------------------------------
 # One errand is one holding, one copy, one branch, so a tracker item spanning
 # three repositories is three errands and the key they share is the only record
@@ -211,6 +220,7 @@ one() {
   at=$(printf   '%s\n' "$rec" | grep -m1 '^at='         | sed 's/^at=//')
 
   printf 'errand    %s\n' "$i"
+  printf 'reeve     %s\n' "$(reeve_of "$i")"
   printf 'office    %s on %s via %s\n' "$(meta_show "$i" office)" "$(meta_show "$i" harness)" "$(meta_show "$i" backend)"
   printf 'tier      %s\n' "$(tier_line "$i")"
   printf 'holding   %s\n' "$(meta_show "$i" repo)"
@@ -271,12 +281,23 @@ one() {
 
 # One row, in the only layout there is. Grouped and ungrouped rows print
 # through here so a ticket can never give an errand a different shape.
+#
+# A listing of the whole home, --all or --orphans, adds whose errand each is, by
+# reeve name, as a last column, so every column before it stays where it was. A
+# bare listing is this session's own work, where the column would say one name
+# on every row.
 table_row() {
-  local i=$1 o
+  local i=$1 o w
   o=$(status_field "$i" open); o=${o:-0}
-  printf '%-24s %-11s %-16s %-16s %s\n' \
-    "$i" "$(meta_show "$i" office)" "$(status_field "$i" state)" "$(live_state "$i")" \
-    "$([ "$o" -gt 0 ] && printf '%s waiting' "$o" || printf '-')"
+  w=$([ "$o" -gt 0 ] && printf '%s waiting' "$o" || printf -- '-')
+  if [ "$all" = yes ]; then
+    printf '%-24s %-11s %-16s %-16s %-10s %s\n' \
+      "$i" "$(meta_show "$i" office)" "$(status_field "$i" state)" "$(live_state "$i")" "$w" \
+      "$(reeve_of "$i")"
+  else
+    printf '%-24s %-11s %-16s %-16s %s\n' \
+      "$i" "$(meta_show "$i" office)" "$(status_field "$i" state)" "$(live_state "$i")" "$w"
+  fi
 }
 
 if [ "$all" = yes ] || [ -z "$id" ]; then
@@ -321,7 +342,11 @@ if [ "$all" = yes ] || [ -z "$id" ]; then
     fi
     exit 0
   fi
-  printf '%-24s %-11s %-16s %-16s %s\n' ERRAND OFFICE REPORTED PROCESS OPEN
+  if [ "$all" = yes ]; then
+    printf '%-24s %-11s %-16s %-16s %-10s %s\n' ERRAND OFFICE REPORTED PROCESS OPEN REEVE
+  else
+    printf '%-24s %-11s %-16s %-16s %s\n' ERRAND OFFICE REPORTED PROCESS OPEN
+  fi
 
   # <key>TAB<id> per errand, key empty when there is no ticket, sorted once.
   # That single sort settles both orders the view needs, tickets by key

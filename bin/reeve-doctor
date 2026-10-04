@@ -37,7 +37,9 @@ fi
 hdr "sessions"
 me=$(reeve_session)
 if [ -n "$me" ]; then
-  printf '  this one   %s\n' "$me"
+  # Read, never assigned: asking who is here is not a reason to hand out a name.
+  myname=$(session_name "$me")
+  printf '  this one   %s\n' "${myname:+$myname (}$me${myname:+)}"
 else
   printf '  this one   no id. This harness exports none, so errands briefed here are\n'
   printf '             unowned: visible to every reeve on this machine, and cleaned up\n'
@@ -51,7 +53,8 @@ if [ -d "$REEVE_HOME_D/state/sessions" ]; then
     sid=$(basename "$d")
     [ "$(session_state "$sid")" = alive ] || continue
     live=$((live + 1))
-    [ "$sid" = "$me" ] || others="$others $sid"
+    n=$(session_name "$sid")
+    [ "$sid" = "$me" ] || others="$others ${n:+$n (}$sid${n:+)}"
   done
   printf '  live       %s session(s) sharing this home\n' "$live"
   kept=$(ls -d "$REEVE_HOME_D"/state/sessions/*/ 2>/dev/null | wc -l | tr -d ' ')

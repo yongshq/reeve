@@ -88,7 +88,7 @@ say() {
 # sentry <attn clock>
 sentry() { OUT=$(REEVE_ATTN_NOW=$1 "$ROOT/bin/reeve-sentry" --once --no-reap 2>&1); RC=$?; }
 row()    { REEVE_ATTN_NOW=$1 "$ROOT/bin/reeve-status" --all --no-wake 2>/dev/null | grep '^hung ' | cut -c55-70 | sed 's/ *$//'; }
-open()   { REEVE_ATTN_NOW=$1 "$ROOT/bin/reeve-status" --all --no-wake 2>/dev/null | grep '^hung ' | cut -c71-; }
+open()   { REEVE_ATTN_NOW=$1 "$ROOT/bin/reeve-status" --all --no-wake 2>/dev/null | grep '^hung ' | cut -c71-81 | sed 's/ *$//'; }
 single() { REEVE_ATTN_NOW=$1 "$ROOT/bin/reeve-status" hung 2>/dev/null | sed -n 's/^process  *//p'; }
 latched() { [ -f "$LATCH" ] && echo kept || echo gone; }
 
