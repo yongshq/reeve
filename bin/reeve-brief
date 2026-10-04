@@ -479,7 +479,7 @@ Append through the helper, which stamps each line with the UTC time it was writt
 "$say" "$status" failed '<why, and what you tried>'
 \`\`\`
 
-Each lands as \`2026-10-04T15:36:02Z working: <note>\`.
+Each lands as \`working: 2026-10-04T15:36:02Z <note>\`.
 
 Rules:
 

@@ -776,15 +776,19 @@ errand_session() {
 # current state. This function is the single owner of turning the log into a
 # verdict. Nothing else may read the last line and call it the state.
 #
-# Grammar, one per line:   [<stamp> ]<state>[ [key=<slug>]]: <note>
+# Grammar, one per line:   <state>[ [key=<slug>]]: [<stamp> ]<note>
 # States: working needs-decision blocked done failed resolved
 #
 # The stamp is the UTC time the line was written, `2026-10-04T15:36:02Z`, put
 # there by status_append and never typed by a hand. Optional, because every log
 # written before it existed has none, and a hand whose helper refused may still
-# append a bare line: both read exactly as they always did. It is peeled off
-# before the state is split, since its own colons would otherwise end the state
-# token at the hour.
+# append a bare line: both read exactly as they always did. It sits after the
+# state's colon, never before the state, so a reader from before the stamp
+# still splits the state at its first colon and reads state, key and decision
+# right; all it shows is the stamp at the front of the note. A watch or a reeve
+# on older code shares this home with newer writers, so the placement is the
+# compatibility. The interim form, `<stamp> <state>...: <note>`, is still read,
+# since logs written by it exist on disk.
 #
 # A needs-decision stays open until a resolved with the SAME key lands. A later
 # done: never closes it, because a hand finishing is not the liege answering.
@@ -812,7 +816,7 @@ status_stamp() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 status_append() {
   local note
   note=$(printf '%s' "$3" | tr '\r\n' '  ')
-  printf '%s %s: %s\n' "$(status_stamp)" "$2" "$note" >> "$1"
+  printf '%s: %s %s\n' "$2" "$(status_stamp)" "$note" >> "$1"
 }
 
 status_reconcile() {
@@ -828,11 +832,13 @@ status_reconcile() {
   while IFS= read -r line || [ -n "$line" ]; do
     case $line in ''|'#'*) continue ;; esac
     stamp=''
+    # the interim leading form: its own colons would end the state at the hour
     case $line in $status_stamp_glob' '*) stamp=${line%% *}; line=${line#* } ;; esac
     # split off the note at the first colon that ends the state token
     state=${line%%:*}
     note=${line#*:}
     note=${note# }
+    case $note in $status_stamp_glob' '*) stamp=${note%% *}; note=${note#* } ;; esac
     key=''
     case $state in
       *'[key='*']')

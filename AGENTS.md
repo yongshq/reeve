@@ -188,20 +188,22 @@ Three cases still have no answer, and all three are yours to know rather than to
 A dispatch that ends with `NOTHING IS WATCHING` is not a finished dispatch.
 
 The **status file** is the truth, not the pane. A hand appends one line per event to
-`$REEVE_HOME/state/<id>.status`, through `bin/reeve-say`, which stamps each line with the UTC
+`$REEVE_HOME/errands/<id>/status`, through `bin/reeve-say`, which stamps each line with the UTC
 time it was written so no hand types one:
 
 ```
-2026-10-04T15:36:02Z working: <one short line>
-2026-10-04T15:41:17Z needs-decision [key=<slug>]: <the question>
-2026-10-04T15:52:40Z blocked: <what is in the way>
-2026-10-04T16:20:05Z done: <what landed>
-2026-10-04T16:20:05Z failed: <why>
+working: 2026-10-04T15:36:02Z <one short line>
+needs-decision [key=<slug>]: 2026-10-04T15:41:17Z <the question>
+blocked: 2026-10-04T15:52:40Z <what is in the way>
+done: 2026-10-04T16:20:05Z <what landed>
+failed: 2026-10-04T16:20:05Z <why>
 ```
 
 `bin/reeve-answer` stamps its `resolved` line the same way. A line with no stamp, from an older log
-or a hand whose helper could not run, reads exactly as before. The stamp is shown, never trusted
-as a clock: idle and wedged silence still runs from the file's own change time.
+or a hand whose helper could not run, reads exactly as before. The stamp goes after the state's
+colon, never before the state, so a reader on older code still finds state, key and decision. The
+stamp is shown, never trusted as a clock: idle and wedged silence still runs from the file's own
+change time.
 
 Rules you must hold to:
 

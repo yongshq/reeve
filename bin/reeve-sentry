@@ -464,7 +464,7 @@ wake_owed() { # wake_owed <id>
 
 # Absorb or escalate. One errand, one verdict.
 check_one() {
-  local i=$1 f seen now again new st open div bk tgt live
+  local i=$1 f seen now again st open div bk tgt live
   local attn af since woke nowsec last stale how mark latch wedge prc w
 
   # Counted BEFORE the verdict is read, and again after. The cursor is what says
@@ -578,23 +578,25 @@ check_one() {
   seen=$(printf '%s' "$seen" | tr -d '[:space:]'); seen=${seen:-0}
 
   if [ "$now" -gt "$seen" ]; then
-    new=$(sed -n "$((seen + 1)),\$p" "$f" 2>/dev/null)
     printf '%s\n' "$now" > "$(cursor_file "$i")"
+    # The reconciled note, never the raw line: no state word, no stamp, the
+    # same form the caretaker leaves. Read only when there is news to tell.
+    last=$(status_field "$i" last)
     # A `working:` line is progress, not news. Absorb it and keep watching:
     # waking the reeve for progress is how a supervisor becomes noise.
     case $st in
-      needs-decision) printf 'signal: %s needs a decision (%s open) - %s\n' "$i" "$open" "$(printf '%s' "$new" | tail -1)"; return 0 ;;
+      needs-decision) printf 'signal: %s needs a decision (%s open) - %s\n' "$i" "$open" "$last"; return 0 ;;
       blocked)
         # Blocked is not finished: leave the session alone so it can be steered.
-        printf 'signal: %s is blocked - %s\n' "$i" "$(printf '%s' "$new" | tail -1)"
+        printf 'signal: %s is blocked - %s\n' "$i" "$last"
         return 0 ;;
       failed)
-        printf 'signal: %s failed - %s' "$i" "$(printf '%s' "$new" | tail -1)"
+        printf 'signal: %s failed - %s' "$i" "$last"
         reap_one "$i"
         return 0 ;;
       done)
         if reapable "$st" "$div"; then
-          printf 'signal: %s is done - %s' "$i" "$(printf '%s' "$new" | tail -1)"
+          printf 'signal: %s is done - %s' "$i" "$last"
           reap_one "$i"
         else
           # Never reap a divergence. The errand is not finished whatever it says,
