@@ -17,17 +17,14 @@ backend_known() { ls "$REEVE_ROOT_D/backends"/*.sh 2>/dev/null | while read -r f
 
 backend_resolve() {
   local want=${1:-}
-  # Precedence: explicit flag, environment, config file, detection, then herdr.
+  # Precedence: explicit flag, environment, config file, then herdr.
   [ -n "$want" ] || want=${REEVE_BACKEND:-}
   [ -n "$want" ] || want=$(config_get backend '')
-  if [ -z "$want" ]; then
-    # Innermost first. tmux can nest inside herdr, so a tmux marker means tmux
-    # is the layer actually executing. Never guess when both are absent.
-    if   [ -n "${TMUX:-}" ];                  then want=tmux
-    elif [ "${HERDR_ENV:-}" = "1" ];          then want=herdr
-    else want=herdr
-    fi
-  fi
+  [ -n "$want" ] || want=herdr
+  # A record or config naming a backend that has since been removed refuses
+  # by name, so the reader knows it is gone rather than misspelt.
+  [ "$want" = tmux ] \
+    && die "backend tmux was removed. herdr is the only backend. set backend=herdr or unset it"
   lines_has "$want" "$(backend_known)" \
     || die "unknown backend '$want'. known: $(backend_known | tr '\n' ' ')"
   printf '%s\n' "$want"

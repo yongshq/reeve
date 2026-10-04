@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# What a restart does to names, groups and hands: a herdr or tmux server that
-# comes back, a reeve that crashed and was relaunched, a reboot that orphans
+# What a restart does to names, groups and hands: a herdr server that comes
+# back, a reeve that crashed and was relaunched, a reboot that orphans
 # every errand at once.
 #
 # Pinned here, one block per gap the restart survey found:
 #   2  a stored target is checked against what it was made for before anything
 #      kills, relabels or types into it: ids are counters a restart hands out
-#      again, so a kept id can name someone else's tab or window
-#   3  a tmux pane key carries its server's start time, so a pane of a server
-#      since restarted is never inherited from and never holds anything
+#      again, so a kept id can name someone else's tab
+#   3  a pane key is its id on its server, and herdr restores both, so the
+#      same key after a restart is the same pane
 #   4  a name is held only while its holder's pane still runs a harness, and a
 #      refused claim says to retry rather than take a pool name
 #   5  the session /clear replaced in this pane is adoptable at once
@@ -19,9 +19,8 @@
 #  11  a stale names lock from a crash is broken, and a missing name is said
 #  12  doctor does not list the session /clear replaced as a live rival
 #
-# herdr is a stub on PATH writing its errors to stderr as real herdr does. tmux
-# is a stub too, except in block L, which runs a private tmux server on its own
-# socket under a scratch directory and kills it after. Never the liege's server.
+# herdr is a stub on PATH writing its errors to stderr as real herdr does. Never
+# the liege's server.
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 PASS=0; FAIL=0
 ok()  { PASS=$((PASS+1)); printf 'ok    %s\n' "$1"; }
@@ -32,22 +31,14 @@ has() { if printf '%s' "$2" | grep -qF -- "$3"; then ok "$1"; else bad "$1" "did
 nas() { if printf '%s' "$2" | grep -qF -- "$3"; then bad "$1" "should not have mentioned [$3]"; else ok "$1"; fi; }
 
 real_home=$(cd "${HOME:-/nonexistent-home}" 2>/dev/null && pwd -P) || real_home=/nonexistent-home
-# Short: a tmux socket path has a length limit, and block L puts one in here.
 SCRATCH=$(mktemp -d /tmp/rvrs.XXXXXX) && SCRATCH=$(cd -P "$SCRATCH" && pwd) \
   || { printf 'FAIL  could not make a scratch directory\n'; exit 1; }
 case $SCRATCH in "$real_home"|"$real_home"/*) printf 'FAIL  refusing: scratch is inside the real home\n'; exit 1 ;; esac
-LIVE_SOCK="$SCRATCH/t.sock"
-cleanup() {
-  [ -S "$LIVE_SOCK" ] && command tmux -S "$LIVE_SOCK" kill-server 2>/dev/null
-  rm -rf "$SCRATCH"
-}
-trap cleanup EXIT
+trap 'rm -rf "$SCRATCH"' EXIT
 export REEVE_HOME="$SCRATCH/home"
 export REEVE_NO_CARETAKER=1
-unset HERDR_WORKSPACE_ID HERDR_PANE_ID HERDR_ENV HERDR_SOCKET_PATH HERDR_TAB_ID TMUX TMUX_PANE \
-      REEVE_TMUX_SESSION REEVE_BACKEND CLAUDE_CODE_SESSION_ID REEVE_SESSION REEVE_NAME REEVE_HAND
-
-REAL_TMUX=$(command -v tmux 2>/dev/null || true)
+unset HERDR_WORKSPACE_ID HERDR_PANE_ID HERDR_ENV HERDR_SOCKET_PATH HERDR_TAB_ID \
+      REEVE_BACKEND CLAUDE_CODE_SESSION_ID REEVE_SESSION REEVE_NAME REEVE_HAND
 
 # --- stubs -------------------------------------------------------------------
 FAKE="$SCRATCH/fakebin"; mkdir -p "$FAKE"
@@ -94,15 +85,7 @@ case "$1 $2" in
   *) exit 1 ;;
 esac
 HERDR
-# tmux: answers the server start time as $STUB_EPOCH, nothing else.
-cat > "$FAKE/tmux" <<'TMUX'
-#!/usr/bin/env bash
-printf '%s\n' "$*" >> "$STUB_LOG"
-[ "$1" = -S ] && shift 2
-case $* in *start_time*) [ -n "${STUB_EPOCH:-}" ] && echo "$STUB_EPOCH" ;; esac
-exit 0
-TMUX
-chmod +x "$FAKE/herdr" "$FAKE/tmux"
+chmod +x "$FAKE/herdr"
 export PATH="$FAKE:$PATH"
 export REEVE_HERDR_SESSION=stub
 export STUB_SOCK="$SCRATCH/herdr.sock"
@@ -176,23 +159,19 @@ T2=$(STUB_PANES='w7:p9' h relabel "$T" "Bran's scout: a")
 eq  "2 a relabel hands back the target with its new label" "$T2" "w7|w7:p9|w7:t9#$(ident_of "$SCRATCH" "Bran's scout: a")"
 unset REEVE_IDENT_TRIES
 
-echo "--- 3. a tmux pane key carries its server's epoch ---"
-eq "3 same epoch, same pane"        "$(lib pane_eq '%0@/s#100' '%0@/s#100' && echo y || echo n)" y
-eq "3 another epoch, another pane"  "$(lib pane_eq '%0@/s#100' '%0@/s#200' && echo y || echo n)" n
-eq "3 an epoch against none, not proven the same" "$(lib pane_eq '%0@/s#100' '%0@/s' && echo y || echo n)" n
-eq "3 herdr keys keep ids and socket" "$(lib pane_eq "w1:p1$S" "w1:p1$S" && echo y || echo n)" y
-eq "3 the key is built with the epoch" \
-   "$(TMUX="/s,1,0" TMUX_PANE=%0 STUB_EPOCH=100 lib reeve_pane)" '%0@/s#100'
-eq "3 and without one when the server does not say" \
-   "$(TMUX="/s,1,0" TMUX_PANE=%0 STUB_EPOCH='' lib reeve_pane)" '%0@/s'
+echo "--- 3. a herdr pane key is its id on its server ---"
+eq "3 the key is the pane id and its socket" \
+   "$(HERDR_PANE_ID=w1:p1 HERDR_SOCKET_PATH=/s lib reeve_pane)" 'w1:p1@/s'
+eq "3 bare when the socket is unknown"    "$(HERDR_PANE_ID=w1:p1 lib reeve_pane)" 'w1:p1'
+eq "3 and nothing outside herdr"          "$(lib reeve_pane)" ''
+eq "3 one key, one pane"                  "$(lib pane_eq "w1:p1$S" "w1:p1$S" && echo y || echo n)" y
+eq "3 the same id on two servers is two"  "$(lib pane_eq 'w1:p1@/a' 'w1:p1@/b' && echo y || echo n)" n
+# herdr restores its panes with their ids, so a relaunch in the restored pane
+# is the reeve that ran there.
 fresh
-record old Aldric dead '%0@/s#100'
-got=$(REEVE_SESSION=new TMUX="/s,1,0" TMUX_PANE=%0 STUB_EPOCH=200 "$ROOT/bin/reeve-name" 2>/dev/null)
-eq "3 a restarted server's %0 does not inherit the dead reeve's name" "$got" Bran
-fresh
-record old Aldric dead '%0@/s#100'
-got=$(REEVE_SESSION=new TMUX="/s,1,0" TMUX_PANE=%0 STUB_EPOCH=100 "$ROOT/bin/reeve-name" 2>/dev/null)
-eq "3 the same server's %0 after /clear still does"                   "$got" Aldric
+record old Aldric dead "w1:p1$S"
+got=$(REEVE_SESSION=new HERDR_PANE_ID=w1:p1 HERDR_SOCKET_PATH=$STUB_SOCK "$ROOT/bin/reeve-name" 2>/dev/null)
+eq "3 a restored pane keeps the dead reeve's name"                    "$got" Aldric
 
 echo "--- 4. a name is held only while its holder's pane runs a harness ---"
 fresh
@@ -415,42 +394,6 @@ REEVE_HAND=x1 CLAUDE_CODE_SESSION_ID=handsid REEVE_SESSION=handsid HERDR_PANE_ID
 [ -f "$SESS/handsid/seen" ] && ok "17 the hand still heartbeats" || bad "17 the hand still heartbeats" "no seen"
 [ -e "$SESS/handsid/pane" ] && bad "17 but stores no pane" "$(cat "$SESS/handsid/pane")" || ok "17 but stores no pane"
 [ -e "$SESS/handsid/harness" ] && bad "17 nor a harness" "$(cat "$SESS/handsid/harness")" || ok "17 nor a harness"
-
-echo "--- L. live tmux, on a private socket ---"
-if [ -z "$REAL_TMUX" ]; then
-  echo "skip  tmux not installed"
-else
-  rm -f "$FAKE/tmux"
-  t() { ( . "$ROOT/backends/tmux.sh"; "reeve_backend_tmux_$@" ); }
-  export TMUX="$LIVE_SOCK,0,0"
-  tmux -S "$LIVE_SOCK" new-session -d -s liege -c "$SCRATCH"
-  ep1=$(tmux -S "$LIVE_SOCK" display -p -t liege: '#{start_time}')
-  T=$(t create_endpoint "$SCRATCH" "Aldric's scout: L" liege)
-  case $T in "liege|@"*'#'*) ok "L the target carries the window's identity" ;;
-    *) bad "L the target carries the window's identity" "got [$T]" ;; esac
-  eq "L its own window is there"            "$(t agent_state "$T")" dead
-  key=$(TMUX_PANE=%0 lib reeve_pane)
-  eq "L the reeve's pane key has the epoch" "$key" "%0@$LIVE_SOCK#$ep1"
-  eq "L its pane, a shell, is vacant"       "$(lib pane_vacant "$key" && echo y || echo n)" y
-  # Restart on the same socket. Ids come round again: the liege's session and
-  # window @1 exist anew, and %0 is a new pane.
-  tmux -S "$LIVE_SOCK" kill-server
-  n=0; while [ -S "$LIVE_SOCK" ] && [ "$n" -lt 20 ]; do n=$((n + 1)); sleep 0.1; done
-  sleep 1   # start_time is in seconds: the new server must not share one
-  tmux -S "$LIVE_SOCK" new-session -d -s liege -c "$SCRATCH"
-  tmux -S "$LIVE_SOCK" new-window -d -t liege: -n "liege's own"
-  eq "L the old target is missing, though @1 exists again" "$(t agent_state "$T")" missing
-  t kill "$T" 2>/dev/null
-  eq "L and the liege's window is not killed" \
-     "$(tmux -S "$LIVE_SOCK" list-windows -t liege -F '#{window_name}' | grep -c "liege's own")" 1
-  t relabel "$T" "Bran's scout: L" 2>/dev/null
-  eq "L nor renamed" \
-     "$(tmux -S "$LIVE_SOCK" list-windows -t liege -F '#{window_name}' | grep -c "Bran")" 0
-  eq "L the old key's pane is gone, though %0 exists again" "$(lib pane_gone "$key" && echo y || echo n)" y
-  eq "L and never the same pane as the new %0" \
-     "$(lib pane_eq "$key" "$(TMUX_PANE=%0 lib reeve_pane)" && echo y || echo n)" n
-  unset TMUX
-fi
 
 printf '\npassed=%s failed=%s\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

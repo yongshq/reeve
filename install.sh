@@ -34,7 +34,7 @@ printf '  home      %s\n' "$home"
 missing=''
 for t in git; do command -v "$t" >/dev/null 2>&1 || missing="$missing $t"; done
 [ -n "$missing" ] && die "required tool(s) missing:$missing"
-command -v jq >/dev/null 2>&1 || printf '\n  note: jq is not installed. The herdr backend needs it; the tmux backend does not.\n'
+command -v jq >/dev/null 2>&1 || printf '\n  note: jq is not installed. The herdr backend needs it.\n'
 
 # --- the home --------------------------------------------------------------
 home_ensure >/dev/null

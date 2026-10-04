@@ -215,8 +215,8 @@ rname=$(meta_get "$id" reeve '')
 valid_reeve_name "$rname" || rname=$(reeve_name_peek)
 label=$(hand_label "$office" "$id" "$rname")
 
-# The hand opens inside its reeve's group, the workspace or session labelled
-# with the reeve's own name, as a tab or a window. The group is this session's,
+# The hand opens inside its reeve's group, the workspace labelled with the
+# reeve's own name, as a tab. The group is this session's,
 # so it takes this session's name, read and never assigned. No session, no
 # name, a backend with no ensure_group, or one that failed: no group, and the
 # hand opens where it always did. A dry run prints the call and makes none.

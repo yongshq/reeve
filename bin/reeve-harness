@@ -190,12 +190,12 @@ harness_render() {
   done <<EOS
 $(h_get "$n" env '')
 EOS
-  # A hand opens as a tab or window inside its reeve's own workspace, so it
-  # would inherit the variables that say which workspace and pane it sits in,
-  # and a reeve command run from inside the hand would take its reeve's
-  # workspace as its own and relabel it. So the hand is marked, and those two
-  # are taken away; everything else herdr or tmux set is left alone.
-  [ -n "$hand" ] && envs="-u HERDR_WORKSPACE_ID -u TMUX_PANE REEVE_HAND=$(shq "$hand") $envs"
+  # A hand opens as a tab inside its reeve's own workspace, so it would inherit
+  # the variable that says which workspace it sits in, and a reeve command run
+  # from inside the hand would take its reeve's workspace as its own and
+  # relabel it. So the hand is marked, and that variable is taken away;
+  # everything else herdr set is left alone.
+  [ -n "$hand" ] && envs="-u HERDR_WORKSPACE_ID REEVE_HAND=$(shq "$hand") $envs"
   [ -n "$envs" ] && line="env $envs$line"
 
   if [ "$mode" = stdin ]; then

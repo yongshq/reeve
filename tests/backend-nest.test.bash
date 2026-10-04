@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# A reeve's hands open inside its own group: a tab in its herdr workspace, a
-# window in its tmux session, the group labelled with the reeve's name.
+# A reeve's hands open inside its own group: a tab in its herdr workspace, the
+# group labelled with the reeve's name.
 #
 # What is pinned here is what makes that safe. A nested hand's target names its
 # reeve's workspace, so cleaning the hand up must close its tab and NEVER that
 # workspace, which is usually the one the reeve itself runs in. Targets recorded
 # before nesting, two fields, still parse and still clean up as they did. The
-# reeve's own workspace or window is what gets its name, never the liege's tmux
-# session. And a backend with no group to give leaves dispatch exactly as it was.
+# reeve's own workspace is what gets its name, never the liege's. And a backend
+# with no group to give leaves dispatch exactly as it was.
 #
 # One reeve per workspace. A workspace another live reeve holds is never
 # relabelled, nested into or reused; a gone one's may be taken over. A hand,
@@ -15,8 +15,8 @@
 # does a reeve whose workspace id comes from a different herdr server. A group
 # follows its name through /clear and claim instead of a new one each session.
 #
-# herdr and tmux are stubs on PATH that record their argv, so nothing here
-# touches a real server. Scratch homes only.
+# herdr is a stub on PATH that records its argv, so nothing here touches a real
+# server. Scratch homes only.
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 PASS=0; FAIL=0
 ok()  { PASS=$((PASS+1)); printf 'ok    %s\n' "$1"; }
@@ -35,9 +35,9 @@ export REEVE_HOME="$SCRATCH/home"
 export REEVE_NO_CARETAKER=1
 export CLAUDE_CONFIG="$SCRATCH/claude.json"
 # Nothing from the caller's own terminal may leak in: a real HERDR_WORKSPACE_ID
-# or TMUX_PANE is exactly what ensure_group would rename.
-unset HERDR_WORKSPACE_ID HERDR_PANE_ID HERDR_ENV HERDR_SOCKET_PATH HERDR_TAB_ID TMUX TMUX_PANE \
-      REEVE_TMUX_SESSION REEVE_BACKEND CLAUDE_CODE_SESSION_ID REEVE_SESSION REEVE_NAME REEVE_HAND
+# is exactly what ensure_group would rename.
+unset HERDR_WORKSPACE_ID HERDR_PANE_ID HERDR_ENV HERDR_SOCKET_PATH HERDR_TAB_ID \
+      REEVE_BACKEND CLAUDE_CODE_SESSION_ID REEVE_SESSION REEVE_NAME REEVE_HAND
 
 # --- stub binaries -----------------------------------------------------------
 FAKE="$SCRATCH/fakebin"; mkdir -p "$FAKE"
@@ -81,32 +81,13 @@ case "$1 $2" in
   *) exit 1 ;;
 esac
 HERDR
-# tmux: the reeve runs in pane %3, window @4, session `work`. STUB_SES lists the
-# sessions that exist, STUB_TPANES the panes; STUB_TMUX_DOWN, no server.
-cat > "$FAKE/tmux" <<'TMUX'
-#!/usr/bin/env bash
-printf '%s\n' "$*" >> "$STUB_LOG"
-[ "$1" = -S ] && shift 2
-case $1 in
-  display)
-    case $* in *session_name*) echo work ;; *window_id*) echo @4 ;; esac ;;
-  has-session)
-    t=${3#=}; for s in ${STUB_SES:-}; do [ "$s" = "$t" ] && exit 0; done; exit 1 ;;
-  list-panes)
-    [ -n "${STUB_TMUX_DOWN:-}" ] && { echo "no server running" >&2; exit 1; }
-    printf '%s\n' ${STUB_TPANES:-} ;;
-  new-window) echo @9 ;;
-  *) exit 0 ;;
-esac
-TMUX
-chmod +x "$FAKE/herdr" "$FAKE/tmux"
+chmod +x "$FAKE/herdr"
 export PATH="$FAKE:$PATH"
 export REEVE_HERDR_SESSION=stub
 export STUB_SOCK="$SCRATCH/herdr.sock"
 
 # h <fn> <args...>   one herdr backend function, in a subshell, its argv log fresh
 h() { : > "$LOG"; ( . "$ROOT/backends/herdr.sh"; "reeve_backend_herdr_$@" ); }
-t() { : > "$LOG"; ( . "$ROOT/backends/tmux.sh";  "reeve_backend_tmux_$@" ); }
 calls() { cat "$LOG"; }
 
 PLAIN="$SCRATCH/plain"; mkdir -p "$PLAIN"   # not a git checkout
@@ -223,51 +204,6 @@ nas "5 never its reeve's workspace"                        "$(calls)" "workspace
 h relabel 'w5|w5:p1' "Percy's scout: x"
 has "5 a two field target renames its workspace"           "$(calls)" "workspace rename w5 Percy's scout: x"
 
-echo "--- 6. tmux ensure_group ---"
-out=$(TMUX_PANE=%3 t ensure_group Aldric)
-eq  "6 inside tmux, the reeve's own session"               "$out" work
-has "6 its own window takes the name"                      "$(calls)" "rename-window -t @4 Aldric"
-has "6 and keeps it"                                       "$(calls)" "set-window-option -t @4 automatic-rename off"
-nas "6 the session is never renamed"                       "$(calls)" "rename-session"
-out=$(REEVE_TMUX_SESSION=mine TMUX_PANE=%3 t ensure_group Aldric)
-eq  "6 REEVE_TMUX_SESSION wins, as before"                 "$out" mine
-nas "6 and renames nothing"                                "$(calls)" "rename-window"
-out=$(TMUX_PANE=%3 t ensure_group Aldric '' work 2>"$SCRATCH/err")
-eq  "6 a session another live reeve holds is not nested into" "$out" reeve-aldric
-nas "6 and nothing in it is renamed"                       "$(calls)" "rename-window"
-has "6 which it says"                                      "$(cat "$SCRATCH/err")" "session work belongs to another live reeve"
-out=$(REEVE_HAND=fix-auth TMUX_PANE=%3 t ensure_group Bran)
-eq  "6 a hand never takes its reeve's session"             "$out" reeve-bran
-nas "6 or renames its window"                              "$(calls)" "rename-window"
-out=$(t ensure_group Aldric)
-eq  "6 outside tmux, a session named for the reeve"        "$out" reeve-aldric
-has "6 made detached"                                      "$(calls)" "new-session -d -s reeve-aldric"
-out=$(STUB_SES=reeve-aldric t ensure_group Aldric)
-nas "6 and not made twice"                                 "$(calls)" "new-session"
-# A rename: the detached session made under the old name takes the new one.
-out=$(STUB_SES=reeve-aldric t ensure_group Galen reeve-aldric)
-eq  "6 a known reeve-* session under an old name is kept"  "$out" reeve-galen
-has "6 renamed to the new name"                            "$(calls)" "rename-session -t =reeve-aldric reeve-galen"
-nas "6 not made afresh"                                    "$(calls)" "new-session"
-out=$(STUB_SES=reeve-galen t ensure_group Galen reeve-galen)
-nas "6 one already under the name is not renamed"          "$(calls)" "rename-session"
-out=$(STUB_SES='work' t ensure_group Galen work)
-nas "6 a session the liege named is never renamed"         "$(calls)" "rename-session"
-has "6 a reeve-* one is made instead"                      "$(calls)" "new-session -d -s reeve-galen"
-out=$(STUB_SES='' t ensure_group Galen reeve-aldric)
-nas "6 a known session that is gone is not renamed"        "$(calls)" "rename-session"
-has "6 a new one is made"                                  "$(calls)" "new-session -d -s reeve-galen"
-out=$(STUB_SES='reeve-aldric reeve-galen' t ensure_group Galen reeve-aldric)
-nas "6 nor when the new name is taken already"             "$(calls)" "rename-session"
-eq  "6 which is then the group"                            "$out" reeve-galen
-out=$(STUB_SES=reeve-aldric t ensure_group Galen reeve-aldric reeve-aldric)
-nas "6 nor one another live reeve holds"                   "$(calls)" "rename-session"
-
-echo "--- 7. tmux create_endpoint ---"
-out=$(STUB_SES=work t create_endpoint "$PLAIN" "Aldric's scout: x" work)
-eq  "7 a window in the group, the target shape unchanged"  "$out" "work|@9"
-has "7 opened in that session"                             "$(calls)" "new-window -dP -F #{window_id} -t work: -n Aldric's scout: x"
-
 echo "--- 8. dispatch, with and without a group ---"
 git init -q "$SCRATCH/web"
 git -C "$SCRATCH/web" -c user.email=r@invalid -c user.name=r -c commit.gpgsign=false commit -q --allow-empty -m init
@@ -323,10 +259,10 @@ go four nest --dry-run
 has "8 a dry run prints the ensure_group it would run"       "$OUT" "would run: reeve-backend call ensure_group Escanor \"grp1\" --backend nest"
 has "8 and the group it would pass"                          "$OUT" "\"<group>\" --backend nest"
 eq  "8 and calls nothing"                                    "$(calls)" ''
-# The hand's own environment marks it, and loses the two variables that would
-# make its reeve's workspace look like its own.
-has "8 the hand is launched marked, its workspace and pane unset" "$OUT" \
-    "env -u HERDR_WORKSPACE_ID -u TMUX_PANE REEVE_HAND='four' true"
+# The hand's own environment marks it, and loses the variable that would make
+# its reeve's workspace look like its own.
+has "8 the hand is launched marked, its workspace unset"    "$OUT" \
+    "env -u HERDR_WORKSPACE_ID REEVE_HAND='four' true"
 # The dry run passes what the real call would: the held ids too.
 mkdir -p "$REEVE_HOME/state/sessions/rival"; printf 'grpX\n' > "$REEVE_HOME/state/sessions/rival/group.nest"
 printf '%s\n' "$(date +%s)" > "$REEVE_HOME/state/sessions/rival/seen"
@@ -465,25 +401,20 @@ has "11 the line was run in the hand's pane"                     "$(calls)" "pan
 has "11 its foreground was read"                                 "$(calls)" "pane process-info --pane w7:p9"
 nas "11 and no Enter was nudged into it"                         "$(calls)" "send-keys"
 
-echo "--- 12. pane_gone, per backend ---"
+echo "--- 12. pane_gone ---"
 pg() { ( . "$ROOT/backends/$1.sh"; shift; "reeve_backend_$@" ) && echo gone || echo here; }
 eq "12 herdr: a pane its server says is not found is gone" "$(STUB_PANES='' pg herdr herdr_pane_gone w1:p1 "$STUB_SOCK")" gone
 eq "12 herdr: an existing pane is not"                     "$(STUB_PANES='w1:p1' pg herdr herdr_pane_gone w1:p1 "$STUB_SOCK")" here
 eq "12 herdr: a server error proves nothing"               "$(STUB_PANES='' STUB_PANE_ERR=1 pg herdr herdr_pane_gone w1:p1 "$STUB_SOCK")" here
 eq "12 herdr: nor does a socket no session listens on"     "$(STUB_PANES='' pg herdr herdr_pane_gone w1:p1 /elsewhere.sock)" here
 eq "12 herdr: nor does no socket at all"                   "$(STUB_PANES='' pg herdr herdr_pane_gone w1:p1 '')" here
-: > "$LOG"
-eq "12 tmux: a pane its server does not list is gone"      "$(STUB_TPANES='%1 %2' pg tmux tmux_pane_gone %3 /tmp/t.sock)" gone
-has "12 tmux: asked of that socket"                        "$(calls)" "-S /tmp/t.sock list-panes -a"
-eq "12 tmux: a listed pane is not"                         "$(STUB_TPANES='%1 %3' pg tmux tmux_pane_gone %3 /tmp/t.sock)" here
-eq "12 tmux: a server that does not answer proves nothing" "$(STUB_TMUX_DOWN=1 pg tmux tmux_pane_gone %3 /tmp/t.sock)" here
 
 pe() { bash -c '. "$1/bin/reeve-lib.sh"; pane_eq "$2" "$3"' _ "$ROOT" "$1" "$2" && echo same || echo other; }
-eq "12 pane_eq: one key"                              "$(pe '%3@/a' '%3@/a')" same
-eq "12 pane_eq: an old bare key matches by id"        "$(pe '%3' '%3@/a')" same
+eq "12 pane_eq: one key"                              "$(pe 'w1:p1@/a' 'w1:p1@/a')" same
+eq "12 pane_eq: an old bare key matches by id"        "$(pe 'w1:p1' 'w1:p1@/a')" same
 eq "12 pane_eq: either way round"                     "$(pe 'w1:p1@/a' 'w1:p1')" same
-eq "12 pane_eq: two servers are two panes"            "$(pe '%3@/a' '%3@/b')" other
-eq "12 pane_eq: no pane is no match"                  "$(pe '' '%3')" other
+eq "12 pane_eq: two servers are two panes"            "$(pe 'w1:p1@/a' 'w1:p1@/b')" other
+eq "12 pane_eq: no pane is no match"                  "$(pe '' 'w1:p1')" other
 
 echo "passed=$PASS failed=$FAIL"
 [ "$FAIL" -eq 0 ]

@@ -51,14 +51,14 @@ export REEVE_HOME
 
 # Nothing from the caller's own session may leak in: every reeve below is named
 # by the test that runs it.
-unset CLAUDE_CODE_SESSION_ID REEVE_SESSION REEVE_NAME HERDR_PANE_ID TMUX_PANE HERDR_SOCKET_PATH \
+unset CLAUDE_CODE_SESSION_ID REEVE_SESSION REEVE_NAME HERDR_PANE_ID HERDR_SOCKET_PATH \
       HERDR_TAB_ID REEVE_HAND
 # A bare reeve-name also labels the reeve's workspace through the backend. Run
-# from inside a real herdr or tmux, that would rename the caller's own, so both
-# are stubs here that refuse everything, and the label is simply not made.
-unset HERDR_WORKSPACE_ID HERDR_ENV TMUX REEVE_TMUX_SESSION REEVE_BACKEND
+# from inside a real herdr, that would rename the caller's own, so herdr is a
+# stub here that refuses everything, and the label is simply not made.
+unset HERDR_WORKSPACE_ID HERDR_ENV REEVE_BACKEND
 mkdir -p "$SCRATCH/fakebin"
-for b in herdr tmux; do printf '#!/bin/sh\nexit 1\n' > "$SCRATCH/fakebin/$b"; chmod +x "$SCRATCH/fakebin/$b"; done
+printf '#!/bin/sh\nexit 1\n' > "$SCRATCH/fakebin/herdr"; chmod +x "$SCRATCH/fakebin/herdr"
 PATH="$SCRATCH/fakebin:$PATH"; export PATH
 
 N="$ROOT/bin/reeve-name"
@@ -120,23 +120,21 @@ eq "5 the pane is recorded with it" "w9:p1" "$(cat "$SESS/after/pane" 2>/dev/nul
 eq "5 a session in another pane does not" "Aldric" \
    "$(HERDR_PANE_ID=w9:p2 REEVE_SESSION=other "$N" 2>/dev/null)"
 fresh
-record before Rowan dead %7
-eq "5 tmux's pane works the same way, and a gone predecessor still counts" "Rowan" \
-   "$(TMUX_PANE=%7 REEVE_SESSION=after "$N" 2>/dev/null)"
+record before Rowan dead w7:p1
+eq "5 a gone predecessor in the same pane still counts" "Rowan" \
+   "$(HERDR_PANE_ID=w7:p1 REEVE_SESSION=after "$N" 2>/dev/null)"
 
-# A pane is its id on its server. tmux numbers panes from %0 on every server,
-# so the same id on another socket is another pane and another reeve.
+# A pane is its id on its server. Each server counts its own panes, so the same
+# id on another socket is another pane and another reeve.
 fresh
-record a Aldric alive "%0@/tmp/tmux-1/default"
-eq "5 the pane is recorded with its server's socket" "%0@/tmp/tmux-1/default" \
-   "$(TMUX=/tmp/tmux-1/default,99,0 TMUX_PANE=%0 REEVE_SESSION=a "$N" >/dev/null 2>&1; cat "$SESS/a/pane")"
-eq "5 the same pane id on another tmux server is not this pane" "Bran" \
-   "$(TMUX=/tmp/tmux-2/other,98,0 TMUX_PANE=%0 REEVE_SESSION=b "$N" 2>/dev/null)"
+record a Aldric alive "w1:p1@/tmp/h1.sock"
+eq "5 the pane is recorded with its server's socket" "w1:p1@/tmp/h1.sock" \
+   "$(HERDR_SOCKET_PATH=/tmp/h1.sock HERDR_PANE_ID=w1:p1 REEVE_SESSION=a "$N" >/dev/null 2>&1; cat "$SESS/a/pane")"
 eq "5 the same pane on the same server is" "Aldric" \
-   "$(TMUX=/tmp/tmux-1/default,99,0 TMUX_PANE=%0 REEVE_SESSION=c "$N" 2>/dev/null)"
+   "$(HERDR_SOCKET_PATH=/tmp/h1.sock HERDR_PANE_ID=w1:p1 REEVE_SESSION=c "$N" 2>/dev/null)"
 fresh
 record a Merek alive "w1:p1@/tmp/h1.sock"
-eq "5 herdr's pane is keyed by HERDR_SOCKET_PATH the same way" "Aldric" \
+eq "5 the same pane id on another herdr server is not this pane" "Aldric" \
    "$(HERDR_SOCKET_PATH=/tmp/h2.sock HERDR_PANE_ID=w1:p1 REEVE_SESSION=b "$N" 2>/dev/null)"
 eq "5 and on its own socket is inherited" "Merek" \
    "$(HERDR_SOCKET_PATH=/tmp/h1.sock HERDR_PANE_ID=w1:p1 REEVE_SESSION=c "$N" 2>/dev/null)"

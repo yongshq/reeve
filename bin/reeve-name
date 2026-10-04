@@ -19,9 +19,9 @@
 # pool name silently; $REEVE_NAME just falls through to the pool, with a
 # warning.
 #
-# Inside herdr or tmux, every form also labels the reeve's own workspace or
-# window with the name, unless another live reeve already holds it, and never
-# from inside a hand. A pane is its id plus its server's socket.
+# Inside herdr, every form also labels the reeve's own workspace with the name,
+# unless another live reeve already holds it, and never from inside a hand. A
+# pane is its id plus its server's socket.
 #
 # The session id stays the identity everywhere. A name is what the liege reads.
 #
@@ -38,18 +38,18 @@ session_touch
 s=$(reeve_session)
 [ -n "$s" ] || die "this session has no id, so it cannot hold a name. set REEVE_SESSION to name a reeve on a harness that exports none"
 
-# label_group <name>   label this reeve's own workspace or window with its
-# name, the group its hands will open inside. Presentation only, so a backend
-# that cannot is said once and ignored: the name is the answer here.
+# label_group <name>   label this reeve's own workspace with its name, the
+# group its hands will open inside. Presentation only, so a backend that cannot
+# is said once and ignored: the name is the answer here.
 #
 # Not from a hand: dispatch marks one with REEVE_HAND, and the workspace it sits
-# in is its reeve's. Not outside a backend's own session either (no HERDR_ENV,
-# no TMUX): there is no workspace of its own to label, and making one at every
+# in is its reeve's. Not outside a backend's own session either (no
+# HERDR_ENV): there is no workspace of its own to label, and making one at every
 # session start left an empty one behind each time. Dispatch makes it then.
 label_group() {
   local bin b
   [ -z "${REEVE_HAND:-}" ] || return 0
-  [ "${HERDR_ENV:-}" = 1 ] || [ -n "${TMUX:-}" ] || return 0
+  [ "${HERDR_ENV:-}" = 1 ] || return 0
   bin=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
   if ! b=$("$bin/reeve-backend" resolve 2>/dev/null); then
     warn "no backend resolved, so no workspace was labelled $1"
@@ -80,8 +80,8 @@ case $cmd in
     fi
     # claim takes back a name a handoff recorded, so a group this session made
     # under another name is let go and claim finds the one its name kept. set
-    # renames this reeve, so it keeps its group, relabelled now inside herdr or
-    # tmux and at the next dispatch outside them, never a second one.
+    # renames this reeve, so it keeps its group, relabelled now inside herdr
+    # and at the next dispatch outside it, never a second one.
     [ "$cmd" = claim ] && [ "$(session_name "$s")" != "$want" ] && rm -f "$(session_dir "$s")"/group.*
     name_store "$s" "$want" || die "could not write $(session_dir "$s")/name"
     pane_store "$s"

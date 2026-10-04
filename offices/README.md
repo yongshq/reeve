@@ -42,7 +42,7 @@ prints the axis as dropped, naming the harness that has no flag for it.
 
 ## Why an allow list and not a blanket bypass
 
-Measured against claude 2.1.236, four configurations, in a detached tmux session so nothing reached
+Measured against claude 2.1.236, four configurations, in a detached session so nothing reached
 the user's terminal:
 
 | configuration | result |

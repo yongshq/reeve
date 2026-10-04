@@ -9,6 +9,9 @@ so `bin/reeve-dispatch` creates worktrees itself and hands a backend a plain dir
 optionally *adopt* that directory for presentation (herdr groups it in the sidebar), but must work
 correctly if it does not.
 
+herdr (`herdr.sh`) is the only backend shipped. The contract stays so another can be added, and the
+tests drive it through stub backends of their own.
+
 ## Required functions
 
 Each is `reeve_backend_<name>_<fn>`, sourced only through `bin/reeve-backend`.
@@ -33,41 +36,38 @@ the call, and every caller treats that refusal as a no and carries on.
 | Function | Arguments | Must print | Exit |
 |---|---|---|---|
 | `relabel` | `<target> <label>` | nothing, or the target to keep from now on | 0 if the endpoint now shows `<label>`. Used by `bin/reeve-adopt`, so an adopted hand carries its new reeve's name. A target whose identity holds its label is printed again with the new one |
-| `ensure_group` | `<label> [<known-id> [<held-id>...]]` | one line: a group id | 0 if the group exists and shows `<label>`. The reeve's own group: a herdr workspace, a tmux session. `<known-id>` is what an earlier call printed, to reuse while it is still there; it may be empty. Each `<held-id>` is a group another reeve holds, never relabelled, nested into or reused. Used by `bin/reeve-dispatch` and `bin/reeve-name` |
+| `ensure_group` | `<label> [<known-id> [<held-id>...]]` | one line: a group id | 0 if the group exists and shows `<label>`. The reeve's own group: a herdr workspace. `<known-id>` is what an earlier call printed, to reuse while it is still there; it may be empty. Each `<held-id>` is a group another reeve holds, never relabelled, nested into or reused. Used by `bin/reeve-dispatch` and `bin/reeve-name` |
 | `pane_gone` | `<pane-id> <socket>` | nothing | 0 only when the server on `<socket>` answers that the pane is not there. Anything it cannot check is 1. Used to free a group whose reeve's pane has closed |
 | `pane_vacant` | `<pane-id> <socket>` | nothing | 0 only when that server answers that the pane is gone or runs no harness. Anything it cannot check is 1. Used so a reeve that crashed stops holding its name |
 | `group_gone` | `<target>` | nothing | 0 only when the target opened inside a group and the server answers that group is gone. Used by the sentry to say a hand died with its reeve's workspace |
 
 A group is a reeve's own place, labelled with its name, and its hands open inside it: herdr tabs in
-its workspace, tmux windows in its session. The group id, like a target, is opaque to callers; only
+its workspace. The group id, like a target, is opaque to callers; only
 the backend that printed it reads it. A target made inside a group stays opaque too, and `kill` on
 it closes that endpoint only, **never the group**: the group is usually the workspace the reeve
 itself runs in, so closing it would kill the reeve and every hand beside it.
 
 One reeve per group. The workspace a reeve runs in is its group only when no other reeve holds it,
-when the id really is on the server the backend talks to, and never from inside a hand:
-dispatch launches every hand with `REEVE_HAND=<id>` and with `HERDR_WORKSPACE_ID` and `TMUX_PANE`
-unset, since the workspace a hand sits in is its reeve's. Otherwise the reeve gets one of its own.
-A reeve holds its group for as long as its recorded pane is open, whatever its heartbeat says; only
-`pane_gone` on that pane's own server frees it, and a pane that cannot be checked keeps it held. A
-reeve with no pane, in a plain terminal, holds it while its heartbeat is fresh. herdr group ids
-carry their server's socket (`w5@<socket>`), and a known id is reused only on that same server,
-and only while it shows the reeve's name or one its records held (`$REEVE_GROUP_NAMES`, set by
-`reeve_group`): ids are counters, so after a server restart a known id may be someone else's. A
-tmux reeve renamed outside tmux has its known `reeve-*` session renamed to match, never a session
-the liege named. Under `REEVE_GROUP_KEEP=1`, set by `reeve_group` while the known group still holds
-hands of this reeve's errands, the known group is preferred to the workspace the reeve now sits in.
+when the id really is on the server the backend talks to, and never from inside a hand: dispatch
+launches every hand with `REEVE_HAND=<id>` and with `HERDR_WORKSPACE_ID` unset, since the workspace
+a hand sits in is its reeve's. Otherwise the reeve gets one of its own. A reeve holds its group for
+as long as its recorded pane is open, whatever its heartbeat says; only `pane_gone` on that pane's
+own server frees it, and a pane that cannot be checked keeps it held. A reeve with no pane, in a
+plain terminal, holds it while its heartbeat is fresh. herdr group ids carry their server's socket
+(`w5@<socket>`), and a known id is reused only on that same server, and only while it shows the
+reeve's name or one its records held (`$REEVE_GROUP_NAMES`, set by `reeve_group`): ids are counters,
+so after a server restart a known id may be someone else's. Under `REEVE_GROUP_KEEP=1`, set by
+`reeve_group` while the known group still holds hands of this reeve's errands, the known group is
+preferred to the workspace the reeve now sits in.
 
 A server restart reuses ids, so a stored target or pane key may name someone else's endpoint. A
 target may end `#<identity>`, what the endpoint was when it was made, and every function that acts
 on a target checks it first: a different endpoint under the same id is `missing` to `agent_state`
 and is never killed, relabelled or typed into. herdr's identity is checksums of the pane's working
 directory and of its label, either matching enough: a restored endpoint keeps its label and
-usually its directory, while its `terminal_id` does not survive a restart. tmux's is the server's
-start time plus the window's first pane pid. A target without one is trusted as before.
-A tmux pane key carries its server's start time (`%3@<socket>#<epoch>`), so a pane from a server
-that has since restarted is gone, and never the same pane as one on the new server. A herdr key
-does not: herdr restores its panes with their ids, so the same id is the same pane.
+usually its directory, while its `terminal_id` does not survive a restart. A target without one is
+trusted as before. A herdr pane key carries no server epoch: herdr restores its panes with their
+ids, so the same id is the same pane.
 
 ## The rules every backend obeys
 
@@ -95,22 +95,7 @@ does not: herdr restores its panes with their ids, so the same id is the same pa
    return "a change was observed" instantly and forever; a caller that reads that as time having
    passed busy-spins.
 
-## The two backends are not symmetric about attention
-
-herdr composes its answer from a detection manifest it updates remotely, so `attention_state` there is
-one call against the live screen and the regexes are never this repository's problem.
-
-Under tmux there is nothing to ask but the pane's text. Measured: `pane_current_command` is the
-harness binary in every condition, working or suspended, and `#{pane_title}` carries the harness's OSC
-title but never the working glyph, because that glyph is herdr's own composition of an OSC progress
-region tmux has no format variable for. So the highest priority rule in the herdr scheme has no tmux
-equivalent and `working` cannot be recognised positively at all. The tmux adapter therefore borrows
-herdr's classifier on captured text where herdr happens to be installed, and falls back to two
-conditions of its own where it is not, answering `unknown` rather than guessing.
-
-That gap is a property of tmux, not an unfinished adapter.
-
 ## Adding one
 
-Copy `tmux.sh`, which is the minimal honest implementation, then `bin/reeve-doctor` will pick it up.
+Start from `herdr.sh`, implement the required functions, and `bin/reeve-doctor` will pick it up.
 A backend is not usable until an errand has actually run through it end to end.

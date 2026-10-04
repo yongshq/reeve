@@ -41,7 +41,7 @@ settings_flag = "--settings {settings}"
 #                         configured server. It does not appear in
 #                         `claude mcp list` and --strict-mcp-config alone
 #                         leaves its whole mcp__ tool set loaded.
-# Measured on 2.1.236 in a detached tmux session: strict alone still listed
+# Measured on 2.1.236 in a detached session: strict alone still listed
 # mcp__claude-in-chrome__*, strict plus --no-chrome listed none. Probe late,
 # not at startup: these servers connect asynchronously, so a hand asked in its
 # first seconds answers "none" whether or not the flag is doing anything.

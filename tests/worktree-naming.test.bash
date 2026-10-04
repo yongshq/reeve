@@ -76,7 +76,7 @@ git -C "$REPO" -c user.email=reeve@example.invalid -c user.name=reeve \
 
 # No session id and no name from the caller's environment: the briefs below are
 # an unnamed reeve's unless a test names one.
-unset CLAUDE_CODE_SESSION_ID REEVE_SESSION REEVE_NAME HERDR_PANE_ID TMUX_PANE
+unset CLAUDE_CODE_SESSION_ID REEVE_SESSION REEVE_NAME HERDR_PANE_ID
 
 B="$ROOT/bin/reeve-brief"
 PARENT="$SCRATCH/holding.worktrees"

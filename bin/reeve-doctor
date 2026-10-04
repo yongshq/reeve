@@ -88,12 +88,11 @@ if [ "$orph" -gt 0 ]; then
 fi
 
 hdr "tools"
-for t in git herdr tmux jq gh python3; do
+for t in git herdr jq gh python3; do
   if command -v "$t" >/dev/null 2>&1; then
     case $t in
       git)   v=$(git --version | awk '{print $3}') ;;
       herdr) v=$(herdr --version 2>/dev/null | awk '{print $NF}') ;;
-      tmux)  v=$(tmux -V | awk '{print $2}') ;;
       jq)    v=$(jq --version 2>/dev/null) ;;
       *)     v=$("$t" --version 2>/dev/null | head -1 | awk '{print $NF}') ;;
     esac

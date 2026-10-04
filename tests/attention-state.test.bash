@@ -65,44 +65,6 @@ else
   ck_eq "1 so is one that is not json at all"          "$(_h_attn_from_explain 'herdr: no running session')" unknown
 fi
 
-# --- 2. the mapping, tmux text fallback ------------------------------------
-# Under tmux there is nothing to ask but the text, so this half runs on captures.
-# The AND is the whole test: a hand writing ABOUT permission prompts has the
-# footer in its scrollback and its composer still on screen underneath.
-
-# shellcheck disable=SC1091
-. "$ROOT/backends/tmux.sh"
-
-t_dialog=$(cat <<'X'
-  Bash(python3 -c "print(6*7)")
- ─────────────────────────────────────────────
-  Do you want to proceed?
-  ❯ 1. Yes
-    2. No, and tell Claude what to do differently (esc to cancel)
- ─────────────────────────────────────────────
-X
-)
-t_quoting=$(cat <<'X'
-  I am writing about permission prompts. One reads:
-    2. No, and tell Claude what to do differently (esc to cancel)
- ─────────────────────────────────────────────
-  ❯
- ─────────────────────────────────────────────
-  esc to interrupt
-X
-)
-t_composer=$(cat <<'X'
-  ⏺ Done. The branch is ready.
- ─────────────────────────────────────────────
-  ❯
- ─────────────────────────────────────────────
-X
-)
-ck_eq "2 a dialog with no composer is waiting"        "$(_t_attn_from_text "$t_dialog")"   waiting
-ck_eq "2 a hand QUOTING a prompt is not waiting"      "$(_t_attn_from_text "$t_quoting")"  unknown
-ck_eq "2 an idle composer is not waiting"             "$(_t_attn_from_text "$t_composer")" unknown
-ck_eq "2 nothing captured is unknown"                 "$(_t_attn_from_text '')"            unknown
-
 # --- 3. the sentry: dwell, latch, and what must stay quiet -----------------
 # A stub backend, in a scratch REEVE_ROOT, so the sentry's arithmetic is tested
 # rather than herdr's. The word it reports is whatever is in $ATTN, which the

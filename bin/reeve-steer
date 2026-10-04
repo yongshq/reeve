@@ -20,8 +20,8 @@
 # up, or whose session is gone. Refuses too a session standing at a dialog: the
 # text would land in the dialog and answer it, which is never the reeve's to do.
 # Deny it or bring it to the liege, in the session itself. And a session it
-# cannot tell from one, for the same reason: tmux without herdr and an
-# unverified harness both answer `unknown`, whatever is on the screen.
+# cannot tell from one, for the same reason: an unverified harness answers
+# `unknown`, whatever is on the screen.
 #
 # Writes nothing but the two latches and the time of the steer, and never the
 # status file, which is the hand's.
@@ -58,7 +58,7 @@ attn=$("$BIN/reeve-backend" call attention_state "$target" --backend "$backend" 
 case $attn in
   settled|working) : ;;
   waiting) die "the hand at $target is waiting at a dialog in its session. Typing would answer it, so nothing was sent. Deny it there, or bring it to the liege." ;;
-  *) die "cannot tell whether the hand at $target is at a dialog: backend $backend answered ${attn:-nothing}. Typing into one would answer it, so nothing was sent. Look at the session yourself: tmux without herdr, and any unverified harness, cannot be told apart from a dialog." ;;
+  *) die "cannot tell whether the hand at $target is at a dialog: backend $backend answered ${attn:-nothing}. Typing into one would answer it, so nothing was sent. Look at the session yourself: an unverified harness cannot be told apart from a dialog." ;;
 esac
 
 "$BIN/reeve-backend" call send_text_submit "$target" "$text" --backend "$backend" 2>/dev/null \

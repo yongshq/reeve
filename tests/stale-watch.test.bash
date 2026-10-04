@@ -332,8 +332,8 @@ ck_eq  "12 three conditions, three different words"       \
   "$(printf '%s\n' "$w_gone" "$w_idle" "${OUT%%:*}" | sort -u | grep -c .)" 3
 
 # --- 13. a session that cannot say ------------------------------------------
-# tmux without herdr reads unknown, never settled, so the wake cannot come. The
-# watch says so instead of reading as quiet.
+# A backend or harness that reads unknown, never settled, cannot bring the wake.
+# The watch says so instead of reading as quiet.
 printf 'unknown\n' > "$STUB_ATTN"
 say 'working: rewriting the parser'
 backdate 86400

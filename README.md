@@ -14,7 +14,7 @@ It is not a model, a harness, a CLI or an MCP server. It is a directory you inst
 
 | Axis | Question it answers | Implementations |
 |---|---|---|
-| **backend** | where does a hand's session live | `herdr` (primary), `tmux` |
+| **backend** | where does a hand's session live | `herdr` |
 | **harness** | which agent CLI runs inside it | `claude` (verified), `codex`, `pi`, `opencode`, `cursor`, `grok`, `gemini` (declared) |
 
 **Verified** means an errand has actually run through it end to end on this machine. Anything else

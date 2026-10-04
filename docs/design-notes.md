@@ -4,7 +4,7 @@ Decisions that cost something to learn, recorded so they are not re-litigated.
 
 ## Permissions: an allow list, not a bypass
 
-Four configurations were measured against claude 2.1.236, in a detached tmux session:
+Four configurations were measured against claude 2.1.236, in a detached session:
 
 | configuration | result |
 |---|---|

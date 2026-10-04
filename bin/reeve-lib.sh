@@ -665,57 +665,43 @@ valid_reeve_name() {
 }
 
 # reeve_pane   this session's pane, as `<pane id>@<server socket>`. Pane ids are
-# per server, tmux's `%N` restarting at %0 on each and herdr's counted per
-# session, so the id alone would make two reeves on two servers one pane. Bare
-# id when the socket is unknown. Whitespace dropped: the key is one field.
-#
-# tmux adds its server's start time, `%3@<socket>#<epoch>`: a restarted server
-# hands out %0, %1 again on the same socket, so without it a new reeve would
-# inherit the name of whichever dead one had that id. herdr keeps no epoch: it
-# restores its panes with their ids across a restart, so the same id there is
-# the same pane, and the name following it is right.
+# per server, herdr's counted per session, so the id alone would make two
+# reeves on two servers one pane. Bare id when the socket is unknown. Whitespace
+# dropped: the key is one field. No epoch: herdr restores its panes with their
+# ids across a restart, so the same id there is the same pane, and the name
+# following it is right.
 reeve_pane() {
-  local p sock='' ep=''
-  if [ -n "${HERDR_PANE_ID:-}" ]; then p=$HERDR_PANE_ID; sock=${HERDR_SOCKET_PATH:-}
-  elif [ -n "${TMUX_PANE:-}" ]; then
-    p=$TMUX_PANE; sock=${TMUX:-}; sock=${sock%%,*}
-    # Asked of that socket only, never the default server, which may be another.
-    [ -n "$sock" ] && ep=$(tmux -S "$sock" display -p -t "$p" '#{start_time}' 2>/dev/null | tr -dc '0-9')
-  else return 0
-  fi
-  printf '%s%s%s' "$p" "${sock:+@$sock}" "${ep:+#$ep}" | tr -d '[:space:]'
+  [ -n "${HERDR_PANE_ID:-}" ] || return 0
+  printf '%s%s' "$HERDR_PANE_ID" "${HERDR_SOCKET_PATH:+@$HERDR_SOCKET_PATH}" | tr -d '[:space:]'
 }
 
 # pane_eq <a> <b>   one pane. A record written before the socket was kept holds
-# the bare id, and is that same pane when the ids match. A key carrying a tmux
-# epoch matches only itself: another epoch is another server, and a key with no
-# epoch cannot say which server it was.
+# the bare id, and is that same pane when the ids match.
 pane_eq() {
   [ -n "$1" ] && [ -n "$2" ] || return 1
   [ "$1" = "$2" ] && return 0
-  case $1$2 in *'#'*) return 1 ;; esac
   case $1$2 in *@*@*) return 1 ;; esac
   [ "${1%%@*}" = "${2%%@*}" ]
 }
 
 # pane_gone <pane key>   0 only when the server the key names answers that the
-# pane is not there. herdr's ids read `w4:p1`, tmux's `%3`. A bare key has no
-# server to ask, and a server that cannot be asked proves nothing: both are no.
+# pane is not there. herdr's ids read `w4:p1`. A bare key has no server to ask,
+# and a server that cannot be asked proves nothing: both are no.
 pane_gone() {
-  local p=$1 b
+  local p=$1
   case $p in *@*) ;; *) return 1 ;; esac
-  case $p in %*) b=tmux ;; *) b=herdr ;; esac
-  "$REEVE_ROOT_D/bin/reeve-backend" call pane_gone "${p%%@*}" "${p#*@}" --backend "$b" >/dev/null 2>&1
+  "$REEVE_ROOT_D/bin/reeve-backend" call pane_gone "${p%%@*}" "${p#*@}" --backend herdr \
+    >/dev/null 2>&1
 }
 
 # pane_vacant <pane key>   0 only when the server the key names answers that no
 # harness runs in that pane: it is gone, or it fell back to a shell. What a
 # reeve that crashed leaves behind. Anything that cannot be asked is a no.
 pane_vacant() {
-  local p=$1 b
+  local p=$1
   case $p in *@*) ;; *) return 1 ;; esac
-  case $p in %*) b=tmux ;; *) b=herdr ;; esac
-  "$REEVE_ROOT_D/bin/reeve-backend" call pane_vacant "${p%%@*}" "${p#*@}" --backend "$b" >/dev/null 2>&1
+  "$REEVE_ROOT_D/bin/reeve-backend" call pane_vacant "${p%%@*}" "${p#*@}" --backend herdr \
+    >/dev/null 2>&1
 }
 
 # holder_live <sid>   0 when that session still holds what it holds: its
@@ -927,13 +913,12 @@ hand_label() {
 }
 
 # --- a reeve's group ----------------------------------------------------------
-# A reeve owns one group on each backend, a herdr workspace or a tmux session,
-# labelled with its name, and its hands open inside it as tabs or windows. The
-# id the backend returned is kept in the session's record, one file per backend
-# (`group.herdr`, `group.tmux`), and handed back on the next call so the backend
-# can reuse it rather than make another. Presentation only: a missing or failed
-# group means a hand opens where it always did, and nothing ever decides
-# anything destructive by it.
+# A reeve owns one group on each backend, a herdr workspace, labelled with its
+# name, and its hands open inside it as tabs. The id the backend returned is
+# kept in the session's record, one file per backend (`group.herdr`), and
+# handed back on the next call so the backend can reuse it rather than make
+# another. Presentation only: a missing or failed group means a hand opens where
+# it always did, and nothing ever decides anything destructive by it.
 
 group_file() { printf '%s/group.%s\n' "$(session_dir "$1")" "$2"; } # group_file <sid> <backend>
 
@@ -1667,11 +1652,11 @@ stale_look() {
 #
 # The case stale_silence cannot judge and should not pass over in silence: a
 # `working` hand silent past `hand-stale` whose attention reads `unknown`. That
-# is every hand on a backend or harness that cannot tell idle from busy, tmux
-# without herdr among them, where `settled` never comes and the check above can
-# never fire, nor `working`, so the wedged check below cannot either. Prints the
-# silence in seconds when that is the case, so the caller can say both checks
-# are blind here rather than let it read as quiet.
+# is every hand on a backend or harness that cannot tell idle from busy, where
+# `settled` never comes and the check above can never fire, nor `working`, so
+# the wedged check below cannot either. Prints the silence in seconds when that
+# is the case, so the caller can say both checks are blind here rather than let
+# it read as quiet.
 stale_unseen() {
   local quiet age
   [ "$2" = working ] && [ "$3" = unknown ] || return 1

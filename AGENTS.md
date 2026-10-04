@@ -20,7 +20,7 @@ a skill, listed in section 11.
 | session | one reeve, running. Owns the errands it briefed. Several share one home |
 | manor | one logical project, which may span several repos |
 | holding | one repo inside a manor |
-| backend | where a session lives: herdr, tmux |
+| backend | where a session lives: herdr |
 | harness | which agent CLI runs in it: claude, codex, pi, opencode, cursor, grok, gemini |
 | name | a reeve's short name, unique among the live reeves on one home. A hand is labelled with it, `<Name>'s <office>: <id>` |
 
@@ -240,10 +240,10 @@ Rules you must hold to:
   `bin/reeve-status` shows it as `idle` in its process column only once the sentry's own clock says
   so, reading it and writing nothing, so the listing and the wake never disagree; before that it
   shows the silence without the word. Two limits. A backend or harness that cannot tell idle from
-  busy, tmux without herdr among them, never reads idle, so the check cannot fire there: the
-  sentry says so on stderr, once per watch, for a hand silent past `config/hand-stale`. And a
-  threshold set to anything but a whole number of seconds turns its half of the check off, which
-  the sentry and the listing both say on stderr.
+  busy never reads idle, so the check cannot fire there: the sentry says so on stderr, once per
+  watch, for a hand silent past `config/hand-stale`. And a threshold set to anything but a whole
+  number of seconds turns its half of the check off, which the sentry and the listing both say on
+  stderr.
 - **Working and frozen is not progress either.** A hand stuck inside one command, a test that
   hangs or a network call that never returns, keeps its session reading `working` for as long as
   it is stuck, so the idle check never sees it, and a timeout on silence alone would cry wolf at
@@ -261,11 +261,11 @@ Rules you must hold to:
   watch running is not counted before then. `bin/reeve-status` shows it as `wedged` in its process
   column on the same second the sentry wakes, reading the screen again and writing nothing; before
   that a working hand shows as working. Three limits. A backend or harness that cannot tell idle
-  from busy, tmux without herdr among them, never reads working, so the check cannot fire there:
-  the sentry says so on stderr, once per watch, alongside the idle limit. A screen that cannot be
-  read, or a backend that cannot capture, cannot be judged: no wake, said on stderr once per watch
-  for a hand silent past the window. And a threshold that is not a whole number turns the check
-  off, which the sentry and the listing both say on stderr; 0 turns it off silently.
+  from busy never reads working, so the check cannot fire there: the sentry says so on stderr,
+  once per watch, alongside the idle limit. A screen that cannot be read, or a backend that cannot
+  capture, cannot be judged: no wake, said on stderr once per watch for a hand silent past the
+  window. And a threshold that is not a whole number turns the check off, which the sentry and the
+  listing both say on stderr; 0 turns it off silently.
 - When the sentry wakes you, handle every actionable errand before you reply to the liege. Do not
   report on one and leave two.
 - **You supervise your own errands and nobody else's.** Several reeves share one home, and an
@@ -291,10 +291,10 @@ halves have different safety conditions:
 | **free the session** | as soon as a terminal state is reported with nothing open | nothing. The status file and any report are already on disk |
 | **remove the copy** | only when the branch holds nothing the base does not, and the report has somewhere to go | commits, if done too early. So it refuses instead |
 
-Hands open inside their reeve's own workspace, as tabs (windows, under tmux), so freeing a hand's
-session closes its tab and never the reeve's workspace, which holds the reeve and every other hand
-beside it. A hand dispatched before that, or on a backend with no group to give,
-has a workspace of its own, and freeing it closes that, as it always did.
+Hands open inside their reeve's own workspace, as tabs, so freeing a hand's session closes its tab
+and never the reeve's workspace, which holds the reeve and every other hand beside it. A hand
+dispatched before that, or on a backend with no group to give, has a workspace of its own, and
+freeing it closes that, as it always did.
 
 The converse holds too, and it is accepted: closing a reeve's workspace closes every hand tab in
 it, and those hands die mid-errand. The watch names each one so lost, a `stale:` line ending
@@ -492,11 +492,11 @@ Read, in order:
    liege, and retry once that reeve's pane has closed rather than take a pool name; run it bare
    only if the liege agrees. With no handoff, read `bin/reeve-status --orphans` first: when every
    orphan carries one name no live reeve holds, it says so: take it with `bin/reeve-name claim
-   <that>` and say so in your opening line. Otherwise `bin/reeve-name`, bare. Inside herdr or
-   tmux, every form also labels your own workspace with the name, unless another reeve holds it,
-   when you get your own. A reeve holds its workspace for as long as its pane is open, however
-   quiet it has been: only a pane that is provably closed frees the workspace, and one that cannot
-   be checked does not.
+   <that>` and say so in your opening line. Otherwise `bin/reeve-name`, bare. Inside herdr, every
+   form also labels your own workspace with the name, unless another reeve holds it, when you get
+   your own. A reeve holds its workspace for as long as its pane is open, however quiet it has
+   been: only a pane that is provably closed frees the workspace, and one that cannot be checked
+   does not.
 3. `$REEVE_HOME/liege.md`, `$REEVE_HOME/manors.md`, and `manors/<manor>.md` for the manor in hand.
 4. `bin/reeve-status --all` for anything still in flight, then `bin/reeve-status --orphans`. A
    reset gives you a new session id, so errands the last reeve briefed are no longer yours to
@@ -509,8 +509,7 @@ Read, in order:
 under another), brings a crashed reeve back as the same session: its name, its errands and their
 ownership, with only the watch to restart. That is the full recovery; a handoff or the orphans'
 name is the fallback. A reeve relaunched in its restored herdr pane keeps its name by that pane,
-since herdr restores panes with their ids. After a tmux server restart it does not, since tmux
-reuses pane ids for new panes. A reeve outside herdr and tmux has no pane to key on, so each
+since herdr restores panes with their ids. A reeve outside herdr has no pane to key on, so each
 `/clear` gives it a new name: accepted, and a handoff carries the name across.
 
 If a file is absent, that means absent, not empty: `liege.md` absent means you have learned nothing
@@ -568,7 +567,7 @@ fact per line, because you are the one reading it.
 |---|---|
 | `bin/reeve-doctor` | what is installed, what is verified, who else is running, what will refuse and why |
 | `bin/reeve-contract` | print this contract, for a session that did not load it from the clone |
-| `bin/reeve-name` | this reeve's name, assigned on first ask. `claim <Name>` takes one back from a handoff, `set <Name>` is the liege's rename. Both, and `$REEVE_NAME`, refuse a name a live reeve on another pane holds. Inside herdr or tmux, every form also labels this reeve's own workspace with the name; one reeve per workspace, so one another reeve holds, its pane still open, is left alone and this reeve gets its own |
+| `bin/reeve-name` | this reeve's name, assigned on first ask. `claim <Name>` takes one back from a handoff, `set <Name>` is the liege's rename. Both, and `$REEVE_NAME`, refuse a name a live reeve on another pane holds. Inside herdr, every form also labels this reeve's own workspace with the name; one reeve per workspace, so one another reeve holds, its pane still open, is left alone and this reeve gets its own |
 | `bin/reeve-survey <path>` | gather evidence about an unfamiliar repository |
 | `bin/reeve-survey --register ...` | record the liege's answer about which manor a repo belongs to |
 | `bin/reeve-brief <id> <holding> --office <o>` | write a brief with the two seams |
