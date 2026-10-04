@@ -6,7 +6,39 @@
 # something (push events, confirmed submission) it says so instead of pretending.
 
 _t_session() { printf '%s\n' "${REEVE_TMUX_SESSION:-reeve}"; }
-_t_target()  { printf '%s\n' "${1%%|*}:${1#*|}"; }   # "<ses>|@3" -> "<ses>:@3"
+# "<ses>|@3" -> "<ses>:@3". A target may end `#<identity>`, which is not part of it.
+_t_target()  { local b=${1%%#*}; printf '%s\n' "${b%%|*}:${b#*|}"; }
+
+# A window's identity is its server's start time and its first pane's pid,
+# `<start_time>.<pane_pid>`. Window ids restart at @0 on every server, and the
+# session a hand opens in is now the reeve's own, which the liege recreates
+# under the same name, so after a restart `<ses>|@3` names someone else's
+# window. Read from the full pane list, never `display -t`, which was measured
+# answering for the current pane when the target window does not exist.
+_t_ident() { # _t_ident <window id>
+  tmux list-panes -a -F '#{window_id} #{start_time}.#{pane_pid}' 2>/dev/null \
+    | awk -v w="$1" '$1 == w { print $2; exit }'
+}
+
+# _t_verified <target>   0 when it carries no identity, or its window still
+# shows it, or no window by that id is there to ask (the callers' own checks
+# then find it missing, as before). 1 is a different window under the same id.
+_t_verified() {
+  local want have b
+  case $1 in *'#'*) want=${1##*#} ;; *) return 0 ;; esac
+  b=${1%%#*}
+  have=$(_t_ident "${b#*|}")
+  [ -z "$have" ] || [ "$have" = "$want" ]
+}
+
+_t_refuse() {
+  echo "tmux: $(_t_target "$1") is not the window this target was made for, so nothing was done to it" >&2
+  return 1
+}
+
+# A native claude install runs a binary named for its version, `2.1.3`, which is
+# the name the process table shows: a harness too.
+_t_harness_re='^(claude|codex|opencode|cursor-agent|grok|gemini|pi|node|bun|[0-9]+(\.[0-9]+)+)$'
 
 reeve_backend_tmux_available() {
   command -v tmux >/dev/null 2>&1 || { echo "tmux not on PATH" >&2; return 1; }
@@ -28,10 +60,16 @@ reeve_backend_tmux_ensure_group() {
   # and one reeve per session: a held one is neither renamed in nor nested into,
   # and the reeve gets its own. A hand (REEVE_HAND, set by dispatch) never takes
   # the session it sits in, which is its reeve's.
+  #
+  # REEVE_GROUP_KEEP says the known session still holds hands of this reeve's,
+  # so a reeve that moved keeps sending hands there while any are left.
   local label=$1 known=${2:-} ses='' win h
   shift; [ $# -gt 0 ] && shift
   if [ -n "${REEVE_TMUX_SESSION:-}" ]; then
     ses=$REEVE_TMUX_SESSION
+  elif [ -n "${REEVE_GROUP_KEEP:-}" ] && [ -n "$known" ] && tmux has-session -t "=$known" 2>/dev/null \
+       && ! _t_held "$known" "$@"; then
+    ses=$known
   elif [ -n "${TMUX_PANE:-}" ] && [ -z "${REEVE_HAND:-}" ]; then
     ses=$(tmux display -p -t "$TMUX_PANE" '#{session_name}' 2>/dev/null) || ses=''
     win=$(tmux display -p -t "$TMUX_PANE" '#{window_id}' 2>/dev/null) || win=''
@@ -61,23 +99,56 @@ reeve_backend_tmux_ensure_group() {
   printf '%s\n' "$ses"
 }
 
+_t_held() { local k=$1 h; shift; for h in "$@"; do [ "$h" = "$k" ] && return 0; done; return 1; }
+
 reeve_backend_tmux_pane_gone() {
   # Optional. <pane id> <socket>: 0 only when the server on that socket lists
   # its panes and that one is not among them. Pane ids restart at %0 on every
   # server, so it is asked of that socket only. `display -t` on a missing pane
   # was measured printing nothing and exiting 0 on tmux 3.7b, so the list is the
   # proof instead. A server that does not answer is not proof, so it is a no.
-  local pane=$1 sock=${2:-} out
+  #
+  # The socket may end `#<epoch>`, the server's start time when the key was
+  # made. A server answering with another start time is another server, so
+  # every pane of the old one is gone, whatever ids the new one reuses.
+  local pane=$1 sock=${2:-} ep='' out
+  case $sock in *'#'*) ep=${sock##*#}; sock=${sock%#*} ;; esac
   [ -n "$pane" ] && [ -n "$sock" ] || return 1
-  out=$(tmux -S "$sock" list-panes -a -F '#{pane_id}' 2>/dev/null) || return 1
+  out=$(tmux -S "$sock" list-panes -a -F '#{pane_id} #{start_time}' 2>/dev/null) || return 1
   [ -n "$out" ] || return 1
-  ! printf '%s\n' "$out" | grep -qxF -- "$pane"
+  if [ -n "$ep" ]; then
+    [ "$(printf '%s\n' "$out" | awk 'NR == 1 { print $2 }')" = "$ep" ] || return 0
+  fi
+  ! printf '%s\n' "$out" | awk '{ print $1 }' | grep -qxF -- "$pane"
+}
+
+reeve_backend_tmux_pane_vacant() {
+  # Optional. <pane id> <socket[#epoch]>: 0 only when that server answers that
+  # the pane is gone, or that it runs no harness. Not proof otherwise.
+  local pane=$1 sock=${2:-} cmd
+  reeve_backend_tmux_pane_gone "$pane" "$sock" && return 0
+  sock=${sock%#*}
+  [ -n "$pane" ] && [ -n "$sock" ] || return 1
+  cmd=$(tmux -S "$sock" list-panes -a -F '#{pane_id} #{pane_current_command}' 2>/dev/null \
+    | awk -v p="$pane" '$1 == p { print $2; exit }')
+  [ -n "$cmd" ] || return 1
+  ! printf '%s\n' "$cmd" | grep -qiE "$_t_harness_re"
+}
+
+reeve_backend_tmux_group_gone() {
+  # Optional. <target>: 0 only when the server answers and the session the
+  # hand's window was in is not among its sessions. Closing a reeve's session
+  # closes every hand window in it.
+  local b=${1%%#*} out
+  out=$(tmux list-sessions -F '#{session_name}' 2>/dev/null) || return 1
+  [ -n "$out" ] || return 1
+  ! printf '%s\n' "$out" | grep -qxF -- "${b%%|*}"
 }
 
 reeve_backend_tmux_create_endpoint() {
   # The group, when given, is the session ensure_group printed. The target
   # format is the same either way: a window is a window.
-  local cwd=$1 label=$2 ses=${3:-} win
+  local cwd=$1 label=$2 ses=${3:-} win id
   [ -d "$cwd" ] || { echo "cwd does not exist: $cwd" >&2; return 1; }
   [ -n "$ses" ] || ses=$(_t_session)
   tmux has-session -t "$ses" 2>/dev/null || tmux new-session -d -s "$ses" -c "$cwd" || return 1
@@ -85,7 +156,8 @@ reeve_backend_tmux_create_endpoint() {
   win=$(tmux new-window -dP -F '#{window_id}' -t "$ses:" -n "$label" -c "$cwd") || return 1
   tmux set-window-option -t "$ses:$win" automatic-rename off >/dev/null 2>&1 || :
   tmux set-window-option -t "$ses:$win" allow-rename off    >/dev/null 2>&1 || :
-  printf '%s|%s\n' "$ses" "$win"
+  id=$(_t_ident "$win")
+  printf '%s|%s%s\n' "$ses" "$win" "${id:+#$id}"
 }
 
 reeve_backend_tmux_launch() {
@@ -94,12 +166,14 @@ reeve_backend_tmux_launch() {
 
 reeve_backend_tmux_capture() {
   local lines=${2:-200}
+  _t_verified "$1" || return 1
   tmux capture-pane -p -J -t "$(_t_target "$1")" -S "-$lines" 2>/dev/null
 }
 
 reeve_backend_tmux_send_text_submit() {
   local target tgt=$1 text=$2 tail_now
   target=$(_t_target "$tgt")
+  _t_verified "$tgt" || { _t_refuse "$tgt"; return 1; }
   tmux send-keys -t "$target" "$text" Enter || return 1
   sleep 1
   # tmux has no notion of a composer, so confirmation is best effort: if the
@@ -116,22 +190,22 @@ reeve_backend_tmux_send_text_submit() {
 }
 
 reeve_backend_tmux_target_exists() {
-  local tgt=$1 ses win
+  local tgt=${1%%#*} ses win
   ses=${tgt%%|*}; win=${tgt#*|}
-  tmux list-windows -t "$ses" -F '#{window_id}' 2>/dev/null | grep -qx -- "$win"
+  tmux list-windows -t "$ses" -F '#{window_id}' 2>/dev/null | grep -qx -- "$win" || return 1
+  _t_verified "$1"
 }
 
 reeve_backend_tmux_agent_state() {
   local tgt=$1 target cmd
   target=$(_t_target "$tgt")
   if ! tmux has-session -t "${tgt%%|*}" 2>/dev/null; then echo missing; return 0; fi
+  # target_exists checks the identity too: another window under the same id
+  # is missing, never alive.
   reeve_backend_tmux_target_exists "$tgt" || { echo missing; return 0; }
   cmd=$(tmux list-panes -t "$target" -F '#{pane_current_command}' 2>/dev/null | head -1)
   [ -n "$cmd" ] || { echo unreadable; return 0; }
-  case $cmd in
-    claude|codex|opencode|cursor-agent|grok|gemini|pi|node|bun) echo alive ;;
-    *) echo dead ;;
-  esac
+  if printf '%s\n' "$cmd" | grep -qiE "$_t_harness_re"; then echo alive; else echo dead; fi
 }
 
 _t_attn_from_text() {
@@ -206,8 +280,15 @@ reeve_backend_tmux_wait_change() {
   return 2
 }
 
-reeve_backend_tmux_kill() { tmux kill-window -t "$(_t_target "$1")" 2>/dev/null; }
+# Never a window a reused id now names: the one this target was made for is gone.
+reeve_backend_tmux_kill() {
+  _t_verified "$1" || { _t_refuse "$1"; return 1; }
+  tmux kill-window -t "$(_t_target "$1")" 2>/dev/null
+}
 
 # Optional. automatic-rename is off on every window create_endpoint made, so the
 # new name holds.
-reeve_backend_tmux_relabel() { tmux rename-window -t "$(_t_target "$1")" "$2" 2>/dev/null; }
+reeve_backend_tmux_relabel() {
+  _t_verified "$1" || { _t_refuse "$1"; return 1; }
+  tmux rename-window -t "$(_t_target "$1")" "$2" 2>/dev/null
+}

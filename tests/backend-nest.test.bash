@@ -183,16 +183,18 @@ eq  "1 and never when the socket is listed"                  "$(cat "$SCRATCH/er
 
 echo "--- 2. herdr create_endpoint ---"
 out=$(h create_endpoint "$PLAIN" "Aldric's scout: x" "w7$S")
-eq  "2 with a group, a three field target, no socket"     "$out" "w7|w7:p9|w7:t9"
+# Each ends `#<identity>`, what the endpoint was made as: tests/restart.test.bash.
+eq  "2 with a group, a three field target, no socket"     "${out%%#*}" "w7|w7:p9|w7:t9"
+has "2 carrying its identity"                              "$out" "w7|w7:p9|w7:t9#c"
 has "2 opened as a tab in that workspace"                  "$(calls)" "tab create --workspace w7 --cwd $PLAIN --label Aldric's scout: x --no-focus"
 nas "2 and no workspace of its own"                        "$(calls)" "workspace create"
 
 out=$(h create_endpoint "$PLAIN" "scout: x")
-eq  "2 without a group, two fields, as before"             "$out" "wNEW|wNEW:p1"
+eq  "2 without a group, two fields, as before"             "${out%%#*}" "wNEW|wNEW:p1"
 has "2 in a workspace of its own"                          "$(calls)" "workspace create --cwd $PLAIN --label scout: x --no-focus"
 
 out=$(STUB_TAB_FAIL=1 h create_endpoint "$PLAIN" "scout: x" w7 2>/dev/null)
-eq  "2 a tab herdr refuses falls back to a workspace"      "$out" "wNEW|wNEW:p1"
+eq  "2 a tab herdr refuses falls back to a workspace"      "${out%%#*}" "wNEW|wNEW:p1"
 
 echo "--- 3. parsing both target shapes ---"
 eq "3 _h_ws, three fields"   "$( . "$ROOT/backends/herdr.sh"; _h_ws   'w7|w7:p9|w7:t9')" w7

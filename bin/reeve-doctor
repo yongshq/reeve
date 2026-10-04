@@ -52,6 +52,9 @@ if [ -d "$REEVE_HOME_D/state/sessions" ]; then
     [ -d "$d" ] || continue
     sid=$(basename "$d")
     [ "$(session_state "$sid")" = alive ] || continue
+    # The session /clear replaced in this pane is not here, however fresh its
+    # heartbeat: listed, it read as a second live reeve under this one's name.
+    session_replaced "$sid" && continue
     live=$((live + 1))
     n=$(session_name "$sid")
     [ "$sid" = "$me" ] || others="$others ${n:+$n (}$sid${n:+)}"

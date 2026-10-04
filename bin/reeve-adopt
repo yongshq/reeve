@@ -4,6 +4,8 @@
 # Usage:
 #   reeve-adopt <id>          take it, if its owner is provably gone
 #   reeve-adopt <id> --force  take it anyway, from an owner that may be alive
+#   reeve-adopt --mine        take every orphan that carries this reeve's name,
+#                             and list the others, which are the liege's to place
 #
 # One home is shared by every reeve on this machine and an errand is owned by
 # the session that briefed it, so a sentry reports and reaps only its own. That
@@ -13,6 +15,13 @@
 # wrong session and the hand it was watching gets cleaned up under it.
 #
 # `bin/reeve-status --orphans` lists the ones this will take without --force.
+#
+# An owner that ran in this very pane is the session /clear replaced, so it is
+# gone whatever its heartbeat says, and its errands are taken at once.
+#
+# After a reboot every reeve's errands are orphans at once, and the first reeve
+# up used to take them all and relabel them its own. --mine takes only those
+# whose recorded reeve name is this reeve's, and names the rest.
 #
 # The errand takes this reeve's name with it, and where the backend can, the
 # hand's label is renamed to match: `<Name>'s <office>: <id>`.
@@ -26,14 +35,40 @@
 session_touch
 BIN=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
-force=no id=''
+force=no id='' minef=no
 while [ $# -gt 0 ]; do
   case $1 in
     --force) force=yes; shift ;;
+    --mine) minef=yes; shift ;;
     -h|--help) print_help "$0"; exit 0 ;;
     *) id=$1; shift ;;
   esac
 done
+
+if [ "$minef" = yes ]; then
+  [ -z "$id" ] && [ "$force" = no ] || die "--mine takes no errand id and no --force"
+  [ -n "$(reeve_session)" ] || die "this session has no id, so it cannot own anything. set REEVE_SESSION to adopt from a harness that exports none"
+  me=$(reeve_name)
+  [ -n "$me" ] || die "this reeve has no name, so no orphan can be told to be its own. run reeve-name first"
+  took=0 left=0
+  for f in "$REEVE_HOME_D"/state/*.meta; do
+    [ -f "$f" ] || continue
+    i=$(basename "$f" .meta)
+    [ -z "$(meta_get "$i" tornDown '')" ] || continue
+    own=$(meta_get "$i" session '')
+    [ -n "$own" ] && [ "$own" != "$(reeve_session)" ] || continue
+    [ "$(session_state "$own")" = dead ] || session_replaced "$own" || continue
+    rn=$(meta_get "$i" reeve '')
+    if [ "$rn" = "$me" ]; then
+      "$BIN/reeve-adopt" "$i" && took=$((took + 1))
+    else
+      info "left for the liege: $i, reeve ${rn:-unnamed}, owner $own"
+      left=$((left + 1))
+    fi
+  done
+  info "adopted $took orphan(s) of $me's, left $left for the liege"
+  exit 0
+fi
 
 [ -n "$id" ] || die "which errand? usage: reeve-adopt <id>"
 require_id "$id"
@@ -49,7 +84,11 @@ mine=$(reeve_session)
 own=$(meta_get "$id" session '')
 [ "$own" = "$mine" ] && { info "errand '$id' is already this session's"; exit 0; }
 
-if [ "$force" != yes ]; then
+# The session this pane ran before /clear: gone, whatever its heartbeat says.
+replaced=no
+session_replaced "$own" && replaced=yes
+
+if [ "$force" != yes ] && [ "$replaced" != yes ]; then
   case ${own:+set} in
     '') die "errand '$id' has no recorded owner, so nothing has been lost and every watch can already see it. adopt it only if you want it to become yours alone: reeve-adopt $id --force" ;;
   esac
@@ -72,8 +111,13 @@ relabeled=no
 tgt=$(meta_get "$id" target '')
 if [ -n "$tgt" ]; then
   label=$(hand_label "$(meta_get "$id" office '')" "$id" "$rname")
-  "$BIN/reeve-backend" call relabel "$tgt" "$label" \
-      --backend "$(meta_get "$id" backend herdr)" >/dev/null 2>&1 && relabeled=yes
+  # A backend whose target names its label hands back the target to keep.
+  if newt=$("$BIN/reeve-backend" call relabel "$tgt" "$label" \
+      --backend "$(meta_get "$id" backend herdr)" 2>/dev/null); then
+    relabeled=yes
+    newt=$(printf '%s\n' "$newt" | head -n 1)
+    [ -n "$newt" ] && [ "${newt%%#*}" = "${tgt%%#*}" ] && meta_set "$id" target "$newt"
+  fi
 fi
 
 # A wake is addressed to a session, so rewriting the owner leaves any pending

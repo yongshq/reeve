@@ -13,9 +13,11 @@
 # a letter first, at most 12.
 #
 # claim, set and $REEVE_NAME all refuse a name a live reeve on another pane
-# holds: two reeves under one name would label their hands alike. On refusal,
-# run it bare and say which name you got instead; $REEVE_NAME just falls
-# through to the pool, with a warning.
+# holds: two reeves under one name would label their hands alike. A holder is
+# live while its heartbeat is fresh and its pane, if it recorded one, still
+# runs a harness. On refusal, retry once the holder has gone rather than take a
+# pool name silently; $REEVE_NAME just falls through to the pool, with a
+# warning.
 #
 # Inside herdr or tmux, every form also labels the reeve's own workspace or
 # window with the name, unless another live reeve already holds it, and never
@@ -68,10 +70,13 @@ case $cmd in
     [ -n "$want" ] || die "which name? usage: reeve-name $cmd <Name>"
     valid_reeve_name "$want" \
       || die "bad name '$want': letters and hyphens, a letter first, at most 12"
-    lk=$(lock_acquire names 15) || exit 1
+    lk=$(lock_acquire names 15 "$(config_get lock-stale 10)") || exit 1
     trap 'lock_release "$lk"' EXIT
     if rival=$(name_live_elsewhere "$want" "$(reeve_pane)" "$s"); then
-      die "'$want' is held by live reeve $rival on another pane. run reeve-name bare for a free one"
+      # A holder that crashed lets go once its pane closes or falls back to a
+      # shell, or its heartbeat is session-stale old. Retrying keeps the name;
+      # running bare takes a new one for good, which is the liege's call.
+      die "'$want' is held by live reeve $rival on another pane. if that reeve is gone, retry reeve-name $cmd $want once its pane is closed, or within $(config_get session-stale 900)s of its last heartbeat. a new name from the pool (reeve-name, bare) only if the liege agrees"
     fi
     # claim takes back a name a handoff recorded, so a group this session made
     # under another name is let go and claim finds the one its name kept. set

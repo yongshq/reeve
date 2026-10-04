@@ -465,7 +465,7 @@ wake_owed() { # wake_owed <id>
 # Absorb or escalate. One errand, one verdict.
 check_one() {
   local i=$1 f seen now again st open div bk tgt live
-  local attn af since woke nowsec last stale how mark latch wedge prc w
+  local attn af since woke nowsec last stale how mark latch wedge prc w why
 
   # Counted BEFORE the verdict is read, and again after. The cursor is what says
   # a line has been dealt with, so advancing it past a line the verdict did not
@@ -658,7 +658,13 @@ check_one() {
   case "$live:$st" in
     dead:done|dead:failed|missing:done|missing:failed) : ;;
     dead:*|missing:*)
-      printf 'stale: %s left no result and its session is %s, last reported %s\n' "$i" "$live" "$st"
+      # A hand opens inside its reeve's workspace, so closing that workspace
+      # takes every hand in it. Said, so each one lost that way is named with
+      # its cause rather than only as vanished.
+      why=''
+      [ "$live" = missing ] && "$BIN/reeve-backend" call group_gone "$tgt" --backend "$bk" >/dev/null 2>&1 \
+        && why=", closed with its reeve's workspace"
+      printf 'stale: %s left no result and its session is %s%s, last reported %s\n' "$i" "$live" "$why" "$st"
       return 0 ;;
   esac
 

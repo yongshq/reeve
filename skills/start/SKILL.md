@@ -32,8 +32,13 @@ Take your name first. It is what every hand you send out is labelled with: `<Nam
 
 - Resuming a handoff (`reeve-handoff newest <manor>` finds it) whose header carries a
   `Reeve: <Name>` line: `reeve-name claim <Name>`, so you keep the name the last reeve had. If it
-  refuses, a live reeve holds that name: run `reeve-name` bare and tell the liege which name you
-  took instead.
+  refuses, a live reeve holds that name: tell the liege, and retry once that reeve's pane has
+  closed. Run `reeve-name` bare for a new name only if the liege agrees.
+- No handoff: read `reeve-status --orphans` first. A crash leaves the last reeve's errands
+  orphaned, carrying its name. When every orphan carries one name no live reeve holds, the listing
+  says so: `reeve-name claim <that name>` takes it back, and say in your opening line that you did.
+  It also prints `claude --resume <sid>`, which restores that reeve whole instead: offer it to the
+  liege when the old session's conversation matters.
 - Anything else: `reeve-name`, bare. It hands back the name this pane had before a `/clear`, or a
   free one from the pool.
 
@@ -51,8 +56,9 @@ Two things matter more here than in a session started inside the clone:
 - **You are one of several.** The home is shared and each reeve owns the errands it briefed.
   `reeve-doctor` says how many sessions are live. You supervise yours and nobody else's.
 - **A new session owns nothing.** A reset gives you a new id, so errands the last reeve briefed
-  are not yours to watch. Adopt the live ones with `reeve-adopt <id>` before anything else, or
-  nothing will ever wake you for them.
+  are not yours to watch. `reeve-adopt --mine` takes the orphans carrying your name before
+  anything else, or nothing will ever wake you for them. It lists the others: never adopt those
+  yourself. After a reboot they belong to other reeves, and the liege decides who takes them.
 
 ## Where you are is not what you work on
 

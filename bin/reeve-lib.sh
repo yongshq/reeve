@@ -659,20 +659,32 @@ valid_reeve_name() {
 # per server, tmux's `%N` restarting at %0 on each and herdr's counted per
 # session, so the id alone would make two reeves on two servers one pane. Bare
 # id when the socket is unknown. Whitespace dropped: the key is one field.
+#
+# tmux adds its server's start time, `%3@<socket>#<epoch>`: a restarted server
+# hands out %0, %1 again on the same socket, so without it a new reeve would
+# inherit the name of whichever dead one had that id. herdr keeps no epoch: it
+# restores its panes with their ids across a restart, so the same id there is
+# the same pane, and the name following it is right.
 reeve_pane() {
-  local p sock=''
+  local p sock='' ep=''
   if [ -n "${HERDR_PANE_ID:-}" ]; then p=$HERDR_PANE_ID; sock=${HERDR_SOCKET_PATH:-}
-  elif [ -n "${TMUX_PANE:-}" ]; then p=$TMUX_PANE; sock=${TMUX:-}; sock=${sock%%,*}
+  elif [ -n "${TMUX_PANE:-}" ]; then
+    p=$TMUX_PANE; sock=${TMUX:-}; sock=${sock%%,*}
+    # Asked of that socket only, never the default server, which may be another.
+    [ -n "$sock" ] && ep=$(tmux -S "$sock" display -p -t "$p" '#{start_time}' 2>/dev/null | tr -dc '0-9')
   else return 0
   fi
-  printf '%s%s' "$p" "${sock:+@$sock}" | tr -d '[:space:]'
+  printf '%s%s%s' "$p" "${sock:+@$sock}" "${ep:+#$ep}" | tr -d '[:space:]'
 }
 
 # pane_eq <a> <b>   one pane. A record written before the socket was kept holds
-# the bare id, and is that same pane when the ids match.
+# the bare id, and is that same pane when the ids match. A key carrying a tmux
+# epoch matches only itself: another epoch is another server, and a key with no
+# epoch cannot say which server it was.
 pane_eq() {
   [ -n "$1" ] && [ -n "$2" ] || return 1
   [ "$1" = "$2" ] && return 0
+  case $1$2 in *'#'*) return 1 ;; esac
   case $1$2 in *@*@*) return 1 ;; esac
   [ "${1%%@*}" = "${2%%@*}" ]
 }
@@ -685,6 +697,38 @@ pane_gone() {
   case $p in *@*) ;; *) return 1 ;; esac
   case $p in %*) b=tmux ;; *) b=herdr ;; esac
   "$REEVE_ROOT_D/bin/reeve-backend" call pane_gone "${p%%@*}" "${p#*@}" --backend "$b" >/dev/null 2>&1
+}
+
+# pane_vacant <pane key>   0 only when the server the key names answers that no
+# harness runs in that pane: it is gone, or it fell back to a shell. What a
+# reeve that crashed leaves behind. Anything that cannot be asked is a no.
+pane_vacant() {
+  local p=$1 b
+  case $p in *@*) ;; *) return 1 ;; esac
+  case $p in %*) b=tmux ;; *) b=herdr ;; esac
+  "$REEVE_ROOT_D/bin/reeve-backend" call pane_vacant "${p%%@*}" "${p#*@}" --backend "$b" >/dev/null 2>&1
+}
+
+# holder_live <sid>   0 when that session still holds what it holds: its
+# heartbeat is fresh, and its recorded pane, if it has one, still runs a
+# harness. A heartbeat alone stays fresh for session-stale after a crash, which
+# kept a reeve relaunched in another pane out of its own name that long.
+holder_live() {
+  local p
+  [ "$(session_state "$1")" = alive ] || return 1
+  p=$(session_pane "$1" | tr -d '[:space:]')
+  [ -n "$p" ] || return 0
+  ! pane_vacant "$p"
+}
+
+# session_replaced <sid>   0 when that other session ran in this very pane: the
+# one /clear replaced, whatever its heartbeat says. A pane runs one harness at a
+# time, so it cannot still be there. The same rule names and groups use.
+session_replaced() {
+  local me
+  me=$(reeve_session)
+  [ -n "${1:-}" ] && [ -n "$me" ] && [ "$1" != "$me" ] || return 1
+  pane_eq "$(session_pane "$1" | tr -d '[:space:]')" "$(reeve_pane)"
 }
 
 session_name() { # session_name <sid>   the stored name, or nothing
@@ -734,11 +778,13 @@ name_holders() {
 # name_live_elsewhere <name> <pane> [<except sid>]
 #   prints the live session holding <name> on another pane, rc 0 if there is one.
 #   A holder on this same pane is the session this one replaced, so not a rival.
+#   Nor is one whose pane no longer runs a harness: holder_live's rule.
 name_live_elsewhere() {
   local want=$1 pane=$2 n st p sid
   while read -r n st p sid; do
     [ "$n" = "$want" ] && [ "$st" = alive ] || continue
     pane_eq "$p" "$pane" && continue
+    [ "$p" != - ] && pane_vacant "$p" && continue
     printf '%s\n' "$sid"; return 0
   done <<NAME_HOLDERS_EOF
 $(name_holders "${3:-}")
@@ -791,7 +837,9 @@ reeve_name() {
   n=$(session_name "$s")
   if [ -n "$n" ]; then pane_store "$s"; printf '%s\n' "$n"; return 0; fi
 
-  lk=$(lock_acquire names 15) || return 0
+  # A caller degrades on an empty name, so the reason is said here, once.
+  lk=$(lock_acquire names 15 "$(config_get lock-stale 10)") \
+    || { warn "no name: the names lock in $REEVE_HOME_D/state is held, hands go out unlabelled"; return 0; }
   pane=$(reeve_pane)
   n=$(session_name "$s")
   if [ -z "$n" ] && [ -n "${REEVE_NAME:-}" ]; then
@@ -896,12 +944,18 @@ group_known() { # group_known <sid> <backend>   the stored id, or nothing
 # sitting there. Only a pane its server says is gone frees the group, and a
 # pane that cannot be checked holds it. A holder with no pane, a reeve in a
 # plain terminal, holds while its heartbeat is fresh.
+#
+# Given <name>, a record under that same name is this reeve's own past, by the
+# name rule: no two live reeves share one. It holds nothing against this one
+# once holder_live says it is gone, so a reeve relaunched in another pane can
+# go back to the workspace its hands are in.
 group_held_elsewhere() {
-  local me=$1 b=$2 pane d k p g
+  local me=$1 b=$2 n=${3:-} pane d k p g
   pane=$(reeve_pane)
   for d in "$REEVE_HOME_D"/state/sessions/*; do
     [ -f "$d/group.$b" ] || continue
     k=$(basename "$d"); [ "$k" = "$me" ] && continue
+    [ -n "$n" ] && [ "$(session_name "$k")" = "$n" ] && ! holder_live "$k" && continue
     p=$(session_pane "$k" | tr -d '[:space:]')
     if [ -n "$p" ]; then
       pane_eq "$p" "$pane" && continue
@@ -938,7 +992,29 @@ group_args() {
   known=$(group_known "$1" "$2")
   [ -n "$known" ] || known=$(group_of_name "$1" "$2" "$3")
   printf '%s\n' "$known"
-  group_held_elsewhere "$1" "$2"
+  group_held_elsewhere "$1" "$2" "$3"
+}
+
+# group_keeps_hands <bin> <backend> <name> <known>   0 when hands of this name's
+# errands still run in the known group: an errand in flight under <name>, on
+# this backend, whose target opens in that group and still exists there. Then
+# the known group is this reeve's even when it now sits in another workspace,
+# and its next hands go beside the others rather than into a second one.
+group_keeps_hands() {
+  local bin=$1 b=$2 n=$3 known=$4 f i tgt
+  [ -n "$known" ] && [ -n "$n" ] || return 1
+  for f in "$REEVE_HOME_D"/state/*.meta; do
+    [ -f "$f" ] || continue
+    i=$(basename "$f" .meta)
+    [ -z "$(meta_get "$i" tornDown '')" ] || continue
+    [ "$(meta_get "$i" reeve '')" = "$n" ] || continue
+    [ "$(meta_get "$i" backend '')" = "$b" ] || continue
+    tgt=$(meta_get "$i" target '')
+    case $tgt in *'|'*) ;; *) continue ;; esac
+    [ "${tgt%%|*}" = "${known%%@*}" ] || continue
+    "$bin/reeve-backend" call target_exists "$tgt" --backend "$b" >/dev/null 2>&1 && return 0
+  done
+  return 1
 }
 
 # group_names <sid> <backend> <name> <known>   the names this reeve's records
@@ -971,17 +1047,22 @@ group_names() {
 # The backend is handed this session's kept id, else the one its name kept, and
 # every id another live reeve holds, which it never relabels or reuses. Under a
 # lock, so two reeves starting in one workspace do not both take it.
+#
+# REEVE_GROUP_KEEP=1 tells it the known group still holds hands of this name
+# (group_keeps_hands): it is then reused before the workspace the reeve now
+# sits in, so a reeve that moved keeps one workspace while its hands run there.
 reeve_group() {
-  local bin=$1 b=$2 n=$3 s known g f lk err rc held args
+  local bin=$1 b=$2 n=$3 s known g f lk err rc held args keep=''
   s=$(reeve_session); [ -n "$s" ] && [ -n "$n" ] || return 1
-  lk=$(lock_acquire groups 15) || return 1
+  lk=$(lock_acquire groups 15 "$(config_get lock-stale 10)") || return 1
   args=$(group_args "$s" "$b" "$n")
   known=$(printf '%s\n' "$args" | head -n 1)
   held=$(printf '%s\n' "$args" | sed 1d)
+  group_keeps_hands "$bin" "$b" "$n" "$known" && keep=1
   err=$(mktemp "${TMPDIR:-/tmp}/reeve-group.XXXXXX") || { lock_release "$lk"; return 1; }
   # shellcheck disable=SC2086
   g=$(IFS='
-'; REEVE_GROUP_NAMES=$(group_names "$s" "$b" "$n" "$known") \
+'; REEVE_GROUP_KEEP=$keep REEVE_GROUP_NAMES=$(group_names "$s" "$b" "$n" "$known") \
      "$bin/reeve-backend" call ensure_group "$n" "$known" $held --backend "$b" 2>"$err"); rc=$?
   g=$(printf '%s\n' "$g" | head -n 1)
   if [ "$rc" -ne 0 ] || [ -z "$g" ]; then rm -f "$err"; lock_release "$lk"; return 1; fi
@@ -1953,13 +2034,28 @@ resolve_holding_path() {
 
 # --- locking ----------------------------------------------------------------
 # mkdir is atomic on every filesystem we care about. A stale lock names the pid
-# that holds it so a human can judge it; we never break one automatically.
+# that holds it so a human can judge it; we never break one automatically,
+# except where the caller passes <stale seconds>: a lock that guards nothing but
+# presentation (names, groups), whose holder is dead and which is older than
+# that. A crash mid-call left one forever, and every later reeve went unnamed.
+# Moved aside before removal, so two waiters breaking it at once break it once.
 
 lock_acquire() {
-  local name=$1 timeout=${2:-30} d elapsed=0
+  local name=$1 timeout=${2:-30} brk=${3:-} d elapsed=0 age
   d="$REEVE_HOME_D/state/.lock-$name"
   mkdir -p "$REEVE_HOME_D/state"
+  case $brk in *[!0-9]*) brk='' ;; esac
   while ! mkdir "$d" 2>/dev/null; do
+    if [ -n "$brk" ] && [ -f "$d/pid" ] && ! kill -0 "$(cat "$d/pid" 2>/dev/null)" 2>/dev/null; then
+      age=$(stat -f %m "$d" 2>/dev/null || stat -c %Y "$d" 2>/dev/null || echo '')
+      age=$(printf '%s' "$age" | tr -dc '0-9')
+      if [ -n "$age" ] && [ $(( $(date +%s) - age )) -ge "$brk" ] \
+         && mv "$d" "$d.stale.$$" 2>/dev/null; then
+        warn "broke stale lock $name held by dead pid $(cat "$d.stale.$$/pid" 2>/dev/null)"
+        rm -rf "$d.stale.$$"
+        continue
+      fi
+    fi
     if [ -f "$d/pid" ] && ! kill -0 "$(cat "$d/pid" 2>/dev/null)" 2>/dev/null; then
       warn "stale lock $name held by dead pid $(cat "$d/pid" 2>/dev/null), not breaking it automatically"
       warn "remove it by hand if you are sure: rm -rf $d"

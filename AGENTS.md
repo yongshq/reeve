@@ -296,6 +296,11 @@ session closes its tab and never the reeve's workspace, which holds the reeve an
 beside it. A hand dispatched before that, or on a backend with no group to give,
 has a workspace of its own, and freeing it closes that, as it always did.
 
+The converse holds too, and it is accepted: closing a reeve's workspace closes every hand tab in
+it, and those hands die mid-errand. The watch names each one so lost, a `stale:` line ending
+`closed with its reeve's workspace`. A reeve that moves to another workspace keeps sending hands to
+the old one while tabs of its errands are still open there, then to the one it sits in.
+
 So a scout disappears completely, while an artificer loses only its idle session and keeps its
 copy and branch until it lands. A `blocked:` hand is never reaped, because it may still be
 steered, and neither is a divergence, because that errand is not finished whatever it claims. A
@@ -483,16 +488,28 @@ Read, in order:
    session that was not on disk, and its header's `Reeve: <Name>` line is the name step 2 needs.
 2. Your name: the one every hand you send out is labelled with. Resuming a handoff whose header
    says `Reeve: <Name>`, run `bin/reeve-name claim <Name>`, so the household keeps calling you
-   what it called the last reeve; if the claim refuses, a live reeve holds that name: run it bare
-   and say so. Otherwise `bin/reeve-name`, bare. Inside herdr or tmux, every form also labels
-   your own workspace with the name, unless another reeve holds it, when you get your own. A
-   reeve holds its workspace for as long as its pane is open, however quiet it has been: only a
-   pane that is provably closed frees the workspace, and one that cannot be checked does not.
+   what it called the last reeve. If the claim refuses, a live reeve holds that name: tell the
+   liege, and retry once that reeve's pane has closed rather than take a pool name; run it bare
+   only if the liege agrees. With no handoff, read `bin/reeve-status --orphans` first: when every
+   orphan carries one name no live reeve holds, it says so, and `bin/reeve-name claim <that>` takes
+   it back. Otherwise `bin/reeve-name`, bare. Inside herdr or tmux, every form also labels your
+   own workspace with the name, unless another reeve holds it, when you get your own. A reeve
+   holds its workspace for as long as its pane is open, however quiet it has been: only a pane
+   that is provably closed frees the workspace, and one that cannot be checked does not.
 3. `$REEVE_HOME/liege.md`, `$REEVE_HOME/manors.md`, and `manors/<manor>.md` for the manor in hand.
 4. `bin/reeve-status --all` for anything still in flight, then `bin/reeve-status --orphans`. A
    reset gives you a new session id, so errands the last reeve briefed are no longer yours to
-   watch: adopt the ones that are still live with `bin/reeve-adopt <id>` before anything else, or
-   nothing will ever wake you for them.
+   watch: `bin/reeve-adopt --mine` takes the orphans that carry your name, before anything else,
+   or nothing will ever wake you for them. It lists the rest: bring those to the liege. After a
+   reboot they are other reeves' errands, and which reeve takes them is the liege's call.
+
+**After a crash or a restart.** `claude --resume <sid>`, with the owner id that `--orphans` or
+`reeve-adopt --mine` prints, brings a crashed reeve back as the same session: its name, its errands and their ownership, with
+only the watch to restart. That is the full recovery; a handoff or the orphans' name is the
+fallback. A reeve relaunched in its restored herdr pane keeps its name by that pane, since herdr
+restores panes with their ids. After a tmux server restart it does not, since tmux reuses pane ids
+for new panes. A reeve outside herdr and tmux has no pane to key on, so each `/clear` gives it a
+new name: accepted, and a handoff carries the name across.
 
 If a file is absent, that means absent, not empty: `liege.md` absent means you have learned nothing
 about the liege yet, and `manors.md` absent means rebuild it with `bin/reeve-survey`.
@@ -556,7 +573,7 @@ fact per line, because you are the one reading it.
 | `bin/reeve-dispatch <id>` | worktree, endpoint, launch. The hand opens as a tab in this reeve's own workspace, labelled with its name. `--dry-run` changes nothing |
 | `bin/reeve-status <id>` / `--all` | the reconciled state, never the last line of the log, and `idle` in the process column for a hand idle and silent past its threshold, or `wedged` for a working hand whose status file and screen have both held still past its threshold, each on the rule the sentry wakes on. Bare lists yours, `--all` the machine's. A listing also delivers anything a caretaker left you, on stderr so a filter over the table cannot eat it, and a script asking a different question passes `--no-wake` |
 | `bin/reeve-status --orphans` | errands whose owning session is provably gone |
-| `bin/reeve-adopt <id>` | take an orphaned errand on, so this session watches it, and relabel its hand with this reeve's name where the backend can |
+| `bin/reeve-adopt <id>` | take an orphaned errand on, so this session watches it, and relabel its hand with this reeve's name where the backend can. `--mine` takes every orphan carrying this reeve's name and lists the rest for the liege |
 | `bin/reeve-answer <id> <key> <answer>` | close an open question, durably, then tell the hand |
 | `bin/reeve-say <file> <state> <note>` | a hand's one way to append a status line, stamped in UTC |
 | `bin/reeve-steer <id> <text>` | tell a live hand what to do next, and re-arm its idle and wedged alarms. Refuses a session at a dialog, or one it cannot tell is not |
