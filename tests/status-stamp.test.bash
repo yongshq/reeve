@@ -3,7 +3,7 @@
 # state's colon: `done: 2026-10-04T15:36:02Z <note>`. Three halves: the writers
 # stamp (bin/reeve-say for a hand, bin/reeve-answer for the reeve), every reader
 # takes stamped, bare, interim (leading stamp) and mixed logs alike, and a
-# reader from before the stamp, main's own lib, still reads a stamped log right.
+# reader from before the stamp, the lib at 15b6496, still reads a stamped log right.
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 export REEVE_HOME=$(mktemp -d)/reeve-home-test
 export REEVE_ROOT="$ROOT"
