@@ -75,23 +75,39 @@ _h_label_of() {
 # pane restored by a server restart is, reports the directories its startup
 # files pass through (measured: a zsh plugin directory, for a moment), and one
 # such reading would call the hand's own pane someone else's.
+#
+# A label is not one hand's alone: two hands of one office from one reeve both
+# read `Scout sent by Aldric`. So a label match does not count from a pane that
+# sits in another git checkout: that is another hand, in its own copy, under
+# the shared label. A restored shell that wandered off lands somewhere else.
 _h_verified() {
-  local want wc wl='' doc c l n=0
+  local want wc wl='' doc d c l n=0
   want=$(_h_want "$1") || return 0
   wc=${want#c}; wc=${wc%%l*}
   case $want in *l*) wl=${want##*l} ;; esac
   doc=${2:-}
   while :; do
     [ -n "$doc" ] || doc=$(_h pane get "$(_h_pane "$1")") || return 2
-    c=$(_h_sum "$(printf '%s' "$doc" | jq -r '.result.pane.cwd // empty' 2>/dev/null)")
+    d=$(printf '%s' "$doc" | jq -r '.result.pane.cwd // empty' 2>/dev/null)
+    c=$(_h_sum "$d")
     [ -n "$c" ] && [ "$c" = "$wc" ] && return 0
     l=''
     [ -n "$wl" ] && l=$(_h_sum "$(_h_label_of "$1")")
-    [ -n "$l" ] && [ "$l" = "$wl" ] && return 0
+    [ -n "$l" ] && [ "$l" = "$wl" ] && ! _h_other_checkout "$d" "$wc" && return 0
     [ -n "$c$l" ] || return 2
     n=$((n + 1)); [ "$n" -lt "${REEVE_IDENT_TRIES:-3}" ] || return 1
     sleep 1; doc=''
   done
+}
+
+# _h_other_checkout <dir> <sum>   0 when <dir> is inside a git work tree whose
+# top level is not the directory <sum> is the checksum of.
+_h_other_checkout() {
+  local top
+  [ -n "$1" ] && [ -d "$1" ] || return 1
+  top=$(git -C "$1" rev-parse --show-toplevel 2>/dev/null) || return 1
+  top=$(cd -P "$top" 2>/dev/null && pwd -P) || return 1
+  [ "$(_h_sum "$top")" != "$2" ]
 }
 
 reeve_backend_herdr_available() {
@@ -543,6 +559,24 @@ reeve_backend_herdr_kill() {
     _h workspace close "$ws" >/dev/null 2>&1 && return 0
   fi
   _h pane close "$(_h_pane "$target")" >/dev/null 2>&1
+}
+
+reeve_backend_herdr_label_own() {
+  # Optional. The tab this reeve itself runs in shows <label>, its name, so the
+  # sidebar's first row says whose it is. Only $HERDR_TAB_ID, the tab herdr put
+  # this process in, and only when that id is on the server _h talks to: tab
+  # ids are counters per server, so on another one it names a stranger's tab.
+  # Never from a hand (REEVE_HAND): the tab a hand sits in is its own, labelled
+  # for its office. Never any other tab.
+  local tab=${HERDR_TAB_ID:-} sock
+  [ -z "${REEVE_HAND:-}" ] || { echo "herdr: a hand never labels its tab with a reeve's name" >&2; return 1; }
+  [ -n "$tab" ] || { echo "herdr: no HERDR_TAB_ID, so no tab of this reeve's to label" >&2; return 1; }
+  sock=$(_h_sock)
+  if [ -z "$sock" ] || [ "$sock" != "${HERDR_SOCKET_PATH:-}" ]; then
+    echo "herdr: tab $tab is not on the server this backend talks to, so it was not labelled" >&2; return 1
+  fi
+  _h tab get "$tab" >/dev/null || { echo "herdr: tab $tab cannot be read, so it was not labelled" >&2; return 1; }
+  _h tab rename "$tab" "$1" >/dev/null
 }
 
 reeve_backend_herdr_relabel() {

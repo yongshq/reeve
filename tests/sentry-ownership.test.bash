@@ -45,7 +45,7 @@ reeve_backend_stub_available()       { return 0; }
 reeve_backend_stub_describe()        { printf 'stub backend\n'; }
 reeve_backend_stub_create_endpoint() { printf 'stub:1\n'; }
 reeve_backend_stub_launch()          { return 0; }
-reeve_backend_stub_agent_state()     { printf 'alive\n'; }
+reeve_backend_stub_agent_state()     { printf '%s\n' "${STUB_STATE:-alive}"; }
 reeve_backend_stub_attention_state() { printf 'settled\n'; }
 reeve_backend_stub_wait_change()     { return 2; }
 reeve_backend_stub_kill()            { printf '%s\n' "$1" >> "$STUB_KILLS"; return 0; }
@@ -418,6 +418,38 @@ OUT=$(td_watch locked lock)
 has "11 a lock not taken is deferred, not refused" \
   "$OUT" "[session kept, cleanup deferred: reeve: could not take the lock]"
 nas "11 and never claims the copy was removed"     "$OUT" "copy removed"
+
+# A target teardown left standing on a session already closed is gone, never kept.
+errand closed sess-R "working: x" "done: finished"
+OUT=$(STUB_STATE=missing td_watch closed early)
+has "11 a closed session is gone, not kept" \
+  "$OUT" "[session gone, cleanup refused: stub says no to early.]"
+errand dead sess-R "working: x" "done: finished"
+OUT=$(STUB_STATE=dead td_watch dead early)
+has "11 and so is one whose harness has exited" \
+  "$OUT" "[session gone, cleanup refused: stub says no to early.]"
+
+# A copy still on disk: the refusal's reason, and deferred, said as above, so
+# a teardown that could not judge reads apart from the ordinary keep.
+oncopy() { sed "s|^worktree=.*|worktree=$SCRATCH/copy13|; s|^branch=.*|branch=${2:-}|" \
+  "$REEVE_HOME/state/$1.meta" > "$REEVE_HOME/state/$1.meta.t" && mv "$REEVE_HOME/state/$1.meta.t" "$REEVE_HOME/state/$1.meta"; }
+mkdir -p "$SCRATCH/copy13"
+errand cbr sess-R "working: x" "done: finished"; oncopy cbr feat/x
+OUT=$(td_watch cbr early)
+has "11 a kept branch says why it was kept" \
+  "$OUT" "[session kept, feat/x kept with ? commit(s), cleanup refused: stub says no to early.]"
+errand ccp sess-R "working: x" "done: finished"; oncopy ccp
+OUT=$(td_watch ccp late)
+has "11 a kept copy says why it was kept" \
+  "$OUT" "[session freed, copy kept, cleanup refused: stub says no to late.]"
+errand clk sess-R "working: x" "failed: gave up"; oncopy clk feat/y
+OUT=$(td_watch clk lock)
+has "11 a kept copy whose lock was not taken is deferred" \
+  "$OUT" "[session kept, feat/y kept with ? commit(s), cleanup deferred: reeve: could not take the lock]"
+errand cgo sess-R "working: x" "done: finished"; oncopy cgo
+OUT=$(STUB_STATE=missing td_watch cgo early)
+has "11 a kept copy beside a closed session says gone" \
+  "$OUT" "[session gone, copy kept, cleanup refused: stub says no to early.]"
 
 printf '\npassed=%s failed=%s\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

@@ -20,8 +20,8 @@
 # warning.
 #
 # Inside herdr, every form also labels the reeve's own workspace with the name,
-# unless another live reeve already holds it, and never from inside a hand. A
-# pane is its id plus its server's socket.
+# unless another live reeve already holds it, and its own tab, never any other,
+# and neither from inside a hand. A pane is its id plus its server's socket.
 #
 # The session id stays the identity everywhere. A name is what the liege reads.
 #
@@ -47,14 +47,24 @@ s=$(reeve_session)
 # HERDR_ENV): there is no workspace of its own to label, and making one at every
 # session start left an empty one behind each time. Dispatch makes it then.
 label_group() {
-  local bin b
+  local bin b err
   [ -z "${REEVE_HAND:-}" ] || return 0
   [ "${HERDR_ENV:-}" = 1 ] || return 0
   bin=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
   if ! b=$("$bin/reeve-backend" resolve 2>/dev/null); then
     warn "no backend resolved, so no workspace was labelled $1"
-  elif ! reeve_group "$bin" "$b" "$1" >/dev/null; then
-    warn "backend '$b' gave $1 no group, so its hands will open on their own"
+  else
+    reeve_group "$bin" "$b" "$1" >/dev/null \
+      || warn "backend '$b' gave $1 no group, so its hands will open on their own"
+    # The reeve's own tab too, never any other: the backend checks it is
+    # this process's tab, on its own server, and not from a hand.
+    # A backend without it has no tab to label, which is no news.
+    if ! err=$("$bin/reeve-backend" call label_own "$1" --backend "$b" 2>&1 >/dev/null); then
+      case $err in
+        *'does not implement'*) ;;
+        *) warn "this reeve's own tab was not labelled $1: $(printf '%s\n' "$err" | tail -1)" ;;
+      esac
+    fi
   fi
 }
 

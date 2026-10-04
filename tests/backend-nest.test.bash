@@ -46,7 +46,8 @@ LOG="$SCRATCH/argv"; export STUB_LOG="$LOG"
 # tab create answers with a tab and root pane in the workspace it was asked for,
 # unless STUB_TAB_FAIL is set. Its one session, `stub`, listens on $STUB_SOCK.
 # STUB_PANES lists the panes that exist; pane get on any other is not found, or
-# a server error under STUB_PANE_ERR. process-info names $STUB_FG. Error
+# a server error under STUB_PANE_ERR. process-info names $STUB_FG. STUB_TABS
+# lists the tabs tab get finds. Error
 # envelopes go to stderr, as real herdr writes them (0.9.0).
 cat > "$FAKE/herdr" <<'HERDR'
 #!/usr/bin/env bash
@@ -67,6 +68,9 @@ case "$1 $2" in
     ws=''; prev=''
     for a in "$@"; do [ "$prev" = --workspace ] && ws=$a; prev=$a; done
     printf '{"result":{"tab":{"tab_id":"%s:t9"},"root_pane":{"pane_id":"%s:p9","tab_id":"%s:t9"}}}\n' "$ws" "$ws" "$ws" ;;
+  'tab get')
+    for t in ${STUB_TABS:-}; do [ "$t" = "$3" ] && { printf '{"result":{"tab":{"tab_id":"%s"}}}\n' "$3"; exit 0; }; done
+    printf '{"error":{"code":"tab_not_found"}}\n' >&2; exit 1 ;;
   'tab close')
     [ -n "${STUB_TAB_CLOSE_FAIL:-}" ] && exit 1
     printf '{"result":{"type":"ok"}}\n' ;;
@@ -163,11 +167,11 @@ out=$(STUB_LABEL=Aldric STUB_WS='w7' h ensure_group Aldric "w7$S" 2>"$SCRATCH/er
 eq  "1 and never when the socket is listed"                  "$(cat "$SCRATCH/err")" ''
 
 echo "--- 2. herdr create_endpoint ---"
-out=$(h create_endpoint "$PLAIN" "Aldric's scout: x" "w7$S")
+out=$(h create_endpoint "$PLAIN" "Scout sent by Aldric" "w7$S")
 # Each ends `#<identity>`, what the endpoint was made as: tests/restart.test.bash.
 eq  "2 with a group, a three field target, no socket"     "${out%%#*}" "w7|w7:p9|w7:t9"
 has "2 carrying its identity"                              "$out" "w7|w7:p9|w7:t9#c"
-has "2 opened as a tab in that workspace"                  "$(calls)" "tab create --workspace w7 --cwd $PLAIN --label Aldric's scout: x --no-focus"
+has "2 opened as a tab in that workspace"                  "$(calls)" "tab create --workspace w7 --cwd $PLAIN --label Scout sent by Aldric --no-focus"
 nas "2 and no workspace of its own"                        "$(calls)" "workspace create"
 
 out=$(h create_endpoint "$PLAIN" "scout: x")
@@ -198,11 +202,11 @@ h kill 'w5|w5:p1'
 has "4 a two field target still closes its own workspace"  "$(calls)" "workspace close w5"
 
 echo "--- 5. herdr relabel ---"
-h relabel 'w7|w7:p9|w7:t9' "Percy's scout: x"
-has "5 a nested hand renames its tab"                      "$(calls)" "tab rename w7:t9 Percy's scout: x"
+h relabel 'w7|w7:p9|w7:t9' "Scout sent by Percy"
+has "5 a nested hand renames its tab"                      "$(calls)" "tab rename w7:t9 Scout sent by Percy"
 nas "5 never its reeve's workspace"                        "$(calls)" "workspace rename"
-h relabel 'w5|w5:p1' "Percy's scout: x"
-has "5 a two field target renames its workspace"           "$(calls)" "workspace rename w5 Percy's scout: x"
+h relabel 'w5|w5:p1' "Scout sent by Percy"
+has "5 a two field target renames its workspace"           "$(calls)" "workspace rename w5 Scout sent by Percy"
 
 echo "--- 8. dispatch, with and without a group ---"
 git init -q "$SCRATCH/web"
@@ -415,6 +419,41 @@ eq "12 pane_eq: an old bare key matches by id"        "$(pe 'w1:p1' 'w1:p1@/a')"
 eq "12 pane_eq: either way round"                     "$(pe 'w1:p1@/a' 'w1:p1')" same
 eq "12 pane_eq: two servers are two panes"            "$(pe 'w1:p1@/a' 'w1:p1@/b')" other
 eq "12 pane_eq: no pane is no match"                  "$(pe '' 'w1:p1')" other
+
+echo "--- 13. the reeve's own tab reads its name, and no other tab ---"
+export STUB_TABS='w61:t1 w61:t2'
+own() { HERDR_SOCKET_PATH=$STUB_SOCK HERDR_TAB_ID=w61:t1 h label_own "$@"; }
+own Aldric; rc=$?
+eq  "13 its own tab is renamed"                       "$rc" 0
+eq  "13 that tab only, by its id"                     "$(grep '^tab rename' "$LOG")" "tab rename w61:t1 Aldric --session stub"
+REEVE_HAND=one own Aldric 2>/dev/null; rc=$?
+eq  "13 never from a hand"                            "$rc:$(grep -c '^tab rename' "$LOG")" "1:0"
+HERDR_SOCKET_PATH=/elsewhere.sock HERDR_TAB_ID=w61:t1 h label_own Aldric 2>"$SCRATCH/err"; rc=$?
+eq  "13 never a tab id from another server"           "$rc:$(grep -c '^tab rename' "$LOG")" "1:0"
+has "13 which it says"                                "$(cat "$SCRATCH/err")" "not on the server"
+HERDR_SOCKET_PATH=$STUB_SOCK HERDR_TAB_ID=w61:t7 h label_own Aldric 2>/dev/null; rc=$?
+eq  "13 nor one the server does not have"             "$rc:$(grep -c '^tab rename' "$LOG")" "1:0"
+HERDR_SOCKET_PATH=$STUB_SOCK h label_own Aldric 2>/dev/null; rc=$?
+eq  "13 nor any, with no tab id of its own"           "$rc:$(grep -c '^tab rename' "$LOG")" "1:0"
+
+# Through reeve-name: bare, claim and set each label the reeve's own tab.
+rm -rf "$REEVE_HOME/state/sessions/tabber"
+named() { # named <args...>   reeve-name inside herdr, in tab w61:t2
+  : > "$LOG"
+  env HERDR_ENV=1 HERDR_SOCKET_PATH="$STUB_SOCK" HERDR_PANE_ID=w61:p8 HERDR_TAB_ID=w61:t2 \
+    REEVE_SESSION=tabber "$ROOT/bin/reeve-name" "$@" 2>"$SCRATCH/err"
+}
+out=$(named)
+eq  "13 bare names it"                                "$(grep '^tab rename' "$LOG")" "tab rename w61:t2 $out --session stub"
+out=$(named set Odo)
+eq  "13 set renames it"                               "$(grep '^tab rename' "$LOG")" "tab rename w61:t2 Odo --session stub"
+out=$(named claim Hugh)
+eq  "13 claim renames it"                             "$(grep '^tab rename' "$LOG")" "tab rename w61:t2 Hugh --session stub"
+: > "$LOG"
+env HERDR_ENV=1 HERDR_SOCKET_PATH="$STUB_SOCK" HERDR_TAB_ID=w61:t2 REEVE_HAND=one \
+  REEVE_SESSION=tabber "$ROOT/bin/reeve-name" >/dev/null 2>&1
+eq  "13 a hand running reeve-name renames no tab"     "$(grep -c '^tab rename' "$LOG")" 0
+unset STUB_TABS
 
 echo "passed=$PASS failed=$FAIL"
 [ "$FAIL" -eq 0 ]

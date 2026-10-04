@@ -9,7 +9,7 @@
 #
 # Two properties matter beyond the names themselves. The copy stays FLAT,
 # because an <office>/<id> segment would quietly create a directory per role.
-# The label is `<Name>'s <office>: <id>`, one quoted argument to the backend.
+# The label is `<Office> sent by <Name>`, one quoted argument to the backend.
 # And the steward keeps having no copy at all, because dispatch runs it in the
 # reeve's home and a recorded path it never creates is a lie in the record.
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
@@ -157,11 +157,12 @@ dry_label() { # dry_label <id>
 
 # The steward is included on purpose: it has no copy, so its label is the only
 # name it ever shows up under. These were briefed with no session id, so no
-# reeve name: the label falls back to `<office>: <id>`, and still names the
+# reeve name: the label falls back to `<Office>: <id>`, and still names the
 # office.
 for office in artificer warden steward; do
   label=$(dry_label "e-$office")
-  eq "$office opens a session labelled $office: <id>" "$office: e-$office" "$label"
+  cap=$(printf '%s' "${office:0:1}" | tr '[:lower:]' '[:upper:]')${office:1}
+  eq "$office opens a session labelled $cap: <id>" "$cap: e-$office" "$label"
   case $label in
     */*) FAIL=$((FAIL+1)); printf 'FAIL  %s label nests a path: %s\n' "$office" "$label" ;;
     '')  FAIL=$((FAIL+1)); printf 'FAIL  %s dry run printed no label at all\n' "$office" ;;
@@ -169,11 +170,11 @@ for office in artificer warden steward; do
   esac
 done
 
-# A reeve with a name puts it in front: whose hand, then which, then what for.
+# A reeve with a name puts it on the tab: which office, sent by whom.
 REEVE_SESSION=namer REEVE_NAME=Godric "$B" e-named "$REPO" --office scout >/dev/null \
   || { printf 'FAIL  reeve-brief refused for a named reeve\n'; FAIL=$((FAIL+1)); }
-eq "a named reeve's hand is labelled <Name>'s <office>: <id>" \
-   "Godric's scout: e-named" "$(dry_label e-named)"
+eq "a named reeve's hand is labelled <Office> sent by <Name>" \
+   "Scout sent by Godric" "$(dry_label e-named)"
 
 echo "passed=$PASS failed=$FAIL"
 [ "$FAIL" -eq 0 ]

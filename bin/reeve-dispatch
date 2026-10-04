@@ -197,10 +197,11 @@ else
 fi
 
 # --- endpoint and launch ---------------------------------------------------
-# The label names the reeve that sent the hand, the office, and the errand, so
-# the liege reads `Aldric's scout: fix-auth` in a backend's session list and
-# knows whose it is and what it is for. config/hand-label overrides the shape,
-# with {reeve} {office} {id}; a reeve with no name gets `scout: fix-auth`.
+# The label names the office and the reeve that sent the hand, so the liege
+# reads `Scout sent by Aldric` on a tab and knows whose it is. The errand id is
+# on the line under it, from the terminal title. config/hand-label overrides
+# the shape, with {reeve} {Office} {office} {id}; a reeve with no name gets
+# `Scout: fix-auth`.
 #
 # The name is the one the brief recorded, the reeve that briefed the errand, and
 # else this session's stored name, read and never assigned: a dry run promises

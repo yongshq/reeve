@@ -30,13 +30,14 @@ Each is `reeve_backend_<name>_<fn>`, sourced only through `bin/reeve-backend`.
 | `wait_change` | `<target> <timeout_ms>` | nothing | 0 a change was observed, 1 timed out with no signal, 2 this backend cannot wait and the caller must poll |
 | `kill` | `<target>` | nothing | 0 |
 
-Five optional functions. A backend may leave any of them out; `bin/reeve-backend` then refuses
+Six optional functions. A backend may leave any of them out; `bin/reeve-backend` then refuses
 the call, and every caller treats that refusal as a no and carries on.
 
 | Function | Arguments | Must print | Exit |
 |---|---|---|---|
 | `relabel` | `<target> <label>` | nothing, or the target to keep from now on | 0 if the endpoint now shows `<label>`. Used by `bin/reeve-adopt`, so an adopted hand carries its new reeve's name. A target whose identity holds its label is printed again with the new one |
 | `ensure_group` | `<label> [<known-id> [<held-id>...]]` | one line: a group id | 0 if the group exists and shows `<label>`. The reeve's own group: a herdr workspace. `<known-id>` is what an earlier call printed, to reuse while it is still there; it may be empty. Each `<held-id>` is a group another reeve holds, never relabelled, nested into or reused. Used by `bin/reeve-dispatch` and `bin/reeve-name` |
+| `label_own` | `<label>` | nothing | 0 if the endpoint this reeve itself runs in now shows `<label>`, its name. That one only, never any other, and never from a hand. herdr renames `$HERDR_TAB_ID` only when it is on the server the backend talks to. Used by `bin/reeve-name` |
 | `pane_gone` | `<pane-id> <socket>` | nothing | 0 only when the server on `<socket>` answers that the pane is not there. Anything it cannot check is 1. Used to free a group whose reeve's pane has closed |
 | `pane_vacant` | `<pane-id> <socket>` | nothing | 0 only when that server answers that the pane is gone or runs no harness. Anything it cannot check is 1. Used so a reeve that crashed stops holding its name |
 | `group_gone` | `<target>` | nothing | 0 only when the target opened inside a group and the server answers that group is gone. Used by the sentry to say a hand died with its reeve's workspace |
@@ -65,7 +66,9 @@ target may end `#<identity>`, what the endpoint was when it was made, and every 
 on a target checks it first: a different endpoint under the same id is `missing` to `agent_state`
 and is never killed, relabelled or typed into. herdr's identity is checksums of the pane's working
 directory and of its label, either matching enough: a restored endpoint keeps its label and
-usually its directory, while its `terminal_id` does not survive a restart. A target without one is
+usually its directory, while its `terminal_id` does not survive a restart. A label is shared by
+every hand of one office from one reeve (`Scout sent by Aldric`), so a label match from a pane
+sitting in another git checkout does not count: that is another hand, in its own copy. A target without one is
 trusted as before. A herdr pane key carries no server epoch: herdr restores its panes with their
 ids, so the same id is the same pane.
 

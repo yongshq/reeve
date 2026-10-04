@@ -291,7 +291,7 @@ blind=''
 # nothing in flight and exits, and nothing ever cleans it up again.
 REAP_UNDECIDED=no
 reap_one() {
-  local i=$1 wt rc err sess=freed why verb
+  local i=$1 wt rc err sess=freed why verb tgt left=''
   REAP_UNDECIDED=no
   if kept "$i"; then say ' [session kept, %s]\n' "$(meta_get "$i" keep '')"; return; fi
   [ "$reap" = yes ] || { say '\n'; return; }
@@ -302,27 +302,39 @@ reap_one() {
   [ "$rc" = 4 ] && REAP_UNDECIDED=yes
   # Freed is read off the record, never assumed: teardown blanks target= once it
   # has closed the session, and a refusal before that point leaves it standing.
-  [ -z "$(meta_get "$i" target '')" ] || sess=kept
+  # A target left standing is kept only while there is a session at it:
+  # teardown leaves target= on one already closed, which is gone, not kept.
+  tgt=$(meta_get "$i" target '')
+  if [ -n "$tgt" ]; then
+    case $("$BIN/reeve-backend" call agent_state "$tgt" --backend "$(meta_get "$i" backend '')" 2>/dev/null) in
+      missing|dead) sess=gone ;;
+      *)            sess=kept ;;
+    esac
+  fi
+  # Anything but 0 is said, with its reason: a refusal prints it on the line
+  # after `REFUSED`; anything else that failed is named by its own last line,
+  # or by its exit status. 4 is the lock not taken, which decided nothing:
+  # deferred, not refused.
+  if [ "$rc" != 0 ]; then
+    why=$(printf '%s\n' "$err" | sed -n '/REFUSED/{n;s/^ *//p;q;}')
+    [ -n "$why" ] || why=$(printf '%s\n' "$err" | sed '/^ *$/d' | tail -1)
+    [ -n "$why" ] || why="exit $rc"
+    if [ "$rc" = 4 ]; then verb=deferred; else verb=refused; fi
+    left=", cleanup $verb: $why"
+  fi
   if [ -n "$wt" ] && [ -d "$wt" ]; then
     local br ahead
     br=$(meta_get "$i" branch '')
     if [ -n "$br" ]; then
       ahead=$(git -C "$(meta_get "$i" repo '')" rev-list --count "$(meta_get "$i" base main)..$br" 2>/dev/null || echo '?')
-      say ' [session %s, %s kept with %s commit(s)]\n' "$sess" "$br" "$ahead"
+      say ' [session %s, %s kept with %s commit(s)%s]\n' "$sess" "$br" "$ahead" "$left"
     else
-      say ' [session %s, copy kept]\n' "$sess"
+      say ' [session %s, copy kept%s]\n' "$sess" "$left"
     fi
   elif [ "$rc" = 0 ]; then
     say ' [session freed, copy removed]\n'
   else
-    # A refusal prints its reason on the line after `REFUSED`; anything else
-    # that failed is named by its own last line, or by its exit status.
-    why=$(printf '%s\n' "$err" | sed -n '/REFUSED/{n;s/^ *//p;q;}')
-    [ -n "$why" ] || why=$(printf '%s\n' "$err" | sed '/^ *$/d' | tail -1)
-    [ -n "$why" ] || why="exit $rc"
-    # 4 is the lock not taken, which decided nothing: deferred, not refused.
-    if [ "$rc" = 4 ]; then verb=deferred; else verb=refused; fi
-    say ' [session %s, cleanup %s: %s]\n' "$sess" "$verb" "$why"
+    say ' [session %s%s]\n' "$sess" "$left"
   fi
 }
 

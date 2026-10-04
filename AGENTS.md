@@ -22,7 +22,7 @@ a skill, listed in section 11.
 | holding | one repo inside a manor |
 | backend | where a session lives: herdr |
 | harness | which agent CLI runs in it: claude, codex, pi, opencode, cursor, grok, gemini |
-| name | a reeve's short name, unique among the live reeves on one home. A hand is labelled with it, `<Name>'s <office>: <id>` |
+| name | a reeve's short name, unique among the live reeves on one home. A hand's tab is labelled with it, `<Office> sent by <Name>`, and the reeve's own tab with the name |
 
 ## 2. Hard rules
 
@@ -493,8 +493,8 @@ Read, in order:
    only if the liege agrees. With no handoff, read `bin/reeve-status --orphans` first: when every
    orphan carries one name no live reeve holds, it says so: take it with `bin/reeve-name claim
    <that>` and say so in your opening line. Otherwise `bin/reeve-name`, bare. Inside herdr, every
-   form also labels your own workspace with the name, unless another reeve holds it, when you get
-   your own. A reeve holds its workspace for as long as its pane is open, however quiet it has
+   form also labels your own tab with the name, and your own workspace, unless another reeve holds
+   it, when you get your own. A reeve holds its workspace for as long as its pane is open, however quiet it has
    been: only a pane that is provably closed frees the workspace, and one that cannot be checked
    does not.
 3. `$REEVE_HOME/liege.md`, `$REEVE_HOME/manors.md`, and `manors/<manor>.md` for the manor in hand.
@@ -567,7 +567,7 @@ fact per line, because you are the one reading it.
 |---|---|
 | `bin/reeve-doctor` | what is installed, what is verified, who else is running, what will refuse and why |
 | `bin/reeve-contract` | print this contract, for a session that did not load it from the clone |
-| `bin/reeve-name` | this reeve's name, assigned on first ask. `claim <Name>` takes one back from a handoff, `set <Name>` is the liege's rename. Both, and `$REEVE_NAME`, refuse a name a live reeve on another pane holds. Inside herdr, every form also labels this reeve's own workspace with the name; one reeve per workspace, so one another reeve holds, its pane still open, is left alone and this reeve gets its own |
+| `bin/reeve-name` | this reeve's name, assigned on first ask. `claim <Name>` takes one back from a handoff, `set <Name>` is the liege's rename. Both, and `$REEVE_NAME`, refuse a name a live reeve on another pane holds. Inside herdr, every form also labels this reeve's own workspace and its own tab with the name, never any other tab; one reeve per workspace, so one another reeve holds, its pane still open, is left alone and this reeve gets its own |
 | `bin/reeve-survey <path>` | gather evidence about an unfamiliar repository |
 | `bin/reeve-survey --register ...` | record the liege's answer about which manor a repo belongs to |
 | `bin/reeve-brief <id> <holding> --office <o>` | write a brief with the two seams |

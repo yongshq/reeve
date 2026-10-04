@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # A reeve has a short name, and every hand it sends out carries it:
-# `Aldric's scout: fix-auth` in the backend's list is whose hand, which office,
-# what for. The session id stays the identity; the name is what the liege reads.
+# `Scout sent by Aldric` on a hand's tab is which office and whose hand, and
+# the reeve's own tab reads its name. The session id stays the identity; the name is what the liege reads.
 #
 # What is pinned here is what makes a name worth having. Two live reeves never
 # share one, including two that start in the same instant. A /clear keeps it,
@@ -240,7 +240,7 @@ brief lead fix-auth artificer
 eq "10 the brief names the reeve that sent it" "| reeve | Escanor |" \
    "$(grep '^| reeve |' "$REEVE_HOME/errands/fix-auth/brief.md")"
 eq "10 and the record keeps it" "reeve=Escanor" "$(grep '^reeve=' "$REEVE_HOME/state/fix-auth.meta")"
-eq "10 a dry run labels the hand <Name>'s <office>: <id>" "Escanor's artificer: fix-auth" \
+eq "10 a dry run labels the hand <Office> sent by <Name>" "Artificer sent by Escanor" \
    "$(dry_label lead fix-auth)"
 eq "10 the dry run wrote no name for a session that had none" "" \
    "$(dry_label nameless fix-auth >/dev/null; cat "$SESS/nameless/name" 2>/dev/null)"
@@ -251,13 +251,16 @@ eq "11 config/hand-label reshapes it, spaces and all" "artificer fix-auth for Es
 printf '%s\n' '"{reeve}" \{office}' > "$REEVE_HOME/config/hand-label"
 eq "11 quotes and backslashes are kept out, so the dry run still parses" "Escanor artificer" \
    "$(dry_label lead fix-auth)"
+printf '%s\n' '{Office}/{office} {reeve}: {id}' > "$REEVE_HOME/config/hand-label"
+eq "11 {Office} is capitalised, {office} as written, {id} still offered" \
+   "Artificer/artificer Escanor: fix-auth" "$(dry_label lead fix-auth)"
 rm -f "$REEVE_HOME/config/hand-label"
 
 # Briefed with no session id: no name to give, so the label says what it can.
 brief '' loose scout
 eq "12 no name: the brief says so" "| reeve | - |" \
    "$(grep '^| reeve |' "$REEVE_HOME/errands/loose/brief.md")"
-eq "12 and the label falls back to <office>: <id>" "scout: loose" "$(dry_label '' loose)"
+eq "12 and the label falls back to <Office>: <id>" "Scout: loose" "$(dry_label '' loose)"
 
 st=$(REEVE_SESSION=lead "$ROOT/bin/reeve-status" --all --no-wake 2>/dev/null)
 eq "13 a whole-home listing ends its header with REEVE" "REEVE" "$(printf '%s\n' "$st" | head -1 | awk '{ print $NF }')"
@@ -282,7 +285,7 @@ printf 'target=stub:1\nbackend=stub\n' >> "$REEVE_HOME/state/fix-auth.meta"
 out=$(REEVE_SESSION=heir REEVE_ROOT="$STUB" "$ROOT/bin/reeve-adopt" fix-auth 2>&1); rc=$?
 eq "15 adopted" "0" "$rc"
 eq "15 the record names the new reeve" "reeve=Percy" "$(grep '^reeve=' "$REEVE_HOME/state/fix-auth.meta")"
-eq "15 and the hand is relabelled by its target" "stub:1|Percy's artificer: fix-auth" \
+eq "15 and the hand is relabelled by its target" "stub:1|Artificer sent by Percy" \
    "$(cat "$REEVE_HOME/relabels" 2>/dev/null)"
 has "15 which it says" "$out" "relabelled"
 
