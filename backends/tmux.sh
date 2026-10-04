@@ -51,6 +51,19 @@ reeve_backend_tmux_ensure_group() {
   printf '%s\n' "$ses"
 }
 
+reeve_backend_tmux_pane_gone() {
+  # Optional. <pane id> <socket>: 0 only when the server on that socket lists
+  # its panes and that one is not among them. Pane ids restart at %0 on every
+  # server, so it is asked of that socket only. `display -t` on a missing pane
+  # was measured printing nothing and exiting 0 on tmux 3.7b, so the list is the
+  # proof instead. A server that does not answer is not proof, so it is a no.
+  local pane=$1 sock=${2:-} out
+  [ -n "$pane" ] && [ -n "$sock" ] || return 1
+  out=$(tmux -S "$sock" list-panes -a -F '#{pane_id}' 2>/dev/null) || return 1
+  [ -n "$out" ] || return 1
+  ! printf '%s\n' "$out" | grep -qxF -- "$pane"
+}
+
 reeve_backend_tmux_create_endpoint() {
   # The group, when given, is the session ensure_group printed. The target
   # format is the same either way: a window is a window.

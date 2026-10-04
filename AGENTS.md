@@ -485,7 +485,9 @@ Read, in order:
    says `Reeve: <Name>`, run `bin/reeve-name claim <Name>`, so the household keeps calling you
    what it called the last reeve; if the claim refuses, a live reeve holds that name: run it bare
    and say so. Otherwise `bin/reeve-name`, bare. Inside herdr or tmux, every form also labels
-   your own workspace with the name, unless another live reeve holds it, when you get your own.
+   your own workspace with the name, unless another reeve holds it, when you get your own. A
+   reeve holds its workspace for as long as its pane is open, however quiet it has been: only a
+   pane that is provably closed frees the workspace, and one that cannot be checked does not.
 3. `$REEVE_HOME/liege.md`, `$REEVE_HOME/manors.md`, and `manors/<manor>.md` for the manor in hand.
 4. `bin/reeve-status --all` for anything still in flight, then `bin/reeve-status --orphans`. A
    reset gives you a new session id, so errands the last reeve briefed are no longer yours to
@@ -547,7 +549,7 @@ fact per line, because you are the one reading it.
 |---|---|
 | `bin/reeve-doctor` | what is installed, what is verified, who else is running, what will refuse and why |
 | `bin/reeve-contract` | print this contract, for a session that did not load it from the clone |
-| `bin/reeve-name` | this reeve's name, assigned on first ask. `claim <Name>` takes one back from a handoff, `set <Name>` is the liege's rename. Both, and `$REEVE_NAME`, refuse a name a live reeve on another pane holds. Inside herdr or tmux, every form also labels this reeve's own workspace with the name; one reeve per workspace, so one another live reeve holds is left alone and this reeve gets its own |
+| `bin/reeve-name` | this reeve's name, assigned on first ask. `claim <Name>` takes one back from a handoff, `set <Name>` is the liege's rename. Both, and `$REEVE_NAME`, refuse a name a live reeve on another pane holds. Inside herdr or tmux, every form also labels this reeve's own workspace with the name; one reeve per workspace, so one another reeve holds, its pane still open, is left alone and this reeve gets its own |
 | `bin/reeve-survey <path>` | gather evidence about an unfamiliar repository |
 | `bin/reeve-survey --register ...` | record the liege's answer about which manor a repo belongs to |
 | `bin/reeve-brief <id> <holding> --office <o>` | write a brief with the two seams |

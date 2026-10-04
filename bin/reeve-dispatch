@@ -224,9 +224,15 @@ group=''
 gsid=$(reeve_session); gname=$(reeve_name_peek)
 if [ -n "$gsid" ] && [ -n "$gname" ]; then
   if [ "$dry" = yes ]; then
-    gknown=$(group_known "$gsid" "$backend")
-    printf '  would run: reeve-backend call ensure_group %s%s --backend %s\n' \
-      "$gname" "${gknown:+ \"$gknown\"}" "$backend"
+    # The same arguments reeve_group would pass: the known id, quoted and
+    # possibly empty, then each id another reeve holds.
+    gargs=$(group_args "$gsid" "$backend" "$gname")
+    gknown=$(printf '%s\n' "$gargs" | head -n 1)
+    gheld=$(printf '%s\n' "$gargs" | sed 1d | tr '\n' ' ' | sed 's/ $//')
+    gline="$gname"
+    [ -n "$gknown$gheld" ] && gline="$gline \"$gknown\""
+    [ -n "$gheld" ] && gline="$gline $gheld"
+    printf '  would run: reeve-backend call ensure_group %s --backend %s\n' "$gline" "$backend"
     group='<group>'
   elif ! group=$(reeve_group "$BIN" "$backend" "$gname"); then
     group=''

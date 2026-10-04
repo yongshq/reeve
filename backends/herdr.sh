@@ -48,19 +48,33 @@ reeve_backend_herdr_describe() {
   printf 'herdr %s (session %s)\n' "$(herdr --version 2>/dev/null | awk '{print $NF}')" "$(_h_session)"
 }
 
-# _h_own_server   0 when this shell runs inside the very herdr server _h talks
-# to. Workspace ids are short counters per server (w5 on one, w5 on another), so
-# HERDR_WORKSPACE_ID only names a workspace on the server whose socket set it.
-_h_own_server() {
-  local mine=${HERDR_SOCKET_PATH:-} ses sock
-  [ -n "$mine" ] || return 1
-  ses=$(_h_session); [ -n "$ses" ] || return 1
-  sock=$(herdr session list --json 2>/dev/null \
-    | jq -r --arg n "$ses" '.sessions[]? | select(.name == $n) | .socket_path // empty' 2>/dev/null | head -1)
-  [ -n "$sock" ] && [ "$sock" = "$mine" ]
+# _h_sock   the socket of the server _h talks to, or nothing. Workspace ids are
+# short counters per server (w5 on one, w5 on another), so HERDR_WORKSPACE_ID
+# only names a workspace on this server when HERDR_SOCKET_PATH is this socket.
+_h_sock() {
+  local ses
+  ses=$(_h_session); [ -n "$ses" ] || return 0
+  herdr session list --json 2>/dev/null \
+    | jq -r --arg n "$ses" '.sessions[]? | select(.name == $n) | .socket_path // empty' 2>/dev/null | head -1
 }
 
-_h_held() { local w=$1 h; shift; for h in "$@"; do [ "$h" = "$w" ] && return 0; done; return 1; }
+# A group id is `<workspace id>@<socket>`, for the same reason: a bare w5 kept
+# by one session names some other workspace on another server, perhaps the
+# liege's. A bare one, kept before the socket was, is on an unknown server.
+_h_gid() { printf '%s\n' "${1%%@*}"; }
+
+# _h_held <ws> <sock> <held...>   0 when another live reeve holds <ws> on <sock>.
+# A held id with no socket holds that workspace on every server: the safe way.
+_h_held() {
+  local w=$1 s=$2 h; shift 2
+  for h in "$@"; do
+    case $h in
+      *@*) [ "$h" = "$w@$s" ] && return 0 ;;
+      *)   [ "$h" = "$w" ] && return 0 ;;
+    esac
+  done
+  return 1
+}
 
 reeve_backend_herdr_ensure_group() {
   # Optional. The workspace a reeve's hands open in as tabs. Its own workspace
@@ -74,29 +88,41 @@ reeve_backend_herdr_ensure_group() {
   # per workspace: a held one is never renamed, nested into or reused. And a
   # hand (REEVE_HAND, set by dispatch) never takes the workspace it sits in,
   # which is its reeve's.
-  local label=$1 known=${2:-} ws out
+  #
+  # Ids go in and come out as `<workspace id>@<socket>`. A known one is reused
+  # only on the server it was made on; a bare one, from before the socket was
+  # kept, names an unknown server and is not reused at all.
+  local label=$1 known=${2:-} ws out sock cur
   shift; [ $# -gt 0 ] && shift
+  sock=$(_h_sock)
   ws=${HERDR_WORKSPACE_ID:-}
-  if [ -n "$ws" ] && [ -z "${REEVE_HAND:-}" ] && _h_own_server && _h workspace get "$ws" >/dev/null; then
-    if _h_held "$ws" "$@"; then
+  if [ -n "$ws" ] && [ -z "${REEVE_HAND:-}" ] && [ -n "$sock" ] && [ "$sock" = "${HERDR_SOCKET_PATH:-}" ] \
+     && _h workspace get "$ws" >/dev/null; then
+    if _h_held "$ws" "$sock" "$@"; then
       echo "herdr: workspace $ws belongs to another live reeve, so $label gets a workspace of its own" >&2
     else
       _h workspace rename "$ws" "$label" >/dev/null || :
-      printf '%s\n' "$ws"; return 0
+      printf '%s@%s\n' "$ws" "$sock"; return 0
     fi
   fi
-  ws=$known
-  if [ -n "$ws" ] && ! _h_held "$ws" "$@" && _h workspace get "$ws" >/dev/null; then
-    printf '%s\n' "$ws"; return 0
+  ws=''
+  case $known in *@*) [ -n "$sock" ] && [ "${known#*@}" = "$sock" ] && ws=$(_h_gid "$known") ;; esac
+  if [ -n "$ws" ] && ! _h_held "$ws" "$sock" "$@" && cur=$(_h workspace get "$ws"); then
+    # The label follows the name. `reeve-name set` outside herdr had no
+    # workspace to relabel, so the rename lands here, on a group this name owns.
+    [ "$(printf '%s' "$cur" | jq -r '.result.workspace.label // empty' 2>/dev/null)" = "$label" ] \
+      || _h workspace rename "$ws" "$label" >/dev/null || :
+    printf '%s@%s\n' "$ws" "$sock"; return 0
   fi
   out=$(_h workspace create --cwd "${HOME:-$PWD}" --label "$label" --no-focus) || return 1
   ws=$(printf '%s' "$out" | jq -r '.result.workspace.workspace_id // .result.workspace_id // empty' 2>/dev/null)
   [ -n "$ws" ] || { echo "herdr: workspace create returned no id" >&2; return 1; }
-  printf '%s\n' "$ws"
+  printf '%s%s\n' "$ws" "${sock:+@$sock}"
 }
 
 reeve_backend_herdr_create_endpoint() {
-  local cwd=$1 label=$2 group=${3:-} out ws pane tab
+  local cwd=$1 label=$2 group out ws pane tab
+  group=$(_h_gid "${3:-}")   # the workspace, without the socket ensure_group checked
   [ -d "$cwd" ] || { echo "cwd does not exist: $cwd" >&2; return 1; }
 
   # With a group, the hand is a tab in its reeve's workspace. tab create returns
@@ -145,14 +171,31 @@ reeve_backend_herdr_create_endpoint() {
 
 _h_expected_bin() {
   # The harness binary, derived from the rendered command line by skipping the
-  # env prefix and any VAR=value assignments. Used as the submission proof.
-  local tok
-  for tok in $1; do
+  # env prefix, its options and any VAR=value assignments. Used as the
+  # submission proof. Every hand's line opens `env -u HERDR_WORKSPACE_ID ...`,
+  # so an option, and the variable name -u or --unset takes, is never the
+  # binary: taking `-u` once made every herdr launch fail its own proof. A
+  # stdin-mode line pipes its prompt in, so only what follows the last ` | ` is
+  # read. Into an array, never `for tok in $1`, so a glob is not expanded.
+  # A value quoted with a space in it spans tokens: an odd count of unescaped
+  # single quotes opens it and the next odd one closes it.
+  local tok inenv='' skip='' inq='' q toks
+  read -r -a toks <<< "${1##* | }"
+  for tok in ${toks[@]+"${toks[@]}"}; do
+    q=${tok//\\\'/}; q=${q//[!\']/}
+    if [ -n "$inq" ]; then [ $(( ${#q} % 2 )) -eq 1 ] && inq=''; continue; fi
+    if [ -n "$skip" ]; then skip=''; continue; fi
     case $tok in
-      env) continue ;;
-      *=*) continue ;;
-      *) basename "$tok"; return 0 ;;
+      env) inenv=1; continue ;;
+      *=*) [ $(( ${#q} % 2 )) -eq 1 ] && inq=1; continue ;;
     esac
+    if [ -n "$inenv" ]; then
+      case $tok in
+        -u|--unset|-C|--chdir) skip=1; continue ;;
+        -*) continue ;;
+      esac
+    fi
+    basename -- "$tok"; return 0
   done
   return 1
 }
@@ -183,6 +226,7 @@ reeve_backend_herdr_launch() {
   _h pane run "$pane" "$cmdline" >/dev/null || return 1
 
   want=$(_h_expected_bin "$cmdline") || return 0   # cannot prove it, do not block on it
+  [ -n "$want" ] || return 0
   i=0
   while [ "$i" -lt 20 ]; do
     _h_foreground_has "$pane" "$want" && return 0
@@ -222,6 +266,20 @@ reeve_backend_herdr_target_exists() {
   local pane
   pane=$(_h_pane "$1")
   _h pane get "$pane" | jq -e '.result.pane.pane_id // .result.pane_id' >/dev/null 2>&1
+}
+
+reeve_backend_herdr_pane_gone() {
+  # Optional. <pane id> <socket>: 0 only when the server on that socket answers
+  # that the pane is not there. Asked of the session listening on THAT socket,
+  # never the one _h talks to, since pane ids are per server. A socket no
+  # listed session has, or any other error, is not proof, so it is a no.
+  local pane=$1 sock=${2:-} ses out
+  [ -n "$pane" ] && [ -n "$sock" ] || return 1
+  ses=$(herdr session list --json 2>/dev/null \
+    | jq -r --arg s "$sock" '.sessions[]? | select(.socket_path == $s) | .name // empty' 2>/dev/null | head -1)
+  [ -n "$ses" ] || return 1
+  out=$(herdr pane get "$pane" --session "$ses" 2>/dev/null) && return 1
+  [ "$(printf '%s' "$out" | jq -r '.error.code // empty' 2>/dev/null)" = pane_not_found ]
 }
 
 reeve_backend_herdr_agent_state() {

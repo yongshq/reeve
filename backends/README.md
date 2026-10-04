@@ -27,13 +27,14 @@ Each is `reeve_backend_<name>_<fn>`, sourced only through `bin/reeve-backend`.
 | `wait_change` | `<target> <timeout_ms>` | nothing | 0 a change was observed, 1 timed out with no signal, 2 this backend cannot wait and the caller must poll |
 | `kill` | `<target>` | nothing | 0 |
 
-Two optional functions. A backend may leave either out; `bin/reeve-backend` then refuses the call,
-and every caller treats that refusal as a no and carries on.
+Three optional functions. A backend may leave any of them out; `bin/reeve-backend` then refuses
+the call, and every caller treats that refusal as a no and carries on.
 
 | Function | Arguments | Must print | Exit |
 |---|---|---|---|
 | `relabel` | `<target> <label>` | nothing | 0 if the endpoint now shows `<label>`. Used by `bin/reeve-adopt`, so an adopted hand carries its new reeve's name |
-| `ensure_group` | `<label> [<known-id> [<held-id>...]]` | one line: a group id | 0 if the group exists and shows `<label>`. The reeve's own group: a herdr workspace, a tmux session. `<known-id>` is what an earlier call printed, to reuse while it is still there; it may be empty. Each `<held-id>` is a group another live reeve holds, never relabelled, nested into or reused. Used by `bin/reeve-dispatch` and `bin/reeve-name` |
+| `ensure_group` | `<label> [<known-id> [<held-id>...]]` | one line: a group id | 0 if the group exists and shows `<label>`. The reeve's own group: a herdr workspace, a tmux session. `<known-id>` is what an earlier call printed, to reuse while it is still there; it may be empty. Each `<held-id>` is a group another reeve holds, never relabelled, nested into or reused. Used by `bin/reeve-dispatch` and `bin/reeve-name` |
+| `pane_gone` | `<pane-id> <socket>` | nothing | 0 only when the server on `<socket>` answers that the pane is not there. Anything it cannot check is 1. Used to free a group whose reeve's pane has closed |
 
 A group is a reeve's own place, labelled with its name, and its hands open inside it: herdr tabs in
 its workspace, tmux windows in its session. The group id, like a target, is opaque to callers; only
@@ -41,10 +42,14 @@ the backend that printed it reads it. A target made inside a group stays opaque 
 it closes that endpoint only, **never the group**: the group is usually the workspace the reeve
 itself runs in, so closing it would kill the reeve and every hand beside it.
 
-One reeve per group. The workspace a reeve runs in is its group only when no other live reeve holds
-it, when the id really is on the server the backend talks to, and never from inside a hand:
+One reeve per group. The workspace a reeve runs in is its group only when no other reeve holds it,
+when the id really is on the server the backend talks to, and never from inside a hand:
 dispatch launches every hand with `REEVE_HAND=<id>` and with `HERDR_WORKSPACE_ID` and `TMUX_PANE`
 unset, since the workspace a hand sits in is its reeve's. Otherwise the reeve gets one of its own.
+A reeve holds its group for as long as its recorded pane is open, whatever its heartbeat says; only
+`pane_gone` on that pane's own server frees it, and a pane that cannot be checked keeps it held. A
+reeve with no pane, in a plain terminal, holds it while its heartbeat is fresh. herdr group ids
+carry their server's socket (`w5@<socket>`), and a known id is reused only on that same server.
 
 ## The rules every backend obeys
 

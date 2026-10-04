@@ -668,6 +668,25 @@ reeve_pane() {
   printf '%s%s' "$p" "${sock:+@$sock}" | tr -d '[:space:]'
 }
 
+# pane_eq <a> <b>   one pane. A record written before the socket was kept holds
+# the bare id, and is that same pane when the ids match.
+pane_eq() {
+  [ -n "$1" ] && [ -n "$2" ] || return 1
+  [ "$1" = "$2" ] && return 0
+  case $1$2 in *@*@*) return 1 ;; esac
+  [ "${1%%@*}" = "${2%%@*}" ]
+}
+
+# pane_gone <pane key>   0 only when the server the key names answers that the
+# pane is not there. herdr's ids read `w4:p1`, tmux's `%3`. A bare key has no
+# server to ask, and a server that cannot be asked proves nothing: both are no.
+pane_gone() {
+  local p=$1 b
+  case $p in *@*) ;; *) return 1 ;; esac
+  case $p in %*) b=tmux ;; *) b=herdr ;; esac
+  "$REEVE_ROOT_D/bin/reeve-backend" call pane_gone "${p%%@*}" "${p#*@}" --backend "$b" >/dev/null 2>&1
+}
+
 session_name() { # session_name <sid>   the stored name, or nothing
   local n=''
   [ -n "${1:-}" ] && [ -f "$(session_dir "$1")/name" ] \
@@ -719,7 +738,7 @@ name_live_elsewhere() {
   local want=$1 pane=$2 n st p sid
   while read -r n st p sid; do
     [ "$n" = "$want" ] && [ "$st" = alive ] || continue
-    [ -n "$pane" ] && [ "$p" = "$pane" ] && continue
+    pane_eq "$p" "$pane" && continue
     printf '%s\n' "$sid"; return 0
   done <<NAME_HOLDERS_EOF
 $(name_holders "${3:-}")
@@ -781,7 +800,7 @@ reeve_name() {
     n=$(for d in "$REEVE_HOME_D"/state/sessions/*; do
           [ -d "$d" ] || continue
           k=$(basename "$d"); [ "$k" = "$s" ] && continue
-          [ "$(session_pane "$k" | tr -d '[:space:]')" = "$pane" ] || continue
+          pane_eq "$(session_pane "$k" | tr -d '[:space:]')" "$pane" || continue
           cand=$(session_name "$k"); [ -n "$cand" ] || continue
           printf '%s %s\n' "$(tr -dc '0-9' 2>/dev/null < "$d/seen")" "$cand"
         done | sort -n | tail -n 1 | sed 's/^[0-9]* *//')
@@ -857,20 +876,29 @@ group_known() { # group_known <sid> <backend>   the stored id, or nothing
   return 0
 }
 
-# group_held_elsewhere <sid> <backend>   one per line, the group ids other live
+# group_held_elsewhere <sid> <backend>   one per line, the group ids other
 # reeves hold on this backend. One reeve per workspace: a reeve never relabels
 # or nests into a group another is using. A holder on this same pane is the
-# session /clear replaced, so it is not a rival, the same as for a name. A gone
-# holder holds nothing, so its group may be taken over.
+# session /clear replaced, so it is not a rival, the same as for a name.
+#
+# A holder with a recorded pane holds its group for as long as that pane
+# exists, whatever its heartbeat says: a reeve quiet for an hour is still
+# sitting there. Only a pane its server says is gone frees the group, and a
+# pane that cannot be checked holds it. A holder with no pane, a reeve in a
+# plain terminal, holds while its heartbeat is fresh.
 group_held_elsewhere() {
   local me=$1 b=$2 pane d k p g
   pane=$(reeve_pane)
   for d in "$REEVE_HOME_D"/state/sessions/*; do
     [ -f "$d/group.$b" ] || continue
     k=$(basename "$d"); [ "$k" = "$me" ] && continue
-    [ "$(session_state "$k")" = alive ] || continue
     p=$(session_pane "$k" | tr -d '[:space:]')
-    [ -n "$pane" ] && [ "$p" = "$pane" ] && continue
+    if [ -n "$p" ]; then
+      pane_eq "$p" "$pane" && continue
+      pane_gone "$p" && continue
+    else
+      [ "$(session_state "$k")" = alive ] || continue
+    fi
     g=$(head -n 1 "$d/group.$b" 2>/dev/null)
     [ -n "$g" ] && printf '%s\n' "$g"
   done
@@ -892,6 +920,17 @@ group_of_name() {
   done | sort -n | tail -n 1 | sed 's/^[0-9]* *//'
 }
 
+# group_args <sid> <backend> <name>   what reeve_group hands ensure_group after
+# the name: the known id on the first line, empty when there is none, then each
+# held id. One place, so a dispatch dry run prints the very call it would make.
+group_args() {
+  local known
+  known=$(group_known "$1" "$2")
+  [ -n "$known" ] || known=$(group_of_name "$1" "$2" "$3")
+  printf '%s\n' "$known"
+  group_held_elsewhere "$1" "$2"
+}
+
 # reeve_group <bin> <backend> <name>   ensure this session's group, store and
 # print its id. rc 1 with nothing printed when there is no session, no name, or
 # the backend has no ensure_group or it failed; the caller says so and carries
@@ -903,12 +942,12 @@ group_of_name() {
 # every id another live reeve holds, which it never relabels or reuses. Under a
 # lock, so two reeves starting in one workspace do not both take it.
 reeve_group() {
-  local bin=$1 b=$2 n=$3 s known g f lk err rc held
+  local bin=$1 b=$2 n=$3 s known g f lk err rc held args
   s=$(reeve_session); [ -n "$s" ] && [ -n "$n" ] || return 1
   lk=$(lock_acquire groups 15) || return 1
-  known=$(group_known "$s" "$b")
-  [ -n "$known" ] || known=$(group_of_name "$s" "$b" "$n")
-  held=$(group_held_elsewhere "$s" "$b")
+  args=$(group_args "$s" "$b" "$n")
+  known=$(printf '%s\n' "$args" | head -n 1)
+  held=$(printf '%s\n' "$args" | sed 1d)
   err=$(mktemp "${TMPDIR:-/tmp}/reeve-group.XXXXXX") || { lock_release "$lk"; return 1; }
   # shellcheck disable=SC2086
   g=$(IFS='

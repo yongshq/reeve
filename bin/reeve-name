@@ -73,9 +73,11 @@ case $cmd in
     if rival=$(name_live_elsewhere "$want" "$(reeve_pane)" "$s"); then
       die "'$want' is held by live reeve $rival on another pane. run reeve-name bare for a free one"
     fi
-    # A group kept under another name is that name's, so it is let go: claim
-    # then finds the one its name kept, and set gets one under the new name.
-    [ "$(session_name "$s")" = "$want" ] || rm -f "$(session_dir "$s")"/group.*
+    # claim takes back a name a handoff recorded, so a group this session made
+    # under another name is let go and claim finds the one its name kept. set
+    # renames this reeve, so it keeps its group, relabelled now inside herdr or
+    # tmux and at the next dispatch outside them, never a second one.
+    [ "$cmd" = claim ] && [ "$(session_name "$s")" != "$want" ] && rm -f "$(session_dir "$s")"/group.*
     name_store "$s" "$want" || die "could not write $(session_dir "$s")/name"
     pane_store "$s"
     lock_release "$lk"; trap - EXIT
