@@ -144,16 +144,14 @@ r "a half stamp in a note is kept" done 0 no "2026-10-04 shipped" "" <<'X'
 done: 2026-10-04 shipped
 X
 
-echo "--- old readers: main's lib reads a stamped log ---"
-# A watch, caretaker or second reeve still running main's code reads the same
-# home. Its parser is taken from main itself, so this asserts against the code
-# that is actually out there, not a copy of it kept here. A fresh clone of a
-# branch has main only as origin/main.
+echo "--- old readers: the last pre-stamp lib reads a stamped log ---"
+# A watch, caretaker or second reeve still running pre-stamp code reads the same
+# home. Its parser is pinned to 15b6496, the last commit before stamps, not read
+# from main: once stamps land, main's lib is the new reader and the check would
+# pass vacuously. A clone missing that commit (shallow) fails loudly below.
+OLD_REV=15b6496
 OLDLIB="$(dirname "$REEVE_HOME")/old-lib.sh"
-: > "$OLDLIB"
-for ref in main origin/main; do
-  git -C "$ROOT" show "$ref:bin/reeve-lib.sh" > "$OLDLIB" 2>/dev/null && [ -s "$OLDLIB" ] && break
-done
+git -C "$ROOT" show "$OLD_REV:bin/reeve-lib.sh" > "$OLDLIB" 2>/dev/null || : > "$OLDLIB"
 if [ -s "$OLDLIB" ]; then
   old() { # old <name> <state> <open> <div>, of the log in $F
     local got
@@ -184,7 +182,7 @@ if [ -s "$OLDLIB" ]; then
   "$SAY" "$F" done 'built' >/dev/null 2>&1
   old "stamped done over an open ask is a divergence" needs-decision 1 yes
 else
-  bad "old reader: main's bin/reeve-lib.sh could be read from git"
+  bad "old reader: bin/reeve-lib.sh at $OLD_REV could be read from git (shallow clone?)"
 fi
 
 echo "--- sentry: a signal line carries the note, not the stamp ---"
