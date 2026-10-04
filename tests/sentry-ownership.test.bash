@@ -376,5 +376,48 @@ eq "10 within one poll and one pass of done"  "$([ "$took" -le "$BOUND" ] && ech
 has "10 and its owner was left the line"      "$(spool sess-T)" "timed is done"
 kill "$CARE" 2>/dev/null; wait "$CARE" 2>/dev/null
 
+echo "--- 11. the wake line says what teardown did, not what it hoped to do ---"
+# A copy of bin with reeve-teardown stubbed, so each outcome is chosen rather
+# than engineered. The errand has no copy on disk, the case that used to read
+# `copy removed` whatever teardown answered.
+export REEVE_HOME="$SCRATCH/home13"
+mkdir -p "$REEVE_HOME/state"
+FAKEBIN="$SCRATCH/bin13"
+cp -R "$ROOT/bin" "$FAKEBIN"
+cat > "$FAKEBIN/reeve-teardown" <<'STUBTD'
+#!/usr/bin/env bash
+meta="$REEVE_HOME/state/$1.meta"
+case $STUB_TD in
+  late) sed 's/^target=.*/target=/' "$meta" > "$meta.t" && mv "$meta.t" "$meta" ;;
+esac
+case $STUB_TD in
+  lock) printf 'reeve: could not take the lock\n' >&2; exit 4 ;;
+  *)    printf 'reeve: REFUSED to tear down %s\n  stub says no to %s.\n  Investigate.\n' \
+          "$1" "$STUB_TD" >&2
+        exit 1 ;;
+esac
+STUBTD
+chmod +x "$FAKEBIN/reeve-teardown"
+td_watch() { STUB_TD=$2 REEVE_SESSION=sess-R "$FAKEBIN/reeve-sentry" --once --poll 1 2>&1; }
+
+errand early sess-R "working: x" "done: finished"
+OUT=$(td_watch early early)
+has "11 refused before freeing: the done line"    "$OUT" "early is done"
+has "11 says the session was kept and why" \
+  "$OUT" "[session kept, cleanup refused: stub says no to early.]"
+nas "11 and never claims the copy was removed"    "$OUT" "copy removed"
+
+errand late sess-R "working: x" "done: finished"
+OUT=$(td_watch late late)
+has "11 refused after freeing: says so" \
+  "$OUT" "[session freed, cleanup refused: stub says no to late.]"
+nas "11 and never claims the copy was removed"    "$OUT" "copy removed"
+
+errand locked sess-R "working: x" "failed: gave up"
+OUT=$(td_watch locked lock)
+has "11 a lock not taken is deferred, not refused" \
+  "$OUT" "[session kept, cleanup deferred: reeve: could not take the lock]"
+nas "11 and never claims the copy was removed"     "$OUT" "copy removed"
+
 printf '\npassed=%s failed=%s\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

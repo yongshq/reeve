@@ -131,8 +131,9 @@ ck_eq  "4 nothing was typed into it"                       "$(sent)" ""
 ck_eq  "4 nor the latch cleared"                           "$(latched)" kept
 
 # A session that cannot be told from one at a dialog is refused the same way:
-# an unverified harness answers `unknown` whatever is on the screen, and hard rule 7 is not broken on a guess. So is a probe that
-# failed, whatever it printed, and one that printed nothing.
+# an unverified harness answers `unknown` whatever is on the screen, and hard
+# rule 7 is not broken on a guess. So is a probe that failed, whatever it
+# printed, and one that printed nothing.
 for a in unknown error empty; do
   fresh
   case $a in

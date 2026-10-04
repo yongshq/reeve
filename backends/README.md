@@ -42,10 +42,10 @@ the call, and every caller treats that refusal as a no and carries on.
 | `group_gone` | `<target>` | nothing | 0 only when the target opened inside a group and the server answers that group is gone. Used by the sentry to say a hand died with its reeve's workspace |
 
 A group is a reeve's own place, labelled with its name, and its hands open inside it: herdr tabs in
-its workspace. The group id, like a target, is opaque to callers; only
-the backend that printed it reads it. A target made inside a group stays opaque too, and `kill` on
-it closes that endpoint only, **never the group**: the group is usually the workspace the reeve
-itself runs in, so closing it would kill the reeve and every hand beside it.
+its workspace. The group id, like a target, is opaque to callers; only the backend that printed it
+reads it. A target made inside a group stays opaque too, and `kill` on it closes that endpoint
+only, **never the group**: the group is usually the workspace the reeve itself runs in, so closing
+it would kill the reeve and every hand beside it.
 
 One reeve per group. The workspace a reeve runs in is its group only when no other reeve holds it,
 when the id really is on the server the backend talks to, and never from inside a hand: dispatch

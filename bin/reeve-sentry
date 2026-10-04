@@ -291,24 +291,38 @@ blind=''
 # nothing in flight and exits, and nothing ever cleans it up again.
 REAP_UNDECIDED=no
 reap_one() {
-  local i=$1 wt rc
+  local i=$1 wt rc err sess=freed why verb
   REAP_UNDECIDED=no
   if kept "$i"; then say ' [session kept, %s]\n' "$(meta_get "$i" keep '')"; return; fi
   [ "$reap" = yes ] || { say '\n'; return; }
   wt=$(meta_get "$i" worktree '')
-  "$BIN/reeve-teardown" "$i" ${2:+"$2"} >/dev/null 2>&1; rc=$?
+  # Its stdout is dropped, its stderr kept: a refusal's reason is the one thing
+  # from it the wake line repeats.
+  err=$("$BIN/reeve-teardown" "$i" ${2:+"$2"} 2>&1 >/dev/null); rc=$?
   [ "$rc" = 4 ] && REAP_UNDECIDED=yes
+  # Freed is read off the record, never assumed: teardown blanks target= once it
+  # has closed the session, and a refusal before that point leaves it standing.
+  [ -z "$(meta_get "$i" target '')" ] || sess=kept
   if [ -n "$wt" ] && [ -d "$wt" ]; then
     local br ahead
     br=$(meta_get "$i" branch '')
     if [ -n "$br" ]; then
       ahead=$(git -C "$(meta_get "$i" repo '')" rev-list --count "$(meta_get "$i" base main)..$br" 2>/dev/null || echo '?')
-      say ' [session freed, %s kept with %s commit(s)]\n' "$br" "$ahead"
+      say ' [session %s, %s kept with %s commit(s)]\n' "$sess" "$br" "$ahead"
     else
-      say ' [session freed, copy kept]\n'
+      say ' [session %s, copy kept]\n' "$sess"
     fi
-  else
+  elif [ "$rc" = 0 ]; then
     say ' [session freed, copy removed]\n'
+  else
+    # A refusal prints its reason on the line after `REFUSED`; anything else
+    # that failed is named by its own last line, or by its exit status.
+    why=$(printf '%s\n' "$err" | sed -n '/REFUSED/{n;s/^ *//p;q;}')
+    [ -n "$why" ] || why=$(printf '%s\n' "$err" | sed '/^ *$/d' | tail -1)
+    [ -n "$why" ] || why="exit $rc"
+    # 4 is the lock not taken, which decided nothing: deferred, not refused.
+    if [ "$rc" = 4 ]; then verb=deferred; else verb=refused; fi
+    say ' [session %s, cleanup %s: %s]\n' "$sess" "$verb" "$why"
   fi
 }
 
