@@ -751,6 +751,16 @@ name_store() { # name_store <sid> <name>
   mkdir -p "$d" 2>/dev/null || return 1
   printf '%s\n' "$2" > "$d/name.$$" 2>/dev/null && mv -f "$d/name.$$" "$d/name" \
     || { rm -f "$d/name.$$"; return 1; }
+  # Every name this session has held, so a group it labelled under an older one
+  # is still recognised as its own after a rename. Presentation only.
+  grep -qxF -- "$2" "$d/names" 2>/dev/null || printf '%s\n' "$2" >> "$d/names" 2>/dev/null
+  return 0
+}
+
+session_names() { # session_names <sid>   every name the record held, current last
+  local d; d=$(session_dir "$1")
+  { [ -f "$d/names" ] && cat "$d/names" 2>/dev/null; session_name "$1"; } \
+    | tr -d ' \t' | grep . | awk '!seen[$0]++'
 }
 
 pane_store() { # pane_store <sid>   record the pane, when there is one and it moved
@@ -931,6 +941,26 @@ group_args() {
   group_held_elsewhere "$1" "$2"
 }
 
+# group_names <sid> <backend> <name> <known>   the names this reeve's records
+# held for <known>, space separated: this session's, and those of each other
+# record under this name that kept that same id. A backend relabels a known
+# group only when it still shows one of them, so an id the server has since
+# given to someone else's workspace is never renamed.
+group_names() {
+  local me=$1 b=$2 n=$3 known=$4 d k
+  [ -n "$known" ] || return 0
+  {
+    session_names "$me"
+    for d in "$REEVE_HOME_D"/state/sessions/*; do
+      [ -f "$d/group.$b" ] || continue
+      k=$(basename "$d"); [ "$k" = "$me" ] && continue
+      [ "$(session_name "$k")" = "$n" ] || continue
+      [ "$(head -n 1 "$d/group.$b" 2>/dev/null)" = "$known" ] || continue
+      session_names "$k"
+    done
+  } | awk '!seen[$0]++' | tr '\n' ' ' | sed 's/ *$//'
+}
+
 # reeve_group <bin> <backend> <name>   ensure this session's group, store and
 # print its id. rc 1 with nothing printed when there is no session, no name, or
 # the backend has no ensure_group or it failed; the caller says so and carries
@@ -951,7 +981,8 @@ reeve_group() {
   err=$(mktemp "${TMPDIR:-/tmp}/reeve-group.XXXXXX") || { lock_release "$lk"; return 1; }
   # shellcheck disable=SC2086
   g=$(IFS='
-'; "$bin/reeve-backend" call ensure_group "$n" "$known" $held --backend "$b" 2>"$err"); rc=$?
+'; REEVE_GROUP_NAMES=$(group_names "$s" "$b" "$n" "$known") \
+     "$bin/reeve-backend" call ensure_group "$n" "$known" $held --backend "$b" 2>"$err"); rc=$?
   g=$(printf '%s\n' "$g" | head -n 1)
   if [ "$rc" -ne 0 ] || [ -z "$g" ]; then rm -f "$err"; lock_release "$lk"; return 1; fi
   cat "$err" >&2; rm -f "$err"

@@ -20,13 +20,15 @@ reeve_backend_tmux_ensure_group() {
   # when the liege set one, as before. Else the session the reeve itself runs in,
   # where the reeve's OWN window takes its name; the session keeps the liege's
   # name, which other windows may be relying on. Else a detached session named
-  # for the reeve. The known id is not needed: a session name is its own id.
+  # for the reeve. A known id, the detached session an earlier call made under
+  # an older name, is renamed to the new one rather than left beside it; only
+  # a `reeve-*` session, never one the liege named.
   #
   # Every argument after the known id is a session another live reeve holds,
   # and one reeve per session: a held one is neither renamed in nor nested into,
   # and the reeve gets its own. A hand (REEVE_HAND, set by dispatch) never takes
   # the session it sits in, which is its reeve's.
-  local label=$1 ses='' win h
+  local label=$1 known=${2:-} ses='' win h
   shift; [ $# -gt 0 ] && shift
   if [ -n "${REEVE_TMUX_SESSION:-}" ]; then
     ses=$REEVE_TMUX_SESSION
@@ -45,6 +47,14 @@ reeve_backend_tmux_ensure_group() {
   fi
   if [ -z "$ses" ]; then
     ses="reeve-$(printf '%s' "$label" | tr '[:upper:]' '[:lower:]')"
+    case $known in
+      reeve-?*)
+        for h in "$@"; do [ "$h" = "$known" ] && known=''; done
+        if [ -n "$known" ] && [ "$known" != "$ses" ] && tmux has-session -t "=$known" 2>/dev/null \
+           && ! tmux has-session -t "=$ses" 2>/dev/null; then
+          tmux rename-session -t "=$known" "$ses" 2>/dev/null && { printf '%s\n' "$ses"; return 0; }
+        fi ;;
+    esac
     tmux has-session -t "=$ses" 2>/dev/null \
       || tmux new-session -d -s "$ses" -c "${HOME:-$PWD}" || return 1
   fi

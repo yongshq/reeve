@@ -76,6 +76,12 @@ _h_held() {
   return 1
 }
 
+_h_name_was() { # _h_name_was <label> <name...>   0 when <label> is one of them
+  local l=$1 n; shift
+  for n in "$@"; do [ "$n" = "$l" ] && return 0; done
+  return 1
+}
+
 reeve_backend_herdr_ensure_group() {
   # Optional. The workspace a reeve's hands open in as tabs. Its own workspace
   # first, when it runs inside herdr on this same server: that is where the
@@ -95,6 +101,7 @@ reeve_backend_herdr_ensure_group() {
   local label=$1 known=${2:-} ws out sock cur
   shift; [ $# -gt 0 ] && shift
   sock=$(_h_sock)
+  [ -n "$sock" ] || echo "herdr: session $(_h_session) lists no socket path, so no workspace can be reused and $label gets a new one" >&2
   ws=${HERDR_WORKSPACE_ID:-}
   if [ -n "$ws" ] && [ -z "${REEVE_HAND:-}" ] && [ -n "$sock" ] && [ "$sock" = "${HERDR_SOCKET_PATH:-}" ] \
      && _h workspace get "$ws" >/dev/null; then
@@ -110,9 +117,19 @@ reeve_backend_herdr_ensure_group() {
   if [ -n "$ws" ] && ! _h_held "$ws" "$sock" "$@" && cur=$(_h workspace get "$ws"); then
     # The label follows the name. `reeve-name set` outside herdr had no
     # workspace to relabel, so the rename lands here, on a group this name owns.
-    [ "$(printf '%s' "$cur" | jq -r '.result.workspace.label // empty' 2>/dev/null)" = "$label" ] \
-      || _h workspace rename "$ws" "$label" >/dev/null || :
-    printf '%s@%s\n' "$ws" "$sock"; return 0
+    # Only while it still shows this name or one this reeve's records held
+    # ($REEVE_GROUP_NAMES): ids are counters, and after a server restart on
+    # the same socket the id may be someone else's workspace now. Any other
+    # label and it is neither renamed nor reused.
+    cur=$(printf '%s' "$cur" | jq -r '.result.workspace.label // empty' 2>/dev/null)
+    if [ "$cur" = "$label" ]; then
+      printf '%s@%s\n' "$ws" "$sock"; return 0
+    fi
+    if [ -n "$cur" ] && _h_name_was "$cur" ${REEVE_GROUP_NAMES:-}; then
+      _h workspace rename "$ws" "$label" >/dev/null || :
+      printf '%s@%s\n' "$ws" "$sock"; return 0
+    fi
+    echo "herdr: workspace $ws now shows '$cur', not a name of this reeve, so $label gets a new one" >&2
   fi
   out=$(_h workspace create --cwd "${HOME:-$PWD}" --label "$label" --no-focus) || return 1
   ws=$(printf '%s' "$out" | jq -r '.result.workspace.workspace_id // .result.workspace_id // empty' 2>/dev/null)
@@ -278,7 +295,9 @@ reeve_backend_herdr_pane_gone() {
   ses=$(herdr session list --json 2>/dev/null \
     | jq -r --arg s "$sock" '.sessions[]? | select(.socket_path == $s) | .name // empty' 2>/dev/null | head -1)
   [ -n "$ses" ] || return 1
-  out=$(herdr pane get "$pane" --session "$ses" 2>/dev/null) && return 1
+  # herdr writes its error envelope to stderr, not stdout (0.9.0), so that is
+  # the stream read once the call has failed.
+  out=$(herdr pane get "$pane" --session "$ses" 2>&1 >/dev/null) && return 1
   [ "$(printf '%s' "$out" | jq -r '.error.code // empty' 2>/dev/null)" = pane_not_found ]
 }
 

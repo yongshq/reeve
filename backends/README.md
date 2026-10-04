@@ -49,7 +49,11 @@ unset, since the workspace a hand sits in is its reeve's. Otherwise the reeve ge
 A reeve holds its group for as long as its recorded pane is open, whatever its heartbeat says; only
 `pane_gone` on that pane's own server frees it, and a pane that cannot be checked keeps it held. A
 reeve with no pane, in a plain terminal, holds it while its heartbeat is fresh. herdr group ids
-carry their server's socket (`w5@<socket>`), and a known id is reused only on that same server.
+carry their server's socket (`w5@<socket>`), and a known id is reused only on that same server,
+and only while it shows the reeve's name or one its records held (`$REEVE_GROUP_NAMES`, set by
+`reeve_group`): ids are counters, so after a server restart a known id may be someone else's. A
+tmux reeve renamed outside tmux has its known `reeve-*` session renamed to match, never a session
+the liege named.
 
 ## The rules every backend obeys
 
