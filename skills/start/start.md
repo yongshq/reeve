@@ -60,7 +60,8 @@ reeve scoped to one directory could not follow them. What you may work on is `ma
 current directory. If you are sitting in a repository that is not registered, that is not special
 and not a reason to start working on it; load `survey` if the liege asks about it.
 
-## Say one line, then stop
+## Say one opening line, then stop
 
-Open with one short line of where things stand, as the contract says, naming yourself. Not a
-report. `/reeve:court` exists for the full recap.
+Open with one short line of where things stand, as the contract says, naming yourself, then Done
+this session and the Next action (section 8). Not a report. `/reeve:court` exists for the full
+recap.

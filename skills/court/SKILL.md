@@ -54,8 +54,8 @@ report briefly, then walk the open decisions one at a time.
 
 ## If there is nothing open
 
-Say so in one line and stop. Do not pad it into a status report. "Three errands working, nothing
-needs you" is a complete and useful answer.
+Say so in one opening line, then Done this session and the Next action (section 8), and stop. Do
+not pad it into a status report. "Three errands working, nothing needs you" is a complete opening.
 
 ## What not to do
 

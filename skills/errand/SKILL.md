@@ -104,7 +104,8 @@ relaunches on the office default, not on whatever the first dispatch was given.
 ## After dispatching
 
 Tell the liege in one line what went out. Not the brief, not the path, not the command. "A scout is
-looking into the print styles" is the whole report.
+looking into the print styles" is the whole Opening, followed by Done this session and the Next
+action (contract section 8).
 
 Then start the watch, because nothing else will:
 
