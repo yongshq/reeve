@@ -143,8 +143,10 @@ unreachable() { # unreachable <repo> -> none|<sha ...>
 
 # The gate's half of every case, asserted separately from the message so that a
 # wording change can never quietly take the safety with it.
-kept() { # kept <label> <id> <repo> <wt> <sha>
-  ck_eq "$1 refuses"           "$RC" 1
+# A scene the gate cannot tell from work that simply never landed refuses with
+# the 3 of the ordinary keep; every other refusal is a 1.
+kept() { # kept <label> <id> <repo> <wt> <sha> [rc, default 1]
+  ck_eq "$1 refuses"           "$RC" "${6:-1}"
   ck_eq "$1 the copy survives" "$(gone "$4")" present
   ck_eq "$1 not marked torn"   "$(torn "$2")" no
   ck_eq "$1 nothing orphaned"  "$(unreachable "$3")" none
@@ -267,7 +269,7 @@ ck_not "3c it does not say nothing moved"    "$OUT" "So nothing this errand hold
 mk unlanded branch
 record unlanded
 run_teardown unlanded
-kept "4" unlanded "$repo" "$wt" "$sha"
+kept "4" unlanded "$repo" "$wt" "$sha" 3
 ck_has "4 it keeps the original wording"     "$OUT" "1 commit(s) that main does not have"
 ck_not "4 it does not claim the base moved"  "$OUT" "$MOVED"
 
@@ -283,7 +285,7 @@ printf 'unrelated again\n' > "$repo/d.txt"
 git -C "$repo" add -A >/dev/null; git -C "$repo" commit -qm 'unrelated work, again'
 record unlanded-busy-base
 run_teardown unlanded-busy-base
-kept "4b" unlanded-busy-base "$repo" "$wt" "$sha"
+kept "4b" unlanded-busy-base "$repo" "$wt" "$sha" 3
 ck_has "4b it keeps the original wording"    "$OUT" "1 commit(s) that main does not have"
 ck_not "4b it does not claim the base moved" "$OUT" "$MOVED"
 
@@ -306,7 +308,7 @@ git -C "$repo" reset -q --hard HEAD~1
 rm -f "$repo/.git/logs/refs/heads/main"
 record no-reflog
 run_teardown no-reflog
-kept "5" no-reflog "$repo" "$wt" "$sha"
+kept "5" no-reflog "$repo" "$wt" "$sha" 3
 ck_has "5 it falls back to the old wording"  "$OUT" "1 commit(s) that main does not have"
 ck_not "5 it does not claim the base moved"  "$OUT" "$MOVED"
 
@@ -320,7 +322,7 @@ git -C "$repo" reset -q --hard HEAD~1
 git -C "$repo" reflog expire --expire=now --all
 record expired-reflog
 run_teardown expired-reflog
-kept "5a" expired-reflog "$repo" "$wt" "$sha"
+kept "5a" expired-reflog "$repo" "$wt" "$sha" 3
 ck_has "5a it falls back to the old wording" "$OUT" "1 commit(s) that main does not have"
 ck_not "5a it does not claim the base moved" "$OUT" "$MOVED"
 
@@ -335,7 +337,7 @@ chmod 000 "$repo/.git/logs/refs/heads/main"
 record unreadable-reflog
 run_teardown unreadable-reflog
 chmod 644 "$repo/.git/logs/refs/heads/main"
-kept "5a2" unreadable-reflog "$repo" "$wt" "$sha"
+kept "5a2" unreadable-reflog "$repo" "$wt" "$sha" 3
 if [ "$(id -u)" = 0 ]; then
   # The scene is still built and the gate still asserted above, so case 7 below
   # keeps its count; only the claim this mode cannot make is withheld.
@@ -355,7 +357,7 @@ land
 filler 40
 record reflog-depth-40
 run_teardown reflog-depth-40
-kept "5a3" reflog-depth-40 "$repo" "$wt" "$sha"
+kept "5a3" reflog-depth-40 "$repo" "$wt" "$sha" 3
 ck_has "5a3 past the bound it falls back"    "$OUT" "1 commit(s) that main does not have"
 ck_not "5a3 past the bound it says nothing"  "$OUT" "$MOVED"
 
@@ -376,7 +378,7 @@ land
 git -C "$repo" reset -q --hard HEAD~1
 record sha-base "$(git -C "$repo" rev-parse main)"
 run_teardown sha-base
-kept "5b" sha-base "$repo" "$wt" "$sha"
+kept "5b" sha-base "$repo" "$wt" "$sha" 3
 ck_not "5b it does not claim the base moved" "$OUT" "$MOVED"
 
 # 5c. cannot tell: base= is HEAD and the repository's HEAD is detached, so it
@@ -387,7 +389,7 @@ git -C "$repo" reset -q --hard HEAD~1
 git -C "$repo" checkout -q --detach
 record detached-base HEAD
 run_teardown detached-base
-kept "5c" detached-base "$repo" "$wt" "$sha"
+kept "5c" detached-base "$repo" "$wt" "$sha" 3
 ck_not "5c it does not claim the base moved" "$OUT" "$MOVED"
 
 # 5d. cannot tell, and nothing to tell it with: repo= naming a directory that is

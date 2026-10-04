@@ -388,10 +388,13 @@ cat > "$FAKEBIN/reeve-teardown" <<'STUBTD'
 #!/usr/bin/env bash
 meta="$REEVE_HOME/state/$1.meta"
 case $STUB_TD in
-  late) sed 's/^target=.*/target=/' "$meta" > "$meta.t" && mv "$meta.t" "$meta" ;;
+  late|unlanded) sed 's/^target=.*/target=/' "$meta" > "$meta.t" && mv "$meta.t" "$meta" ;;
 esac
 case $STUB_TD in
   lock) printf 'reeve: could not take the lock\n' >&2; exit 4 ;;
+  unlanded) printf 'reeve: REFUSED to tear down %s\n  feat/z has 2 commit(s) that main does not have.\n' \
+          "$1" >&2
+        exit 3 ;;
   *)    printf 'reeve: REFUSED to tear down %s\n  stub says no to %s.\n  Investigate.\n' \
           "$1" "$STUB_TD" >&2
         exit 1 ;;
@@ -450,6 +453,23 @@ errand cgo sess-R "working: x" "done: finished"; oncopy cgo
 OUT=$(STUB_STATE=missing td_watch cgo early)
 has "11 a kept copy beside a closed session says gone" \
   "$OUT" "[session gone, copy kept, cleanup refused: stub says no to early.]"
+
+# The routine artificer finish: teardown keeps the branch only because it has
+# not landed yet (exit 3). That reads as the ordinary keep, never as a refusal,
+# copy on disk or not. Any other refusal on a kept branch still says why, above.
+errand cun sess-R "working: x" "done: finished"; oncopy cun feat/z
+OUT=$(td_watch cun unlanded)
+has "11 an unlanded branch is the ordinary keep" \
+  "$OUT" "[session freed, feat/z kept with ? commit(s)]"
+nas "11 and is never called refused"            "$OUT" "refused"
+errand cnd sess-R "working: x" "done: finished"
+sed "s|^branch=.*|branch=feat/z|" "$REEVE_HOME/state/cnd.meta" > "$REEVE_HOME/state/cnd.meta.t" \
+  && mv "$REEVE_HOME/state/cnd.meta.t" "$REEVE_HOME/state/cnd.meta"
+OUT=$(td_watch cnd unlanded)
+has "11 an unlanded branch with no copy on disk is still kept" \
+  "$OUT" "[session freed, feat/z kept with ? commit(s)]"
+nas "11 and never claims the copy was removed"  "$OUT" "copy removed"
+nas "11 nor calls it refused"                   "$OUT" "refused"
 
 printf '\npassed=%s failed=%s\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

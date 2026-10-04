@@ -68,9 +68,9 @@ and is never killed, relabelled or typed into. herdr's identity is checksums of 
 directory and of its label, either matching enough: a restored endpoint keeps its label and
 usually its directory, while its `terminal_id` does not survive a restart. A label is shared by
 every hand of one office from one reeve (`Scout sent by Aldric`), so a label match from a pane
-sitting in another git checkout does not count: that is another hand, in its own copy. A target without one is
-trusted as before. A herdr pane key carries no server epoch: herdr restores its panes with their
-ids, so the same id is the same pane.
+sitting in another git checkout does not count: that is another hand, in its own copy. A target
+without one is trusted as before. A herdr pane key carries no server epoch: herdr restores its panes
+with their ids, so the same id is the same pane.
 
 ## The rules every backend obeys
 

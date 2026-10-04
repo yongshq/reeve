@@ -149,7 +149,7 @@ ck_eq  "1b nothing is orphaned"                       "$(unreachable "$repo")" n
 #    asked: a refusal naming only base= reads exactly like the old false one.
 stack upper-unlanded a
 run_teardown upper-unlanded
-ck_eq  "2 an unlanded upper errand refuses"           "$RC" 1
+ck_eq  "2 an unlanded upper errand refuses"           "$RC" 3
 ck_eq  "2 the copy survives"                          "$(gone "$wt")" present
 ck_has "2 it counts the unlanded commit"              "$OUT" "1 commit(s)"
 ck_has "2 it names both refs it checked"              "$OUT" "neither $a_br nor main has"
@@ -159,7 +159,7 @@ ck_eq  "2 the commit is not lost"                     "$(survives "$repo" "$sha"
 # 2b. nothing landed at all. Same answer.
 stack nothing-landed none
 run_teardown nothing-landed
-ck_eq  "2b an unlanded stack refuses"                 "$RC" 1
+ck_eq  "2b an unlanded stack refuses"                 "$RC" 3
 ck_eq  "2b the copy survives"                         "$(gone "$wt")" present
 ck_has "2b it names both refs it checked"             "$OUT" "neither $a_br nor main has"
 
@@ -193,7 +193,7 @@ ck_eq  "3 nothing is orphaned"                        "$(unreachable "$repo")" n
 #    as before the fix: refuses on base= alone and names only base=.
 stack trunk-unregistered both trunk
 run_teardown trunk-unregistered
-ck_eq  "4 an unresolvable default refuses as before"  "$RC" 1
+ck_eq  "4 an unresolvable default refuses as before"  "$RC" 3
 ck_eq  "4 the copy survives"                          "$(gone "$wt")" present
 ck_has "4 it refuses on base= alone"                  "$OUT" "1 commit(s) that $a_br does not have"
 ck_not "4 it does not claim main was checked"         "$OUT" "nor main"
@@ -203,7 +203,7 @@ ck_eq  "4 the commit is not lost"                     "$(survives "$repo" "$sha"
 stack bad-registered both trunk bad-holding
 register bad-holding "$repo" no-such-branch
 run_teardown bad-registered
-ck_eq  "4b a registered default that does not resolve refuses" "$RC" 1
+ck_eq  "4b a registered default that does not resolve refuses" "$RC" 3
 ck_eq  "4b the copy survives"                         "$(gone "$wt")" present
 ck_not "4b it does not name the missing default"      "$OUT" "no-such-branch"
 
@@ -291,20 +291,20 @@ stack tag-default none main tag-holding
 git -C "$repo" tag v1 "$sha"
 register tag-holding "$repo" v1
 run_teardown tag-default
-ck_eq  "6 a default naming a tag is not asked"        "$RC" 1
+ck_eq  "6 a default naming a tag is not asked"        "$RC" 3
 ck_eq  "6 the copy survives"                          "$(gone "$wt")" present
 ck_not "6 it does not name the tag"                   "$OUT" "nor v1"
 
 stack sha-default none main sha-holding
 register sha-holding "$repo" "$sha"
 run_teardown sha-default
-ck_eq  "6b a default naming a sha is not asked"       "$RC" 1
+ck_eq  "6b a default naming a sha is not asked"       "$RC" 3
 ck_eq  "6b the copy survives"                         "$(gone "$wt")" present
 
 stack own-default none main own-holding
 register own-holding "$repo" "$b_br"
 run_teardown own-default
-ck_eq  "6c a default naming the errand's own branch is not asked" "$RC" 1
+ck_eq  "6c a default naming the errand's own branch is not asked" "$RC" 3
 ck_eq  "6c the copy survives"                         "$(gone "$wt")" present
 ck_not "6c it does not name its own branch as asked"  "$OUT" "nor $b_br"
 
@@ -313,7 +313,7 @@ ck_not "6c it does not name its own branch as asked"  "$OUT" "nor $b_br"
 stack shadow-main a
 git -C "$repo" tag main "$sha"
 run_teardown shadow-main
-ck_eq  "6d a tag shadowing main is not asked"         "$RC" 1
+ck_eq  "6d a tag shadowing main is not asked"         "$RC" 3
 ck_eq  "6d the copy survives"                         "$(gone "$wt")" present
 ck_has "6d it asked the branch main"                  "$OUT" "neither $a_br nor main has"
 

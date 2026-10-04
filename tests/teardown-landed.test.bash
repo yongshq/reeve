@@ -127,10 +127,11 @@ unreachable() { # unreachable <repo> -> none|<sha ...>
   if [ -n "$out" ]; then printf '%s\n' "$out" | tr '\n' ' '; else printf 'none\n'; fi
 }
 
-# 1. a branch ahead of a base that does exist: refuses, as it always has.
+# 1. a branch ahead of a base that does exist: refuses, as it always has, with
+#    the 3 that marks the ordinary keep apart from every other refusal.
 scene ahead-real-base main ahead
 run_teardown ahead-real-base
-ck_eq  "1 ahead of an existing base refuses"        "$RC" 1
+ck_eq  "1 ahead of an existing base refuses"        "$RC" 3
 ck_has "1 refusal counts the unlanded commits"      "$OUT" "1 commit(s) that main does not have"
 ck_eq  "1 the copy is left alone"                   "$(gone "$wt")" present
 
@@ -341,7 +342,8 @@ cell() { # cell <id> <branch-state> <head-state> <writes> [recorded-base]
 
 # 13. All twenty four cells, executed. The expected column is the invariant
 #     restated as a table: remove only when everything the copy holds is already
-#     on the base, refuse otherwise, and never orphan a commit either way. One
+#     on the base, refuse otherwise (3 when the branch is simply unlanded, 1 for
+#     anything else), and never orphan a commit either way. One
 #     cell changed meaning deliberately: landed/off-ref used to remove and lose
 #     the commit, and now refuses, because the record and the copy disagree.
 n=0
@@ -370,12 +372,12 @@ landed      at-base  home    0   present
 landed      off-ref  yes     1   present
 landed      off-ref  no      1   present
 landed      off-ref  home    0   present
-unlanded    at-base  yes     1   present
-unlanded    at-base  no      1   present
-unlanded    at-base  home    1   present
-unlanded    off-ref  yes     1   present
-unlanded    off-ref  no      1   present
-unlanded    off-ref  home    1   present
+unlanded    at-base  yes     3   present
+unlanded    at-base  no      3   present
+unlanded    at-base  home    3   present
+unlanded    off-ref  yes     3   present
+unlanded    off-ref  no      3   present
+unlanded    off-ref  home    3   present
 missing     at-base  yes     1   present
 missing     at-base  no      1   present
 missing     at-base  home    1   present

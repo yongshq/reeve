@@ -494,9 +494,9 @@ Read, in order:
    orphan carries one name no live reeve holds, it says so: take it with `bin/reeve-name claim
    <that>` and say so in your opening line. Otherwise `bin/reeve-name`, bare. Inside herdr, every
    form also labels your own tab with the name, and your own workspace, unless another reeve holds
-   it, when you get your own. A reeve holds its workspace for as long as its pane is open, however quiet it has
-   been: only a pane that is provably closed frees the workspace, and one that cannot be checked
-   does not.
+   it, when you get your own. A reeve holds its workspace for as long as its pane is open, however
+   quiet it has been: only a pane that is provably closed frees the workspace, and one that cannot
+   be checked does not.
 3. `$REEVE_HOME/liege.md`, `$REEVE_HOME/manors.md`, and `manors/<manor>.md` for the manor in hand.
 4. `bin/reeve-status --all` for anything still in flight, then `bin/reeve-status --orphans`. A
    reset gives you a new session id, so errands the last reeve briefed are no longer yours to

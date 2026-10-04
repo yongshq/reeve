@@ -22,6 +22,9 @@
 # state. REMOVING its copy can lose commits, so that waits until the work has
 # landed. --dismiss-only does the first and stops.
 #
+# Exit status: 0 done, 3 refused only because the branch has not landed yet (the
+# ordinary keep), 1 any other refusal or error, 4 the errand's lock not taken.
+#
 # Refuses while the errand holds anything its base does not. That is narrower
 # than "while work could still be lost", deliberately: it also refuses when some
 # other ref would have kept the commits, because a copy whose record and reality
@@ -301,7 +304,7 @@ require_id "$id"
 # loser reading a git error that looks exactly like the landed-work guard
 # refusing. A refusal here has to mean what it says, so the two are serialised
 # and the second finds the work already done.
-# Exit 4, distinct from the 1 a refusal uses: not taking the lock decides
+# Exit 4, distinct from the 1 or 3 a refusal uses: not taking the lock decides
 # nothing about this errand, and a caller that cannot tell the two apart records
 # a decision that was never made.
 ERRAND_LOCK=$(lock_acquire "errand-$id" 15) || exit 4
@@ -313,10 +316,15 @@ dismiss=no; dismissed=no
 # asked alone, so every refusal after that point says the base was missing
 # rather than reading as though it had been asked.
 base_missing_note=''
+# Exit 1 for every refusal but one. A branch that simply has not landed yet, the
+# routine end of every artificer errand, exits 3 (refuse_rc=3 on that call), so a
+# caller can tell the ordinary keep from a refusal worth investigating without
+# reading the English. Still a refusal, and still non-zero.
+refuse_rc=1
 refuse() {
   printf 'reeve: REFUSED to tear down %s\n' "$id" >&2; printf '  %s\n' "$@" >&2
   [ -z "$base_missing_note" ] || printf '%s\n' "$base_missing_note" | sed 's/^/  /' >&2
-  exit 1
+  exit "$refuse_rc"
 }
 
 repo=$(meta_get "$id" repo '')
@@ -846,6 +854,9 @@ if [ -n "$br" ] || [ "$copy_at_risk" = yes ]; then
       not_on="$base does not have"
       [ -n "$default_sha" ] && not_on="neither $base nor $default_ref has"
       [ -n "$base_sha" ] || not_on="$default_ref does not have"
+      # Unless the base did not resolve: that is a record to correct, not the
+      # ordinary keep, so it stays a 1.
+      [ -n "$base_missing_note" ] || refuse_rc=3
       refuse "$br has ${ahead:-unlanded} commit(s) that $not_on." \
              "$unlanded" \
              "Rebase or merge it first. Removing the copy now leaves the branch, but this is the" \

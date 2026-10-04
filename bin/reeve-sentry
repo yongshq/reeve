@@ -314,15 +314,17 @@ reap_one() {
   # Anything but 0 is said, with its reason: a refusal prints it on the line
   # after `REFUSED`; anything else that failed is named by its own last line,
   # or by its exit status. 4 is the lock not taken, which decided nothing:
-  # deferred, not refused.
-  if [ "$rc" != 0 ]; then
+  # deferred, not refused. 3 is the one refusal not said: a branch that has not
+  # landed yet is the ordinary keep, and the commit count below already says it.
+  if [ "$rc" != 0 ] && [ "$rc" != 3 ]; then
     why=$(printf '%s\n' "$err" | sed -n '/REFUSED/{n;s/^ *//p;q;}')
     [ -n "$why" ] || why=$(printf '%s\n' "$err" | sed '/^ *$/d' | tail -1)
     [ -n "$why" ] || why="exit $rc"
     if [ "$rc" = 4 ]; then verb=deferred; else verb=refused; fi
     left=", cleanup $verb: $why"
   fi
-  if [ -n "$wt" ] && [ -d "$wt" ]; then
+  # A 3 is a branch kept whether or not its copy is still on disk.
+  if { [ -n "$wt" ] && [ -d "$wt" ]; } || [ "$rc" = 3 ]; then
     local br ahead
     br=$(meta_get "$i" branch '')
     if [ -n "$br" ]; then
