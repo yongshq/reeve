@@ -291,6 +291,11 @@ halves have different safety conditions:
 | **free the session** | as soon as a terminal state is reported with nothing open | nothing. The status file and any report are already on disk |
 | **remove the copy** | only when the branch holds nothing the base does not, and the report has somewhere to go | commits, if done too early. So it refuses instead |
 
+Hands open inside their reeve's own workspace, as tabs (windows, under tmux), so freeing a hand's
+session closes its tab and never the reeve's workspace, which holds the reeve and every other hand
+beside it. A hand dispatched before that, or on a backend with no group to give,
+has a workspace of its own, and freeing it closes that, as it always did.
+
 So a scout disappears completely, while an artificer loses only its idle session and keeps its
 copy and branch until it lands. A `blocked:` hand is never reaped, because it may still be
 steered, and neither is a divergence, because that errand is not finished whatever it claims. A
@@ -541,11 +546,11 @@ fact per line, because you are the one reading it.
 |---|---|
 | `bin/reeve-doctor` | what is installed, what is verified, who else is running, what will refuse and why |
 | `bin/reeve-contract` | print this contract, for a session that did not load it from the clone |
-| `bin/reeve-name` | this reeve's name, assigned on first ask. `claim <Name>` takes one back from a handoff, `set <Name>` is the liege's rename. Both refuse a name a live reeve on another pane holds |
+| `bin/reeve-name` | this reeve's name, assigned on first ask. `claim <Name>` takes one back from a handoff, `set <Name>` is the liege's rename. Both refuse a name a live reeve on another pane holds. Bare, it also labels this reeve's own workspace with the name |
 | `bin/reeve-survey <path>` | gather evidence about an unfamiliar repository |
 | `bin/reeve-survey --register ...` | record the liege's answer about which manor a repo belongs to |
 | `bin/reeve-brief <id> <holding> --office <o>` | write a brief with the two seams |
-| `bin/reeve-dispatch <id>` | worktree, endpoint, launch. `--dry-run` changes nothing |
+| `bin/reeve-dispatch <id>` | worktree, endpoint, launch. The hand opens as a tab in this reeve's own workspace, labelled with its name. `--dry-run` changes nothing |
 | `bin/reeve-status <id>` / `--all` | the reconciled state, never the last line of the log, and `idle` in the process column for a hand idle and silent past its threshold, or `wedged` for a working hand whose status file and screen have both held still past its threshold, each on the rule the sentry wakes on. Bare lists yours, `--all` the machine's. A listing also delivers anything a caretaker left you, on stderr so a filter over the table cannot eat it, and a script asking a different question passes `--no-wake` |
 | `bin/reeve-status --orphans` | errands whose owning session is provably gone |
 | `bin/reeve-adopt <id>` | take an orphaned errand on, so this session watches it, and relabel its hand with this reeve's name where the backend can |

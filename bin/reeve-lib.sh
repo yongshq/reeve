@@ -822,6 +822,42 @@ hand_label() {
   [ -n "$t" ] || t="$office: $id"
   printf '%s\n' "$t"
 }
+
+# --- a reeve's group ----------------------------------------------------------
+# A reeve owns one group on each backend, a herdr workspace or a tmux session,
+# labelled with its name, and its hands open inside it as tabs or windows. The
+# id the backend returned is kept in the session's record, one file per backend
+# (`group.herdr`, `group.tmux`), and handed back on the next call so the backend
+# can reuse it rather than make another. Presentation only: a missing or failed
+# group means a hand opens where it always did, and nothing ever decides
+# anything destructive by it.
+
+group_file() { printf '%s/group.%s\n' "$(session_dir "$1")" "$2"; } # group_file <sid> <backend>
+
+group_known() { # group_known <sid> <backend>   the stored id, or nothing
+  local f; f=$(group_file "$1" "$2")
+  [ -f "$f" ] && head -n 1 "$f" 2>/dev/null
+  return 0
+}
+
+# reeve_group <bin> <backend> <name>   ensure this session's group, store and
+# print its id. rc 1 with nothing printed when there is no session, no name, or
+# the backend has no ensure_group or it failed; the caller says so and carries
+# on. The backend's own refusal is not repeated, so the caller's note is the one.
+reeve_group() {
+  local bin=$1 b=$2 n=$3 s known g f
+  s=$(reeve_session); [ -n "$s" ] && [ -n "$n" ] || return 1
+  known=$(group_known "$s" "$b")
+  g=$("$bin/reeve-backend" call ensure_group "$n" ${known:+"$known"} --backend "$b" 2>/dev/null) || return 1
+  g=$(printf '%s\n' "$g" | head -n 1)
+  [ -n "$g" ] || return 1
+  if [ "$g" != "$known" ]; then
+    f=$(group_file "$s" "$b")
+    mkdir -p "$(dirname "$f")" 2>/dev/null \
+      && { printf '%s\n' "$g" > "$f.$$" 2>/dev/null && mv -f "$f.$$" "$f" || rm -f "$f.$$"; }
+  fi
+  printf '%s\n' "$g"
+}
 # --- output -----------------------------------------------------------------
 # Everything a script prints is read by the reeve, so keep it one fact per line.
 

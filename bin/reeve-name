@@ -36,6 +36,15 @@ case $cmd in
   '')
     n=$(reeve_name)
     [ -n "$n" ] || die "could not assign a name, check $(session_dir "$s")"
+    # Label the reeve's own workspace or window with its name at session start,
+    # the group its hands will open inside. Presentation only, so a backend
+    # that cannot is said once and ignored: the name is the answer here.
+    bin=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+    if ! b=$("$bin/reeve-backend" resolve 2>/dev/null); then
+      warn "no backend resolved, so no workspace was labelled $n"
+    elif ! reeve_group "$bin" "$b" "$n" >/dev/null; then
+      warn "backend '$b' gave $n no group, so its hands will open on their own"
+    fi
     info "$n" ;;
   claim|set)
     want=${2:-}

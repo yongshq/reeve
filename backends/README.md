@@ -17,7 +17,7 @@ Each is `reeve_backend_<name>_<fn>`, sourced only through `bin/reeve-backend`.
 |---|---|---|---|
 | `available` | none | nothing | 0 if this backend can be used on this machine, else non-zero with one line on stderr saying what is missing |
 | `describe` | none | one line: name and version | 0 |
-| `create_endpoint` | `<cwd> <label>` | one line: an opaque target string | 0 on success |
+| `create_endpoint` | `<cwd> <label> [<group>]` | one line: an opaque target string | 0 on success. With `<group>`, from `ensure_group`, the endpoint opens inside it; a backend that cannot falls back to an endpoint of its own |
 | `launch` | `<target> <cmdline>` | nothing | 0 if the command line was submitted |
 | `capture` | `<target> <lines>` | up to `<lines>` lines of plain-text scrollback | 0 |
 | `send_text_submit` | `<target> <text>` | nothing | 0 only if submission was **confirmed**, not merely typed |
@@ -27,12 +27,19 @@ Each is `reeve_backend_<name>_<fn>`, sourced only through `bin/reeve-backend`.
 | `wait_change` | `<target> <timeout_ms>` | nothing | 0 a change was observed, 1 timed out with no signal, 2 this backend cannot wait and the caller must poll |
 | `kill` | `<target>` | nothing | 0 |
 
-One optional function. A backend may leave it out; `bin/reeve-backend` then refuses the call, and
-every caller treats that refusal as a no and carries on.
+Two optional functions. A backend may leave either out; `bin/reeve-backend` then refuses the call,
+and every caller treats that refusal as a no and carries on.
 
 | Function | Arguments | Must print | Exit |
 |---|---|---|---|
 | `relabel` | `<target> <label>` | nothing | 0 if the endpoint now shows `<label>`. Used by `bin/reeve-adopt`, so an adopted hand carries its new reeve's name |
+| `ensure_group` | `<label> [<known-id>]` | one line: a group id | 0 if the group exists and shows `<label>`. The reeve's own group: a herdr workspace, a tmux session. `<known-id>` is what an earlier call printed, to reuse while it is still there. Used by `bin/reeve-dispatch` and `bin/reeve-name` |
+
+A group is a reeve's own place, labelled with its name, and its hands open inside it: herdr tabs in
+its workspace, tmux windows in its session. The group id, like a target, is opaque to callers; only
+the backend that printed it reads it. A target made inside a group stays opaque too, and `kill` on
+it closes that endpoint only, **never the group**: the group is usually the workspace the reeve
+itself runs in, so closing it would kill the reeve and every hand beside it.
 
 ## The rules every backend obeys
 

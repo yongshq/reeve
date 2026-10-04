@@ -52,6 +52,13 @@ export REEVE_HOME
 # Nothing from the caller's own session may leak in: every reeve below is named
 # by the test that runs it.
 unset CLAUDE_CODE_SESSION_ID REEVE_SESSION REEVE_NAME HERDR_PANE_ID TMUX_PANE
+# A bare reeve-name also labels the reeve's workspace through the backend. Run
+# from inside a real herdr or tmux, that would rename the caller's own, so both
+# are stubs here that refuse everything, and the label is simply not made.
+unset HERDR_WORKSPACE_ID HERDR_ENV TMUX REEVE_TMUX_SESSION REEVE_BACKEND
+mkdir -p "$SCRATCH/fakebin"
+for b in herdr tmux; do printf '#!/bin/sh\nexit 1\n' > "$SCRATCH/fakebin/$b"; chmod +x "$SCRATCH/fakebin/$b"; done
+PATH="$SCRATCH/fakebin:$PATH"; export PATH
 
 N="$ROOT/bin/reeve-name"
 SESS="$REEVE_HOME/state/sessions"
@@ -202,7 +209,7 @@ brief() { # brief <sid> <id> <office>
 dry_label() { # dry_label <sid> <id>
   REEVE_SESSION=$1 REEVE_ROOT="$STUB" "$ROOT/bin/reeve-dispatch" "$2" \
       --backend stub --harness stub --dry-run 2>/dev/null \
-    | sed -n 's/^ *would run: reeve-backend call create_endpoint [^ ]* "\(.*\)" --backend .*/\1/p'
+    | sed -n 's/^ *would run: reeve-backend call create_endpoint [^ ]* "\([^"]*\)".*/\1/p'
 }
 
 REEVE_SESSION=lead "$N" claim Escanor >/dev/null 2>&1

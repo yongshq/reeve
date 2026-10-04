@@ -27,10 +27,14 @@ _h() {
   herdr "$sub" "$@" --session "$ses" 2>/dev/null
 }
 
-# A target is "<workspace_id>|<pane_id>". Pane ids themselves contain a colon
-# (w4:p1), so a colon separator would be ambiguous. Pipe never appears in either.
-_h_pane() { printf '%s\n' "${1#*|}"; }
+# A target is "<workspace_id>|<pane_id>" for a hand in a workspace of its own,
+# or "<workspace_id>|<pane_id>|<tab_id>" for one opened as a tab inside its
+# reeve's workspace. Pane and tab ids themselves contain a colon (w4:p1, w4:t2),
+# so a colon separator would be ambiguous. Pipe never appears in any of them.
+# Both forms parse here, so targets recorded before nesting keep working.
 _h_ws()   { printf '%s\n' "${1%%|*}"; }
+_h_pane() { local r=${1#*|}; printf '%s\n' "${r%%|*}"; }
+_h_tab()  { local r=${1#*|}; case $r in *'|'*) printf '%s\n' "${r#*|}" ;; esac; }
 
 reeve_backend_herdr_available() {
   command -v herdr >/dev/null 2>&1 || { echo "herdr not on PATH" >&2; return 1; }
@@ -44,9 +48,51 @@ reeve_backend_herdr_describe() {
   printf 'herdr %s (session %s)\n' "$(herdr --version 2>/dev/null | awk '{print $NF}')" "$(_h_session)"
 }
 
+reeve_backend_herdr_ensure_group() {
+  # Optional. The workspace a reeve's hands open in as tabs. Its own workspace
+  # first, when it runs inside herdr on this same server: that is where the
+  # liege is already looking, and it is relabelled with the reeve's name so the
+  # sidebar says whose it is. Then the one a previous call made, if it is still
+  # there. Then a fresh one under the name. Identity is always an id herdr
+  # returned, never a label: herdr does not enforce label uniqueness.
+  local label=$1 known=${2:-} ws out
+  ws=${HERDR_WORKSPACE_ID:-}
+  if [ -n "$ws" ] && _h workspace get "$ws" >/dev/null; then
+    _h workspace rename "$ws" "$label" >/dev/null || :
+    printf '%s\n' "$ws"; return 0
+  fi
+  if [ -n "$known" ] && _h workspace get "$known" >/dev/null; then
+    printf '%s\n' "$known"; return 0
+  fi
+  out=$(_h workspace create --cwd "${HOME:-$PWD}" --label "$label" --no-focus) || return 1
+  ws=$(printf '%s' "$out" | jq -r '.result.workspace.workspace_id // .result.workspace_id // empty' 2>/dev/null)
+  [ -n "$ws" ] || { echo "herdr: workspace create returned no id" >&2; return 1; }
+  printf '%s\n' "$ws"
+}
+
 reeve_backend_herdr_create_endpoint() {
-  local cwd=$1 label=$2 out ws pane
+  local cwd=$1 label=$2 group=${3:-} out ws pane tab
   [ -d "$cwd" ] || { echo "cwd does not exist: $cwd" >&2; return 1; }
+
+  # With a group, the hand is a tab in its reeve's workspace. tab create returns
+  # the tab and its root pane together, measured on 0.9.0. Anything missing and
+  # the hand gets a workspace of its own instead, as it did before nesting.
+  if [ -n "$group" ]; then
+    out=$(_h tab create --workspace "$group" --cwd "$cwd" --label "$label" --no-focus) || out=''
+    tab=$(printf '%s' "$out"  | jq -r '.result.tab.tab_id // .result.root_pane.tab_id // empty' 2>/dev/null)
+    pane=$(printf '%s' "$out" | jq -r '.result.root_pane.pane_id // empty' 2>/dev/null)
+    if [ -z "$pane" ] && [ -n "$tab" ]; then
+      pane=$(_h pane list --workspace "$group" \
+        | jq -r --arg t "$tab" '[.result.panes[]? | select(.tab_id == $t)][0].pane_id // empty' 2>/dev/null)
+    fi
+    if [ -n "$tab" ] && [ -n "$pane" ]; then
+      printf '%s|%s|%s\n' "$group" "$pane" "$tab"; return 0
+    fi
+    # A tab with no pane to address is no use to anyone, so it does not linger.
+    [ -n "$tab" ] && _h tab close "$tab" >/dev/null 2>&1
+    echo "herdr: could not open a tab in workspace $group, opening a workspace of its own" >&2
+    pane=''
+  fi
 
   # worktree open does in one call what tab create plus a split would do in two,
   # and it groups the checkout under its parent repo in the sidebar. It returns
@@ -242,7 +288,17 @@ reeve_backend_herdr_wait_change() {
 }
 
 reeve_backend_herdr_kill() {
-  local target=$1 ws
+  local target=$1 ws tab
+  tab=$(_h_tab "$target")
+  # A nested hand's target names its reeve's group as the workspace, and that is
+  # usually the very workspace the reeve itself runs in. Closing it would kill
+  # the reeve and every other hand beside it. So a three field target closes its
+  # own tab, else its own pane, and NEVER the workspace. Load bearing.
+  if [ -n "$tab" ]; then
+    _h tab close "$tab" >/dev/null 2>&1 && return 0
+    _h pane close "$(_h_pane "$target")" >/dev/null 2>&1
+    return
+  fi
   ws=$(_h_ws "$target")
   # Close the whole workspace when we own one, since create_endpoint made it.
   # Never close by label: herdr does not enforce label uniqueness and a label
@@ -254,10 +310,13 @@ reeve_backend_herdr_kill() {
 }
 
 reeve_backend_herdr_relabel() {
-  # Optional. Renames the workspace create_endpoint made, found by the id in the
-  # target and never by its old label. The label is one argument whatever it
-  # holds; herdr answers with JSON nobody here reads.
-  local ws; ws=$(_h_ws "$1")
+  # Optional. Renames the tab or workspace create_endpoint made, found by the id
+  # in the target and never by its old label. A nested hand renames its tab
+  # only: the workspace is its reeve's, named for the reeve. The label is one
+  # argument whatever it holds; herdr answers with JSON nobody here reads.
+  local ws tab; tab=$(_h_tab "$1")
+  if [ -n "$tab" ]; then _h tab rename "$tab" "$2" >/dev/null; return; fi
+  ws=$(_h_ws "$1")
   [ -n "$ws" ] || return 1
   _h workspace rename "$ws" "$2" >/dev/null
 }

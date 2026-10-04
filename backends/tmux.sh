@@ -15,10 +15,37 @@ reeve_backend_tmux_available() {
 
 reeve_backend_tmux_describe() { printf 'tmux %s (session %s)\n' "$(tmux -V | awk '{print $2}')" "$(_t_session)"; }
 
+reeve_backend_tmux_ensure_group() {
+  # Optional. The session a reeve's hands open in as windows. $REEVE_TMUX_SESSION
+  # when the liege set one, as before. Else the session the reeve itself runs in,
+  # where the reeve's OWN window takes its name; the session keeps the liege's
+  # name, which other windows may be relying on. Else a detached session named
+  # for the reeve. The known id is not needed: a session name is its own id.
+  local label=$1 ses='' win
+  if [ -n "${REEVE_TMUX_SESSION:-}" ]; then
+    ses=$REEVE_TMUX_SESSION
+  elif [ -n "${TMUX_PANE:-}" ]; then
+    ses=$(tmux display -p -t "$TMUX_PANE" '#{session_name}' 2>/dev/null) || ses=''
+    win=$(tmux display -p -t "$TMUX_PANE" '#{window_id}' 2>/dev/null) || win=''
+    if [ -n "$ses" ] && [ -n "$win" ]; then
+      tmux rename-window -t "$win" "$label" 2>/dev/null || :
+      tmux set-window-option -t "$win" automatic-rename off >/dev/null 2>&1 || :
+    fi
+  fi
+  if [ -z "$ses" ]; then
+    ses="reeve-$(printf '%s' "$label" | tr '[:upper:]' '[:lower:]')"
+    tmux has-session -t "=$ses" 2>/dev/null \
+      || tmux new-session -d -s "$ses" -c "${HOME:-$PWD}" || return 1
+  fi
+  printf '%s\n' "$ses"
+}
+
 reeve_backend_tmux_create_endpoint() {
-  local cwd=$1 label=$2 ses win
+  # The group, when given, is the session ensure_group printed. The target
+  # format is the same either way: a window is a window.
+  local cwd=$1 label=$2 ses=${3:-} win
   [ -d "$cwd" ] || { echo "cwd does not exist: $cwd" >&2; return 1; }
-  ses=$(_t_session)
+  [ -n "$ses" ] || ses=$(_t_session)
   tmux has-session -t "$ses" 2>/dev/null || tmux new-session -d -s "$ses" -c "$cwd" || return 1
   # automatic-rename off so a hand's own cd cannot break name based targeting
   win=$(tmux new-window -dP -F '#{window_id}' -t "$ses:" -n "$label" -c "$cwd") || return 1

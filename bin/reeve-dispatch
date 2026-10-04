@@ -214,11 +214,31 @@ fi
 rname=$(meta_get "$id" reeve '')
 valid_reeve_name "$rname" || rname=$(reeve_name_peek)
 label=$(hand_label "$office" "$id" "$rname")
+
+# The hand opens inside its reeve's group, the workspace or session labelled
+# with the reeve's own name, as a tab or a window. The group is this session's,
+# so it takes this session's name, read and never assigned. No session, no
+# name, a backend with no ensure_group, or one that failed: no group, and the
+# hand opens where it always did. A dry run prints the call and makes none.
+group=''
+gsid=$(reeve_session); gname=$(reeve_name_peek)
+if [ -n "$gsid" ] && [ -n "$gname" ]; then
+  if [ "$dry" = yes ]; then
+    gknown=$(group_known "$gsid" "$backend")
+    printf '  would run: reeve-backend call ensure_group %s%s --backend %s\n' \
+      "$gname" "${gknown:+ \"$gknown\"}" "$backend"
+    group='<group>'
+  elif ! group=$(reeve_group "$BIN" "$backend" "$gname"); then
+    group=''
+    warn "backend '$backend' gave $gname no group, so this hand opens on its own"
+  fi
+fi
 if [ "$dry" = yes ]; then
-  printf '  would run: reeve-backend call create_endpoint %s "%s" --backend %s\n' "$cwd" "$label" "$backend"
+  printf '  would run: reeve-backend call create_endpoint %s "%s"%s --backend %s\n' \
+    "$cwd" "$label" "${group:+ \"$group\"}" "$backend"
   target='<target>'
 else
-  target=$("$BIN/reeve-backend" call create_endpoint "$cwd" "$label" --backend "$backend") \
+  target=$("$BIN/reeve-backend" call create_endpoint "$cwd" "$label" ${group:+"$group"} --backend "$backend") \
     || die "could not open a session endpoint on backend '$backend'"
   [ -n "$target" ] || die "backend '$backend' returned an empty target"
 fi

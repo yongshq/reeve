@@ -152,7 +152,7 @@ dry_label() { # dry_label <id>
   fill_seams "$1"
   REEVE_ROOT="$STUB" "$ROOT/bin/reeve-dispatch" "$1" \
       --backend stub --harness stub --dry-run 2>/dev/null \
-    | sed -n 's/^ *would run: reeve-backend call create_endpoint [^ ]* "\(.*\)" --backend .*/\1/p'
+    | sed -n 's/^ *would run: reeve-backend call create_endpoint [^ ]* "\([^"]*\)".*/\1/p'
 }
 
 # The steward is included on purpose: it has no copy, so its label is the only
