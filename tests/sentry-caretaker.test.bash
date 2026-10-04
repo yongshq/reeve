@@ -274,8 +274,12 @@ errand held no "working: going"
 "$ROOT/bin/reeve-sentry" --caretaker --poll 1 >"$SCRATCH/held.out" 2>&1 &
 CARE=$!; STARTED="$STARTED $CARE"
 if waitfor 10 '[ -f "$LOCK" ]'; then
-  marker "$$" 0 > "$LOCK"                 # somebody else now holds this home
-  if waitfor 10 '! kill -0 "$CARE" 2>/dev/null'; then
+  # Somebody else now holds this home, as a caretaker holds it: written whole,
+  # and re-asserted every check. One write in place loses to a refresh the
+  # caretaker already had in flight, and a real holder settles that next poll.
+  take_lock() { marker "$$" 0 > "$LOCK.new.$$" && mv "$LOCK.new.$$" "$LOCK"; }
+  take_lock
+  if waitfor 10 '{ [ "$(marker_pid "$LOCK")" = "$$" ] || take_lock; }; ! kill -0 "$CARE" 2>/dev/null'; then
     ok "2 a caretaker whose lock was taken stands down"
   else
     bad "2 a caretaker whose lock was taken stands down" "pid $CARE is still alive"
