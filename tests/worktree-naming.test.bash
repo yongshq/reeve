@@ -105,8 +105,11 @@ done
 
 # --- the steward stays the exception -----------------------------------------
 eq "steward records no worktree path" "" "$(recorded e-steward)"
-nk "steward's brief mentions no .worktrees directory" ".worktrees" \
-   "$(cat "$REEVE_HOME/errands/e-steward/brief.md")"
+# The status helper's path is this checkout's, which is itself a worktree when
+# the suite runs from one: that names the code, not a copy for the steward.
+steward_brief=$(cat "$REEVE_HOME/errands/e-steward/brief.md")
+steward_brief=${steward_brief//"$ROOT/bin/reeve-say"/reeve-say}
+nk "steward's brief mentions no .worktrees directory" ".worktrees" "$steward_brief"
 
 # --- the session label names the office too -----------------------------------
 # `reeve-dispatch --dry-run` prints every command it would run and changes

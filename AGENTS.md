@@ -188,15 +188,20 @@ Three cases still have no answer, and all three are yours to know rather than to
 A dispatch that ends with `NOTHING IS WATCHING` is not a finished dispatch.
 
 The **status file** is the truth, not the pane. A hand appends one line per event to
-`$REEVE_HOME/state/<id>.status`:
+`$REEVE_HOME/state/<id>.status`, through `bin/reeve-say`, which stamps each line with the UTC
+time it was written so no hand types one:
 
 ```
-working: <one short line>
-needs-decision [key=<slug>]: <the question>
-blocked: <what is in the way>
-done: <what landed>
-failed: <why>
+2026-10-04T15:36:02Z working: <one short line>
+2026-10-04T15:41:17Z needs-decision [key=<slug>]: <the question>
+2026-10-04T15:52:40Z blocked: <what is in the way>
+2026-10-04T16:20:05Z done: <what landed>
+2026-10-04T16:20:05Z failed: <why>
 ```
+
+`bin/reeve-answer` stamps its `resolved` line the same way. A line with no stamp, from an older log
+or a hand whose helper could not run, reads exactly as before. The stamp is shown, never trusted
+as a clock: idle and wedged silence still runs from the file's own change time.
 
 Rules you must hold to:
 
@@ -537,6 +542,7 @@ fact per line, because you are the one reading it.
 | `bin/reeve-status --orphans` | errands whose owning session is provably gone |
 | `bin/reeve-adopt <id>` | take an orphaned errand on, so this session watches it |
 | `bin/reeve-answer <id> <key> <answer>` | close an open question, durably, then tell the hand |
+| `bin/reeve-say <file> <state> <note>` | a hand's one way to append a status line, stamped in UTC |
 | `bin/reeve-steer <id> <text>` | tell a live hand what to do next, and re-arm its idle and wedged alarms. Refuses a session at a dialog, or one it cannot tell is not |
 | `bin/reeve-sentry` | stand watch, print one reason line, exit. A hand idle and silent past its threshold is one of them, opening `idle:`, and a working hand whose screen has not moved past its threshold another, opening `wedged:` |
 | `bin/reeve-teardown <id>` | remove a finished errand's copy, refusing on unlanded work |

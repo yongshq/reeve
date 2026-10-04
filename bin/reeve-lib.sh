@@ -776,8 +776,15 @@ errand_session() {
 # current state. This function is the single owner of turning the log into a
 # verdict. Nothing else may read the last line and call it the state.
 #
-# Grammar, one per line:   <state>[ [key=<slug>]]: <note>
+# Grammar, one per line:   [<stamp> ]<state>[ [key=<slug>]]: <note>
 # States: working needs-decision blocked done failed resolved
+#
+# The stamp is the UTC time the line was written, `2026-10-04T15:36:02Z`, put
+# there by status_append and never typed by a hand. Optional, because every log
+# written before it existed has none, and a hand whose helper refused may still
+# append a bare line: both read exactly as they always did. It is peeled off
+# before the state is split, since its own colons would otherwise end the state
+# token at the hour.
 #
 # A needs-decision stays open until a resolved with the SAME key lands. A later
 # done: never closes it, because a hand finishing is not the liege answering.
@@ -787,7 +794,26 @@ errand_session() {
 #   open=<count of open decisions>
 #   divergence=<yes|no>     terminal state reached with decisions still open
 #   last=<last note>
+#   at=<stamp of the line that note came from, empty when it carried none>
 #   decision=<key>\t<question>    one line per open decision, in order asked
+
+# A stamp, as a case pattern: ISO 8601, UTC, whole seconds, `Z`. Unquoted where
+# it is used, so it globs.
+status_stamp_glob='[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z'
+
+status_stamp() { date -u +%Y-%m-%dT%H:%M:%SZ; }
+
+# status_append <status file> <head> <note>
+#
+# The one writer of a status line: bin/reeve-say for a hand, bin/reeve-answer
+# for the reeve. Stamps it here, so no hand ever types the time. One printf,
+# one line, one write under PIPE_BUF, so an append racing another lands whole.
+# A newline in the note would forge a second line, so it is flattened to a space.
+status_append() {
+  local note
+  note=$(printf '%s' "$3" | tr '\r\n' '  ')
+  printf '%s %s: %s\n' "$(status_stamp)" "$2" "$note" >> "$1"
+}
 
 status_reconcile() {
   local id=$1 f
@@ -797,10 +823,12 @@ status_reconcile() {
     return 0
   fi
 
-  local terminal='' progress='' last='' opened='' resolved=''
-  local line state key note
+  local terminal='' progress='' last='' at='' opened='' resolved=''
+  local line state key note stamp
   while IFS= read -r line || [ -n "$line" ]; do
     case $line in ''|'#'*) continue ;; esac
+    stamp=''
+    case $line in $status_stamp_glob' '*) stamp=${line%% *}; line=${line#* } ;; esac
     # split off the note at the first colon that ends the state token
     state=${line%%:*}
     note=${line#*:}
@@ -814,12 +842,12 @@ status_reconcile() {
     esac
     state=$(printf '%s' "$state" | tr -d '[:space:]')
     case $state in
-      working)        progress=$state; last=$note ;;
-      blocked|failed) terminal=''; progress=$state; last=$note ;;
-      done)           terminal=$state; last=$note ;;
+      working)        progress=$state; last=$note; at=$stamp ;;
+      blocked|failed) terminal=''; progress=$state; last=$note; at=$stamp ;;
+      done)           terminal=$state; last=$note; at=$stamp ;;
       needs-decision) [ -n "$key" ] || key="unkeyed-$(printf '%s' "$note" | cksum | cut -d' ' -f1)"
                       opened="$opened$key	$note
-"; last=$note ;;
+"; last=$note; at=$stamp ;;
       resolved)       [ -n "$key" ] && resolved="$resolved$key
 " ;;
       *)              : ;;  # unknown verb: ignore, never guess
@@ -867,6 +895,7 @@ EOS
   printf 'open=%s\n' "$open_n"
   printf 'divergence=%s\n' "$divergence"
   printf 'last=%s\n' "$last"
+  printf 'at=%s\n' "$at"
   printf '%s' "$open_lines" | while IFS= read -r line; do
     [ -n "$line" ] && printf 'decision=%s\n' "$line"
   done

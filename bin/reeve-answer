@@ -41,7 +41,7 @@ if ! lines_has "$key" "$open_keys"; then
 fi
 
 # 1. durable first. This is the delivery.
-printf 'resolved [key=%s]: %s\n' "$key" "$answer" >> "$(status_file "$id")"
+status_append "$(status_file "$id")" "resolved [key=$key]" "$answer"
 info "recorded: resolved [key=$key]"
 
 # 2. then tell the hand, if one is still alive to tell

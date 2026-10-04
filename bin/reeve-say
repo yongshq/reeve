@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# Append one status line for a hand, stamped with the UTC time it was written.
+#
+# Usage:
+#   bin/reeve-say <status file> <state> <note>
+#
+#   bin/reeve-say "$status" working 'reading the auth module'
+#   bin/reeve-say "$status" 'needs-decision [key=copy]' 'Save or Submit?'
+#
+# States: working, needs-decision [key=<slug>], blocked, done, failed. The line
+# lands as `2026-10-04T15:36:02Z working: reading the auth module`.
+#
+# A hand's one writer, so the time on every line is the clock's and never a
+# guess typed by the hand. The brief names the status file and this path; the
+# hand needs no REEVE_HOME of its own, which is why it takes the file and not
+# an errand id.
+#
+# Refuses `resolved`, which only bin/reeve-answer writes, a needs-decision with
+# no key, any other state, an empty note, and a file that is not an existing
+# errand `status` file. Writes nothing else.
+#
+# Exit: 0 appended, 1 refused or not written.
+
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/reeve-lib.sh"
+
+case ${1:-} in -h|--help) print_help "$0"; exit 0 ;; esac
+[ $# -ge 3 ] || die "usage: reeve-say <status file> <state> <note>"
+f=$1 head=$2; shift 2
+note="$*"
+
+[ "$(basename "$f")" = status ] || die "not a status file: $f"
+[ -f "$f" ] && [ ! -L "$f" ] || die "no status file at $f. Use the path your brief names."
+
+case $head in
+  working|blocked|done|failed) ;;
+  'needs-decision [key='*']')
+    k=${head#'needs-decision [key='}; k=${k%']'}
+    case $k in ''|*[!A-Za-z0-9._-]*) die "a key is letters, digits, dots, underscores and hyphens: [key=$k]" ;; esac ;;
+  needs-decision) die "needs-decision takes a key: 'needs-decision [key=<slug>]'" ;;
+  resolved*) die "resolved is the reeve's to write, never a hand's" ;;
+  *) die "unknown state '$head'. One of: working, needs-decision [key=<slug>], blocked, done, failed" ;;
+esac
+[ -n "$(printf '%s' "$note" | tr -d '[:space:]')" ] || die "no note given"
+
+status_append "$f" "$head" "$note" || die "could not append to $f"

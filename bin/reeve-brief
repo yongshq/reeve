@@ -238,6 +238,7 @@ fi
 
 status=$(status_file "$id")
 report=$(report_file "$id")
+say="$REEVE_ROOT_D/bin/reeve-say"
 mkdir -p "$(errand_dir "$id")"
 
 # ---- the brief ------------------------------------------------------------
@@ -468,16 +469,22 @@ cat <<ROLE
 One line appended to \`$status\` at each real change of state, nothing more. Every append wakes the
 reeve, so report sparingly: constant chatter gets ignored, which defeats the point.
 
+Append through the helper, which stamps each line with the UTC time it was written:
+
+\`\`\`sh
+"$say" "$status" working '<what you are doing now>'
+"$say" "$status" 'needs-decision [key=<short-slug>]' '<the question, answerable without reading your diff>'
+"$say" "$status" blocked '<what is in the way, and what would unblock it>'
+"$say" "$status" done '<what landed, and anything you deliberately left alone>'
+"$say" "$status" failed '<why, and what you tried>'
 \`\`\`
-working: <what you are doing now>
-needs-decision [key=<short-slug>]: <the question, answerable without reading your diff>
-blocked: <what is in the way, and what would unblock it>
-done: <what landed, and anything you deliberately left alone>
-failed: <why, and what you tried>
-\`\`\`
+
+Each lands as \`2026-10-04T15:36:02Z working: <note>\`.
 
 Rules:
 
+- **Never type the time yourself.** If the helper refuses, fix what it names. If it cannot run at
+  all, append the line bare, \`working: <note>\`, with no time: it still reads.
 - **Open with one \`working:\` line**, so the reeve knows you launched.
 - **\`needs-decision\` is a real stop.** Ask, then wait, or work on something unrelated inside this
   errand. Never guess and carry on: a wrong guess costs more than a wait. Always give it a short

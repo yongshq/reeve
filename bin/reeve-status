@@ -202,12 +202,13 @@ tier_line() {
 }
 
 one() {
-  local i=$1 rec st open div last
+  local i=$1 rec st open div last at
   rec=$(status_reconcile "$i")
   st=$(printf  '%s\n' "$rec" | grep -m1 '^state='      | sed 's/^state=//')
   open=$(printf '%s\n' "$rec" | grep -m1 '^open='       | sed 's/^open=//')
   div=$(printf  '%s\n' "$rec" | grep -m1 '^divergence=' | sed 's/^divergence=//')
   last=$(printf '%s\n' "$rec" | grep -m1 '^last='       | sed 's/^last=//')
+  at=$(printf   '%s\n' "$rec" | grep -m1 '^at='         | sed 's/^at=//')
 
   printf 'errand    %s\n' "$i"
   printf 'office    %s on %s via %s\n' "$(meta_show "$i" office)" "$(meta_show "$i" harness)" "$(meta_show "$i" backend)"
@@ -232,6 +233,9 @@ one() {
   printf 'reported  %s\n' "$st"
   printf 'process   %s\n' "$(live_state "$i" long)"
   [ -n "$last" ] && printf 'last said %s\n' "$last"
+  # Only a stamped line has a time to show. An old or bare one shows none
+  # rather than a guess from the file's mtime, which a later line moves.
+  [ -n "$last" ] && [ -n "$at" ] && printf 'said at   %s\n' "$at"
 
   if [ "${open:-0}" -gt 0 ]; then
     printf '\n%s open decision(s), waiting on the liege:\n' "$open"
