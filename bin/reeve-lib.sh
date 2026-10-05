@@ -1485,18 +1485,25 @@ status_silence() { # status_silence <id>
 # gap between its transcript and its composer with blank rows, 35 of 52 on a
 # real herdr capture, and the composer's box and status lines took the rest.
 #
-# Only a line that STARTS with the error counts, after claude's tree glyph and
-# indent: a hand writing about API errors puts the words mid sentence. And only
-# the last such line, with no `⏺` or `❯` entry after it: an error the turn went
-# on past is a turn that recovered. The `✻ Baked for ... · done` footer under it
-# opens no entry, so a dead turn still reads dead with it there.
+# Only a line that STARTS with the error counts, right after claude's `⏺` or `⎿`
+# and its indent: a hand writing about API errors puts the words mid sentence,
+# and where its prose wraps, the continuation line opens with bare indent and no
+# glyph, so it cannot pass for one. And only the last such line, with no `⏺` or
+# `❯` entry after it: an error the turn went on past is a turn that recovered.
+# The `✻ Baked for ... · done` footer under it opens no entry, so a dead turn
+# still reads dead with it there.
+#
+# It assumes a settled pane, which its one caller, stale_silence, checks first
+# (attn=settled). On its own it is neither dialog nor spinner safe: a permission
+# dialog's `❯ 1. Yes` reads as the composer, and a spinner line under an error
+# opens no entry, so either can read dead. Any new caller must gate on settled.
 turn_died_from_text() {
   local t c e
   t=$(printf '%s\n' "$1")
   c=$(grep -nE '^[[:space:]]*❯' <<<"$t" | tail -n 1 | cut -d: -f1)
   [ -n "$c" ] && t=$(head -n $(( c - 1 )) <<<"$t")
   t=$(grep -vE '^[[:space:] ─]*$' <<<"$t" | tail -n 12)
-  e=$(grep -nE '^[^[:alnum:]]*API Error:' <<<"$t" | tail -n 1 | cut -d: -f1)
+  e=$(grep -nE '^[[:space:]]*(⏺|⎿)[[:space:]]*API Error:' <<<"$t" | tail -n 1 | cut -d: -f1)
   [ -n "$e" ] || return 1
   tail -n +$(( e + 1 )) <<<"$t" | grep -qE '^[[:space:]]*(⏺|❯)' && return 1
   return 0

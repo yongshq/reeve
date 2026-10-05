@@ -591,6 +591,13 @@ ck_eq  "22 the error sits above the old thirty line tail"  \
 ck_eq  "22 a connection lost turn reads dead"              "$(died "$FIX/pane-died-connection-lost.txt")" died
 ck_eq  "22 an error the turn went on past does not"        "$(died "$FIX/pane-recovered-after-error.txt")" no
 ck_eq  "22 nor an error named in prose"                    "$(died "$FIX/pane-error-in-prose.txt")" no
+# The same prose rewrapped, so a continuation line opens with the error words
+# behind bare indent: no glyph, so still prose.
+sed 's/^⏺ The retry path now surfaces API Error: /⏺ The retry path now surfaces\
+  API Error: /' "$FIX/pane-error-in-prose.txt" > "$SCRATCH/rewrapped"
+ck_eq  "22 the rewrapped prose puts the words at a line's start" \
+  "$(grep -c '^  API Error:' "$SCRATCH/rewrapped")" 1
+ck_eq  "22 and still does not read dead"                   "$(died "$SCRATCH/rewrapped")" no
 # The footer and blank lines below the error are not entries; text typed into
 # the composer is still the composer; a tree glyph form reads the same.
 sed 's/^❯ $/❯ carry on/' "$FIX/pane-died-connection-lost.txt" > "$SCRATCH/typed"
