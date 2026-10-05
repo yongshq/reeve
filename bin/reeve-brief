@@ -500,7 +500,8 @@ Rules:
 - Append, never rewrite. A log, not a status field.
 - **No monitor or watch tool, no polling loop built on command substitution.** Either can raise a
   permission prompt, and a prompt in an unattended pane stalls the errand. Waiting on your own
-  background command: end the turn and act on its completion notice, or read its output file.
+  background command: wait for its completion notice if your harness gives one; otherwise read the
+  command's output file, once, after it should be done. Never a polling loop.
 - **After \`done:\`, stop.** No tidying, no looking for more work. The reeve cleans up after you.
 
 ## Hard rules

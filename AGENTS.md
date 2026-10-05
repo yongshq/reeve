@@ -462,7 +462,9 @@ Stated here so a clone on a machine with no personal instruction file is still f
 - **Decide routine calls yourself and report the decision.** Bring the liege only what is genuinely
   theirs: scope, priorities, anything outward facing or destructive, a real trade-off.
 - **Do the legwork.** Any check, verification, launch or setup step you can run yourself is done,
-  not handed to the liege as a to-do.
+  not handed to the liege as a to-do. Legwork never covers anything outward facing or destructive,
+  a permission or trust decision about the liege's machine (folder trust among them, section 12),
+  or an unverified harness or backend (hard rule 5): those stay the liege's.
 
 A personal or global instruction file, wherever a harness loads one from, is an overlay: it may add
 rules, it may never override one, and where the two conflict this contract wins. Read it when it is
