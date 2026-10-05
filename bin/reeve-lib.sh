@@ -1411,8 +1411,8 @@ STATUS_FIELD_EOF
 #   silent past `hand-stale`       seconds since the status file last changed,
 #                                  default two hours, three times the longest
 #                                  legitimate turn seen so far
-#   the pane shows a dead turn     claude's own `API Error:` line near the bottom
-#                                  of an idle pane. The turn is provably over, so
+#   the pane shows a dead turn     claude's own `API Error:` line ending the last
+#                                  turn of an idle pane. The turn is provably over, so
 #                                  the long wait that protects a long turn is not
 #                                  needed: `hand-stale-error` applies instead,
 #                                  default ten minutes
@@ -1478,15 +1478,28 @@ status_silence() { # status_silence <id>
   printf '%s\n' $(( now - m ))
 }
 
-# Captured pane text in, yes or no out. Only the bottom of the pane is read,
-# and only a line that STARTS with the error, after claude's tree glyph and
-# indent: a hand writing about API errors puts the words mid sentence, and an
-# old error far up the scrollback is a turn that recovered.
+# Captured pane text in, yes or no out. Only the last turn's transcript is read:
+# the lines above the composer, the last `❯` line, with blank lines and the
+# composer's rules dropped, and of those only the last twelve. A fixed tail of
+# the capture once missed a dead turn outright: a settled claude pane pads the
+# gap between its transcript and its composer with blank rows, 35 of 52 on a
+# real herdr capture, and the composer's box and status lines took the rest.
+#
+# Only a line that STARTS with the error counts, after claude's tree glyph and
+# indent: a hand writing about API errors puts the words mid sentence. And only
+# the last such line, with no `⏺` or `❯` entry after it: an error the turn went
+# on past is a turn that recovered. The `✻ Baked for ... · done` footer under it
+# opens no entry, so a dead turn still reads dead with it there.
 turn_died_from_text() {
-  local t
-  t=$(printf '%s\n' "$1" | tail -n 30)
-  grep -qE '^[^[:alnum:]]*API Error:' <<<"$t" && return 0
-  return 1
+  local t c e
+  t=$(printf '%s\n' "$1")
+  c=$(grep -nE '^[[:space:]]*❯' <<<"$t" | tail -n 1 | cut -d: -f1)
+  [ -n "$c" ] && t=$(head -n $(( c - 1 )) <<<"$t")
+  t=$(grep -vE '^[[:space:] ─]*$' <<<"$t" | tail -n 12)
+  e=$(grep -nE '^[^[:alnum:]]*API Error:' <<<"$t" | tail -n 1 | cut -d: -f1)
+  [ -n "$e" ] || return 1
+  tail -n +$(( e + 1 )) <<<"$t" | grep -qE '^[[:space:]]*(⏺|❯)' && return 1
+  return 0
 }
 
 # How long a session must sit waiting, or idle, before it is worth a wake. A hand

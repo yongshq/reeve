@@ -30,6 +30,10 @@
 #      where a steer typed by hand does not
 #  20. a watch pass that writes the latch back after a steer cannot swallow the
 #      steered turn's death
+#  21. a steer dated in the future holds nothing back
+#  22. a dead turn on a real screen: blank padding, the footer, the composer and
+#      its status lines below the error do not hide it, and a recovered turn or
+#      an error in prose on the same screen is not one
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 
 PASS=0; FAIL=0
@@ -574,6 +578,44 @@ ck_eq  "21 and does not wake inside it"                    "$RC" 4
 dsentry $(( T + 90 ))
 ck_eq  "21 the future steer does not hold the wake back"   "$RC" 0
 ck_has "21 as an idle line"                                "$OUT" "idle: hung has been silent"
+
+# --- 22. a dead turn on a real screen ----------------------------------------
+# A reviewer's turn died on `API Error: Connection lost mid-response.` and sat
+# idle two hours, because the check read only the last thirty lines of the
+# capture and a settled pane is mostly blank rows above its composer. The
+# fixtures are the layout of a real herdr capture of a claude pane, 52 rows.
+FIX="$ROOT/tests/fixtures"
+died() { bash -c '. "$1/bin/reeve-lib.sh"; turn_died_from_text "$(cat "$2")" && echo died || echo no' _ "$ROOT" "$1"; }
+ck_eq  "22 the error sits above the old thirty line tail"  \
+  "$(tail -n 30 "$FIX/pane-died-connection-lost.txt" | grep -c 'API Error:')" 0
+ck_eq  "22 a connection lost turn reads dead"              "$(died "$FIX/pane-died-connection-lost.txt")" died
+ck_eq  "22 an error the turn went on past does not"        "$(died "$FIX/pane-recovered-after-error.txt")" no
+ck_eq  "22 nor an error named in prose"                    "$(died "$FIX/pane-error-in-prose.txt")" no
+# The footer and blank lines below the error are not entries; text typed into
+# the composer is still the composer; a tree glyph form reads the same.
+sed 's/^❯ $/❯ carry on/' "$FIX/pane-died-connection-lost.txt" > "$SCRATCH/typed"
+ck_eq  "22 a composer with text in it is still the composer" "$(died "$SCRATCH/typed")" died
+sed 's/^⏺ API Error:/  ⎿  API Error:/' "$FIX/pane-died-connection-lost.txt" > "$SCRATCH/tree"
+ck_eq  "22 the error under a tool call reads dead too"     "$(died "$SCRATCH/tree")" died
+grep -v 'Baked for' "$FIX/pane-died-connection-lost.txt" > "$SCRATCH/nofooter"
+ck_eq  "22 and without the footer"                         "$(died "$SCRATCH/nofooter")" died
+# End to end, through the sentry and both listings.
+cp "$FIX/pane-died-connection-lost.txt" "$STUB_PANE"
+say 'working: reviewing the upload fix'
+backdate 700
+ck_has "22 the single form says it was an error"           "$(single)" "after an API error"
+sentry
+ck_eq  "22 the sentry wakes after ten minutes"             "$RC" 0
+ck_has "22 and says it was an API error"                   "$OUT" "idle after an API error"
+ck_eq  "22 the listing calls it idle"                      "$(row)" "alive/idle 11m"
+for f in pane-recovered-after-error pane-error-in-prose; do
+  cp "$FIX/$f.txt" "$STUB_PANE"
+  say 'working: reviewing the upload fix'
+  backdate 700
+  sentry
+  ck_eq "22 $f: no wake at ten minutes"                    "$RC" 4
+done
+: > "$STUB_PANE"
 
 echo
 echo "passed=$PASS failed=$FAIL"
