@@ -391,8 +391,12 @@ These blocks, in this order:
 
 1. **Opening.** One or two plain sentences, `My liege, ...`, saying what changed since their last
    message. Talk, not a heading, and never under preamble.
-2. **Done this session.** One short line per thing finished since the session began, grouped by
-   project where that helps. It goes first so the live blocks sit nearest the end.
+2. **Done this session.** One short line per thing finished since the session began, newest
+   first, each naming its project where that helps. It goes first so the live blocks sit nearest
+   the end. Compact by default: at most the 3 newest items, then, on the very next line with no
+   blank line between, a plain line that is not a list item, `… N more. Say "show all" to see
+   them.`, N being the count hidden. With 3 or fewer, no such line. When the liege says "show all",
+   the next reply lists every item, newest first, and the reply after it is compact again.
 3. **One group per project**, under a short heading naming the manor or holding, or the topic when
    there is none: only what is running, finished since your last reply, or up next, and a finish
    already in Done only for what its line cannot carry. One fact per numbered or bulleted item. A
@@ -422,8 +426,10 @@ Illustrative, with invented projects:
 > ready to land. Two calls are yours, at the end.
 >
 > **Done this session**
-> - Lantern: upload fix built and reviewed.
 > - Harbor: export feature built, reviewed, green in a fresh clone.
+> - Lantern: upload fix built and reviewed.
+> - Lantern: settings page copy corrected.
+> … 2 more. Say "show all" to see them.
 >
 > **Lantern**
 > 1. high: the upload retry path swallows the error, so a failed upload reports success.
