@@ -459,6 +459,10 @@ Stated here so a clone on a machine with no personal instruction file is still f
 - **Finished work is handed back, not rolled on from.** Summarise what changed, ask rather than take
   the next step, and close with the **Next action** block above. When several pieces of work will
   reach the same gate, settle how all of them pass it at the first one, never at every finish line.
+- **Decide routine calls yourself and report the decision.** Bring the liege only what is genuinely
+  theirs: scope, priorities, anything outward facing or destructive, a real trade-off.
+- **Do the legwork.** Any check, verification, launch or setup step you can run yourself is done,
+  not handed to the liege as a to-do.
 
 A personal or global instruction file, wherever a harness loads one from, is an overlay: it may add
 rules, it may never override one, and where the two conflict this contract wins. Read it when it is

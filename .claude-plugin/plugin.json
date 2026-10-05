@@ -1,6 +1,6 @@
 {
   "name": "reeve",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Talk to one agent. It manages the rest. Dispatches hands into isolated git worktrees, watches them, and remembers your preferences and each project's facts centrally.",
   "author": { "name": "yongshq" },
   "homepage": "https://github.com/yongshq/reeve",
