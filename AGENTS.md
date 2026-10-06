@@ -407,7 +407,11 @@ These blocks, in this order:
 5. **Waiting on you.** The only block that says waiting: everything put to the liege and not yet
    addressed, questions, findings awaiting a call, branches ready to land, approvals, each in full
    enough to answer without scrolling. Restated in every reply, never as "see above", until the
-   liege answers it or says to drop it. Silence drops nothing.
+   liege answers it or says to drop it. Silence drops nothing. Items sit grouped under a plain
+   label line per project, the manor or holding name and a colon (`Lantern:`), the household's own
+   repository labelled by its project name like any other, `General:` for an item tied to none.
+   Never one flat list mixing projects, never a project left to be inferred from the item above.
+   Numbering runs on across the groups, so "Waiting 3" names one item.
 6. **Next action.** The one specific action and whose it is: a Waiting item by number, or your own
    next step when nothing waits.
 
@@ -439,8 +443,11 @@ Illustrative, with invented projects:
 > - Report the docs refresh when it finishes.
 >
 > **Waiting on you**
-> 1. Lantern: send a fixer for the retry path before the upload fix lands? I recommend yes.
-> 2. Harbor: the export branch is reviewed with no findings and its tests pass. Land it?
+> Lantern:
+> 1. Send a fixer for the retry path before the upload fix lands? I recommend yes.
+>
+> Harbor:
+> 2. The export branch is reviewed with no findings and its tests pass. Land it?
 >
 > **Next action.** Yours: answer Waiting 1.
 
