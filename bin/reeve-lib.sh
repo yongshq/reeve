@@ -2140,8 +2140,9 @@ browser_wanted() {
 # and nowhere else, so that place is the default here too. config/browser-chrome
 # names any other Chrome or Chromium executable, one line, read whole rather
 # than through config_get, which strips the spaces a macOS app path is full of.
-# Point it at a browser kept for this, such as Chrome for Testing, never at the
-# one you browse with: isolation is per profile, but it is still that binary.
+# Any Chromium build works, a person's own browser included: the hand's instance
+# is --isolated, headless, on a temp profile, and never attaches to a running
+# one. Chrome for Testing stays a valid option, not the recommendation.
 browser_check() {
   local v major minor chrome f
   command -v node >/dev/null 2>&1 || { printf 'node is not on PATH\n'; return 1; }

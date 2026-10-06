@@ -98,9 +98,10 @@ cycle.
 The browser is optional. `bin/reeve-doctor` reports whether this machine has it: `node` and `npx`
 on PATH, and a Chrome the server can launch. That Chrome is the one place `chrome-devtools-mcp`
 looks for stable Chrome on this platform, or whatever `$REEVE_HOME/config/browser-chrome` names,
-one line holding an executable's absolute path. Point that at a browser kept for this, such as
-Chrome for Testing (`npx @puppeteer/browsers install chrome@stable --path <dir>`), rather than one
-a person browses with. A dispatch never refuses for want of it: the hand goes out without the
+one line holding an executable's absolute path. Any Chromium build works there, a person's own
+browser included, because the hand's instance is `--isolated`, headless, on a temporary profile, and
+never attaches to a running one. Chrome for Testing (`npx @puppeteer/browsers install chrome@stable
+--path <dir>`) stays a valid option, not the recommendation. A dispatch never refuses for want of it: the hand goes out without the
 server, the dispatch says why, and the hand reports `not visually verified: <reason>`.
 
 ## Tool grants are coarse
