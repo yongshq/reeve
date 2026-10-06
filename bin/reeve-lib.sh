@@ -2190,6 +2190,13 @@ browser_check() {
 # the machine's, and written into the errand directory like settings.json, so a
 # later change here never alters what a hand already out may do.
 #
+#   --prefer-offline         npm's flag, read by npx: a cached package starts at
+#                            once. Without it npx asks the registry on every
+#                            launch, and with the network down that was 70
+#                            seconds or more before the server started, likely
+#                            past a harness's MCP startup wait. A flag over an env
+#                            block, so it holds however a harness hands the
+#                            server its environment.
 #   --isolated               its own temporary profile, deleted when it closes
 #   --headless               no window on the liege's screen
 #   --executablePath         the Chrome browser_check found, never a guess
@@ -2203,7 +2210,7 @@ browser_config_write() {
   "mcpServers": {
     "$BROWSER_SERVER": {
       "command": "npx",
-      "args": ["-y", "$BROWSER_PACKAGE", "--isolated", "--headless",
+      "args": ["--prefer-offline", "-y", "$BROWSER_PACKAGE", "--isolated", "--headless",
                "--executablePath", "$chrome",
                "--no-usage-statistics", "--no-performance-crux"]
     }

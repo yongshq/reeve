@@ -113,7 +113,8 @@ if chrome=$(browser_check); then
   offs=''
   for o in $(office_names); do browser_wanted "$o" && offs="$offs${offs:+ }$o"; done
   printf '  offices     %s\n' "${offs:-none allow it}"
-  printf '  first use   npx fetches the package once, so the first hand needs the network\n'
+  printf '  network     the first hand fetches the package; later ones start from the\n'
+  printf '              npx cache without asking the registry, so they work offline\n'
 else
   printf '  UNAVAILABLE %s\n' "$chrome"
   printf '  dispatch still works: hands that would look at a page report\n'

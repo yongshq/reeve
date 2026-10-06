@@ -93,6 +93,10 @@ cfg="$SCRATCH/browser.json"
 body=$(cat "$cfg")
 has "3 one server, named for the allow rule" "$body" '"reeve-browser": {'
 has "3 the package is pinned"            "$body" '"chrome-devtools-mcp@'
+# npx reads its own flags only before the package; after it they go to the
+# server, which would reject them, so the order is part of the check.
+has "3 npx prefers its cache, ahead of the package" "$body" \
+    '"--prefer-offline", "-y", "chrome-devtools-mcp@'
 nas "3 never an unpinned latest"         "$body" '@latest'
 has "3 its own profile, thrown away"     "$body" '"--isolated"'
 has "3 no window"                        "$body" '"--headless"'
