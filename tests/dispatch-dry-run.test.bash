@@ -193,6 +193,85 @@ after=$(snapshot)
 eq  "4 the dry run succeeds"                          "$RC" 0
 same "4 an existing settings file is not overwritten" "$before" "$after"
 
+# --- 5 to 9. the household browser -------------------------------------------
+# An office that allows the browser gets its MCP config generated into the
+# errand directory and passed on the launch line, through run() like every other
+# write. Without one, the dispatch goes ahead anyway and says why. node, npx and
+# Chrome are stubs, so no browser is launched and nothing is fetched.
+cat > "$STUB/harnesses/browsing.toml" <<'HARNESS'
+bin = "true"
+verified = true
+launch = "{bin} {mcp} {settings} {prompt}"
+settings_flag = "--settings {settings}"
+mcp_flag = "--no-mcp"
+browser_flag = "--mcp-config {browser}"
+prompt_mode = "argv"
+HARNESS
+STUBS="$SCRATCH/stubs"
+mkdir -p "$STUBS"
+printf '#!/bin/sh\necho v22.12.0\n' > "$STUBS/node"
+printf '#!/bin/sh\nexit 0\n' > "$STUBS/npx"
+chrome="$SCRATCH/Chrome for Testing.app/chrome"
+mkdir -p "$(dirname "$chrome")"
+printf '#!/bin/sh\n' > "$chrome"
+chmod +x "$STUBS/node" "$STUBS/npx" "$chrome"
+mkdir -p "$REEVE_HOME/config"
+printf '%s\n' "$chrome" > "$REEVE_HOME/config/browser-chrome"
+export REEVE_NO_CARETAKER=1
+meta_of() { grep -m1 "^$2=" "$REEVE_HOME/state/$1.meta" | cut -d= -f2-; }
+
+brief_for look artificer || bad "5 reeve-brief refused"
+before=$(snapshot)
+PATH="$STUBS:$PATH" dispatch look browsing --dry-run
+after=$(snapshot)
+eq  "5 the dry run succeeds"                           "$RC" 0
+same "5 the home and the code root are untouched"      "$before" "$after"
+has "5 the config is printed as a write it would make" "$OUT" \
+    "would run: browser_config_write $REEVE_HOME/errands/look/browser.json $chrome"
+has "5 the launch line carries it, after the mcp flag" "$OUT" \
+    "--no-mcp --mcp-config $REEVE_HOME/errands/look/browser.json"
+has "5 and the dry run says which browser"             "$OUT" "browser: reeve-browser, headless"
+
+PATH="$STUBS:$PATH" dispatch look browsing
+cfg="$REEVE_HOME/errands/look/browser.json"
+eq  "6 a real dispatch succeeds"                       "$RC" 0
+eq  "6 the config is written"   "$([ -f "$cfg" ] && echo present || echo absent)" present
+has "6 naming the household server"                    "$(cat "$cfg" 2>/dev/null)" '"reeve-browser"'
+has "6 and the Chrome it found"                        "$(cat "$cfg" 2>/dev/null)" "$chrome"
+has "6 whose tools the errand's settings pre-approve" \
+    "$(cat "$REEVE_HOME/errands/look/settings.json")" '"mcp__reeve-browser"'
+has "6 the record says what it went out with"          "$(meta_of look browser)" "reeve-browser"
+has "6 and so does the summary"                        "$OUT" "browser  reeve-browser"
+
+printf '%s\n' "$SCRATCH/no-chrome-here" > "$REEVE_HOME/config/browser-chrome"
+brief_for blind artificer || bad "7 reeve-brief refused"
+PATH="$STUBS:$PATH" dispatch blind browsing --dry-run
+nas "7 no mcp config reaches the launch line"          "$OUT" "--mcp-config"
+has "7 the dry run names the reason"                   "$OUT" "browser: none: config/browser-chrome"
+PATH="$STUBS:$PATH" dispatch blind browsing
+eq  "7 no Chrome is no reason to refuse"               "$RC" 0
+has "7 it says there is no browser, and why"           "$ERR" \
+    "no household browser for this hand: config/browser-chrome names $SCRATCH/no-chrome-here"
+has "7 and what the hand will do instead"              "$ERR" "it will verify nothing visually"
+eq  "7 and none is written" \
+    "$([ -e "$REEVE_HOME/errands/blind/browser.json" ] && echo present || echo absent)" absent
+has "7 the record keeps the reason"                    "$(meta_of blind browser)" \
+    "none: config/browser-chrome"
+printf '%s\n' "$chrome" > "$REEVE_HOME/config/browser-chrome"
+
+brief_for peek scout || bad "8 reeve-brief refused"
+PATH="$STUBS:$PATH" dispatch peek browsing --dry-run
+eq  "8 an office without the allow rule dispatches"    "$RC" 0
+nas "8 and gets no browser"                            "$OUT" "--mcp-config"
+nas "8 nor any word about one"                         "$OUT$ERR" "browser"
+
+brief_for plain artificer || bad "9 reeve-brief refused"
+PATH="$STUBS:$PATH" dispatch plain stub --dry-run
+eq  "9 a harness with no browser_flag still dispatches" "$RC" 0
+has "9 and says the harness is why"                    "$ERR" \
+    "harness stub declares no browser_flag"
+nas "9 with no config written or passed"               "$OUT" "browser_config_write"
+
 echo
 echo "passed=$PASS failed=$FAIL"
 [ "$FAIL" -eq 0 ]

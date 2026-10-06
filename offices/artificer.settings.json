@@ -1,6 +1,7 @@
 {
   "permissions": {
     "defaultMode": "acceptEdits",
-    "allow": ["Bash", "Read", "Write", "Edit", "Glob", "Grep", "TodoWrite"]
+    "allow": ["Bash", "Read", "Write", "Edit", "Glob", "Grep", "TodoWrite",
+              "mcp__reeve-browser"]
   }
 }

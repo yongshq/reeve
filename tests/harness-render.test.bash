@@ -26,6 +26,11 @@ ck "settings file passed"           "--settings $S"                   "$line"
 ck "configured mcp servers off"     "--strict-mcp-config"             "$line"
 ck "built-in chrome mcp off"        "--no-chrome"                     "$line"
 nk "no mcp config alongside it"     "--mcp-config"                    "$line"
+# The household browser is the one exception, and only when dispatch asks for
+# it: appended to the flags that keep every other MCP source out, never instead.
+withb=$("$H" render claude "$B" --settings "$S" --browser /abs/errands/demo/browser.json)
+ck "browser joins the mcp flags" \
+   "--strict-mcp-config --no-chrome --mcp-config /abs/errands/demo/browser.json" "$withb"
 ck "argv separator present"         " -- "                            "$line"
 ck "prompt points at the brief"     "$B"                              "$line"
 nk "brief text is NOT inlined"      "Definition of done"              "$line"

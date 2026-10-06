@@ -368,8 +368,37 @@ fi
 # flags exist to close, arriving through a different door.
 #
 
+# --- the household browser -------------------------------------------------
+# A hand whose office allows the browser gets the household's own: one MCP
+# server that launches its own headless Chrome with a throwaway profile, and
+# nothing else, since it rides next to the flags that shut every other MCP tool
+# off. The allow rule is in the office's settings, copied above, so no consent
+# dialog can stand in front of it. See offices/README.md.
+#
+# Never a reason to refuse. A machine with no Chrome, or a harness with no way
+# to pass the server, sends the hand out without it, says so here, and the hand
+# reports what it could not check rather than stalling over it.
+browser_cfg='' browser_say=''
+if browser_wanted "$office"; then
+  if [ -z "$("$BIN/reeve-harness" get "$harness" browser_flag '')" ]; then
+    browser_say="none: harness $harness declares no browser_flag"
+  elif chrome=$(browser_check); then
+    browser_cfg="$(errand_dir "$id")/browser.json"
+    run browser_config_write "$browser_cfg" "$chrome"
+    browser_say="$BROWSER_SERVER, headless and isolated, launching $chrome"
+  else
+    browser_say="none: $chrome"
+  fi
+  case $browser_say in
+    none:*)
+      warn "no household browser for this hand: ${browser_say#none: }"
+      warn "  it will verify nothing visually, and its done line will say so" ;;
+  esac
+fi
+
 cmdline=$("$BIN/reeve-harness" render "$harness" "$brief" --hand "$id" \
             ${errand_settings:+--settings "$errand_settings"} \
+            ${browser_cfg:+--browser "$browser_cfg"} \
             ${sib_args+"${sib_args[@]}"} \
             ${model:+--model "$model"} ${effort:+--effort "$effort"}) \
   || die "could not render a launch line for harness '$harness'"
@@ -381,6 +410,7 @@ if [ "$dry" = yes ]; then
               "$REEVE_HOME_D/state/sentry.log"
   printf '\ncmdline:\n  %s\n' "$cmdline"
   printf '\ntier: model %s, effort %s\n' "$(tier_say "$model" "$model_from")" "$(tier_say "$effort" "$effort_from")"
+  [ -n "$browser_say" ] && printf '\nbrowser: %s\n' "$browser_say"
   printf '\nnothing was changed.\n'
   exit 0
 fi
@@ -400,6 +430,10 @@ meta_set "$id" cwd "$cwd"
 meta_set "$id" model_from "$model_from"
 meta_set "$id" effort_from "$effort_from"
 meta_set "$id" dispatched "$(date +%Y-%m-%dT%H:%M:%S)"
+# What the hand was sent out with, so a done line saying it verified nothing
+# visually can be checked against the reason dispatch already knew. Blank for
+# an office with no browser, and on a relaunch that no longer has one.
+meta_set "$id" browser "$browser_say"
 # The opt-out belongs to the errand, not to this process. Skipping the caretaker
 # alone kept nothing up: any other dispatch's caretaker on this home freed the
 # hand within one poll of it finishing. Recorded here, it is read by every
@@ -488,6 +522,7 @@ info "  tier     model $(tier_say "$model" "$model_from"), effort $(tier_say "$e
 info "  copy     $cwd"
 [ -n "$branch" ] && info "  branch   $branch (from $base)" || info "  branch   none, detached at $base"
 info "  running  $target"
+[ -n "$browser_say" ] && info "  browser  $browser_say"
 info "  status   $(status_file "$id")"
 
 # The last word, and loud, because a hand nobody will report is worse than a

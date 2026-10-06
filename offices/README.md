@@ -52,6 +52,7 @@ the user's terminal:
 | `--dangerously-skip-permissions` | **stalls.** Same consent dialog |
 | `--settings <file>` with an explicit `allow` list | **works.** No dialog, no prompt, Bash runs |
 | the same, on a machine with any MCP tool source | **stalls, silently.** An inherited MCP tool falls outside the allow list and raises a consent dialog. `--strict-mcp-config --no-chrome`, with no `--mcp-config`, starts the hand with no MCP tools at all and removes the class |
+| the same, plus `--mcp-config` naming the household browser alone, its tools in the allow list | **works.** Only that server's tools load and a call to one raises no dialog. See the household browser below |
 
 The first row is the trap, because it *looks* like it works: common commands match the user's own
 `settings.local.json` allow list and run fine, so a hand gets minutes into real work before hitting
@@ -63,6 +64,44 @@ suspended inside a tool call, so it cannot append `blocked:` and its last status
 flags because there are two sources: `--strict-mcp-config` drops the servers in the machine's MCP
 configuration, and `--no-chrome` drops Claude in Chrome, which is a built-in integration that
 `claude mcp list` never mentions and the strict flag alone leaves fully loaded.
+
+## The household browser
+
+Shutting off every MCP tool also shut off the only way a hand could look at a page it had changed,
+so a builder shipped UI it had never seen and the liege checked it by hand after it landed. The
+browser comes back as the household's own, not the machine's:
+
+- **What:** one MCP server, `reeve-browser`: `chrome-devtools-mcp` at a pinned version, run
+  through `npx`.
+- **Which Chrome:** its own instance, `--headless` and `--isolated`, with a temporary profile
+  deleted when it closes.
+- **Never:** `--browserUrl`, `--wsEndpoint`, `--autoConnect`, port 9222, or any browser a person
+  is using.
+- **Who:** an office whose settings allow `mcp__reeve-browser`. Today the artificer and the warden.
+- **How:** `bin/reeve-dispatch` writes the server config into the errand directory, beside
+  settings.json, and the harness's `browser_flag` passes it next to `--strict-mcp-config
+  --no-chrome`.
+- **Why no dialog:** the allow rule is in the office's own settings, so the server's tools are
+  pre-approved like `Bash`.
+
+`--strict-mcp-config` still keeps every configured server out and `--no-chrome` still keeps Claude
+in Chrome out; `--mcp-config` adds exactly the one server back. The office text owns the conduct:
+the hand starts the project's dev server on a free port of its own, in its own copy, looks at the
+result, stops the server, and says in its `done:` line what it saw. Never the liege's running app,
+never a port the liege's server uses.
+
+Builder and warden both look, on purpose. The builder checks its own result first, which catches
+the obvious before anyone else spends time on it. The warden checks again in fresh context against
+the intent, which catches what an author cannot see in its own work. Two different checks, not a
+cycle.
+
+The browser is optional. `bin/reeve-doctor` reports whether this machine has it: `node` and `npx`
+on PATH, and a Chrome the server can launch. That Chrome is the one place `chrome-devtools-mcp`
+looks for stable Chrome on this platform, or whatever `$REEVE_HOME/config/browser-chrome` names,
+one line holding an executable's absolute path. Point that at a browser kept for this, such as
+Chrome for Testing (`npx @puppeteer/browsers install chrome@stable --path <dir>`), rather than one
+a person browses with. A dispatch never refuses for want of it: the hand goes out without the
+server, the dispatch says why, and the hand reports `not visually verified: <reason>`.
 
 ## Tool grants are coarse
 

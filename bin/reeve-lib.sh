@@ -2113,3 +2113,101 @@ config_get() {
     printf '%s\n' "$fallback"
   fi
 }
+
+# --- the household browser --------------------------------------------------
+# A hand that changes or reviews something visible checks the result itself, in
+# a browser the household owns: one MCP server, chrome-devtools-mcp at a pinned
+# version, which launches its own Chrome headless with a throwaway profile
+# (--isolated). It never connects to a running browser, so it is never given
+# --browserUrl, --wsEndpoint or --autoConnect, and it never sees the liege's
+# profile, cookies or tabs. offices/README.md has the whole policy.
+#
+# An office opts in by allowing `mcp__<BROWSER_SERVER>` in its own settings
+# file, which is the single owner of what a hand may do, so reeve-dispatch reads
+# the opt in from there rather than from a second list.
+BROWSER_SERVER=reeve-browser
+BROWSER_PACKAGE=chrome-devtools-mcp@1.10.1
+
+# browser_wanted <office>   true when the office's settings allow the browser
+browser_wanted() {
+  grep -qF "\"mcp__$BROWSER_SERVER\"" "$REEVE_ROOT_D/offices/$1.settings.json" 2>/dev/null
+}
+
+# browser_check   prints the Chrome the server will launch and returns 0, or
+# prints why there is no household browser on this machine and returns 1.
+#
+# chrome-devtools-mcp looks for stable Chrome in exactly one place per platform
+# and nowhere else, so that place is the default here too. config/browser-chrome
+# names any other Chrome or Chromium executable, one line, read whole rather
+# than through config_get, which strips the spaces a macOS app path is full of.
+# Point it at a browser kept for this, such as Chrome for Testing, never at the
+# one you browse with: isolation is per profile, but it is still that binary.
+browser_check() {
+  local v major minor chrome f
+  command -v node >/dev/null 2>&1 || { printf 'node is not on PATH\n'; return 1; }
+  command -v npx  >/dev/null 2>&1 || { printf 'npx is not on PATH\n'; return 1; }
+  v=$(node --version 2>/dev/null); v=${v#v}
+  major=${v%%.*}; minor=${v#*.}; minor=${minor%%.*}
+  case "$major.$minor" in
+    *[!0-9.]*|.*|*.) printf 'node --version printed %s, which is not a version\n' "${v:-nothing}"
+                     return 1 ;;
+  esac
+  # The package's own engines field: ^20.19.0 || ^22.12.0 || >=23.
+  if ! { [ "$major" -ge 23 ] || { [ "$major" -eq 22 ] && [ "$minor" -ge 12 ]; } \
+         || { [ "$major" -eq 20 ] && [ "$minor" -ge 19 ]; }; }; then
+    printf 'node %s is too old for %s, which needs 20.19, 22.12, or 23 and later\n' \
+      "$v" "$BROWSER_PACKAGE"
+    return 1
+  fi
+  f=$(config_file browser-chrome)
+  if [ -f "$f" ]; then
+    chrome=$(sed -n '1{s/^[[:space:]]*//;s/[[:space:]]*$//;p;}' "$f")
+    if [ -z "$chrome" ] || [ ! -f "$chrome" ] || [ ! -x "$chrome" ]; then
+      printf 'config/browser-chrome names %s, which is not an executable file\n' \
+        "${chrome:-nothing}"
+      return 1
+    fi
+  else
+    case $(uname -s) in
+      Darwin) chrome='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' ;;
+      Linux)  chrome=/opt/google/chrome/chrome ;;
+      *)      printf 'no default Chrome location on %s, so set config/browser-chrome\n' \
+                "$(uname -s)"
+              return 1 ;;
+    esac
+    if [ ! -x "$chrome" ]; then
+      printf 'no Chrome at %s; install Google Chrome there, or set config/browser-chrome\n' \
+        "$chrome"
+      return 1
+    fi
+  fi
+  printf '%s\n' "$chrome"
+}
+
+# browser_config_write <dest> <chrome>   the MCP configuration a hand is
+# launched with, in claude's --mcp-config shape: one server and nothing else.
+# Generated per errand rather than shipped as a file because the Chrome path is
+# the machine's, and written into the errand directory like settings.json, so a
+# later change here never alters what a hand already out may do.
+#
+#   --isolated               its own temporary profile, deleted when it closes
+#   --headless               no window on the liege's screen
+#   --executablePath         the Chrome browser_check found, never a guess
+#   --no-usage-statistics    nothing about the errand is reported to Google
+#   --no-performance-crux    nor the URLs of the pages it traces
+browser_config_write() {
+  local dest=$1 chrome
+  chrome=$(printf '%s' "$2" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g')
+  cat > "$dest" <<JSON
+{
+  "mcpServers": {
+    "$BROWSER_SERVER": {
+      "command": "npx",
+      "args": ["-y", "$BROWSER_PACKAGE", "--isolated", "--headless",
+               "--executablePath", "$chrome",
+               "--no-usage-statistics", "--no-performance-crux"]
+    }
+  }
+}
+JSON
+}

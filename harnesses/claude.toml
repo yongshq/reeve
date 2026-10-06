@@ -1,7 +1,7 @@
 name = "claude"
 bin = "claude"
 verified = true
-source = "verified against claude 2.1.236: the permission table in offices/README.md, plus --strict-mcp-config, --no-chrome and --effort read from its --help and each measured on a live detached launch"
+source = "verified against claude 2.1.236: the permission table in offices/README.md, plus --strict-mcp-config, --no-chrome and --effort read from its --help and each measured on a live detached launch; --mcp-config for the household browser measured the same way on 2.1.285"
 herdr_kind = "claude"
 
 # {dirs} and {settings} both come BEFORE the prompt, and {dirs} is variadic
@@ -35,8 +35,9 @@ settings_flag = "--settings {settings}"
 # Two flags because there are two sources, measured separately:
 #   --strict-mcp-config   restricts the session to servers from --mcp-config,
 #                         and with no --mcp-config alongside it that set is
-#                         empty. Keep it companionless: adding --mcp-config
-#                         here would put the servers back.
+#                         empty. Never add one here: an --mcp-config in this
+#                         flag would go to every hand. The one that may join
+#                         it is browser_flag below, per errand.
 #   --no-chrome           Claude in Chrome is a built-in integration, not a
 #                         configured server. It does not appear in
 #                         `claude mcp list` and --strict-mcp-config alone
@@ -46,6 +47,21 @@ settings_flag = "--settings {settings}"
 # not at startup: these servers connect asynchronously, so a hand asked in its
 # first seconds answers "none" whether or not the flag is doing anything.
 mcp_flag = "--strict-mcp-config --no-chrome"
+
+# The household browser, the one MCP server a hand may have, and only a hand
+# whose office allows it (offices/README.md). reeve-dispatch writes the server
+# configuration into the errand directory and passes its path as {browser};
+# reeve-harness render appends this to mcp_flag above, never instead of it, so
+# --strict-mcp-config keeps every other configured server out and --no-chrome
+# keeps Claude in Chrome out, while this one server loads.
+#
+# Measured on 2.1.285 in a detached session, artificer settings, the machine
+# carrying a user level chrome-devtools server: the hand listed 30 tools, every
+# one mcp__reeve-browser__*, asked again a minute in still none other, and
+# new_page, take_screenshot and evaluate_script all ran with no dialog. The
+# Chrome it launched ran headless on --remote-debugging-pipe, no port, with a
+# temporary profile, and both were gone once the session closed.
+browser_flag = "--mcp-config {browser}"
 
 # Grants tool access to the errand directory, where the brief, the status file
 # and the report live. Without it a hand refuses its own first read with

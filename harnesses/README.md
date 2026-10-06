@@ -20,6 +20,7 @@ reeve needs neither python nor jq to start a hand.
 | `prompt_flag` | used only when `prompt_mode = "flag"` |
 | `perm_flag` | the autonomy flag. See the warning below |
 | `mcp_flag` | valueless flags that start the hand with no MCP tools, from any source, or empty if the harness has none. See the trap below |
+| `browser_flag` | template containing `{browser}`, the path of the household browser's MCP config, appended to `mcp_flag` for an office that allows it. Empty or absent: the hand goes without it. See `offices/README.md` |
 | `model_flag` | template containing `{model}`, or empty if the harness has none |
 | `effort_flag` | template containing `{effort}`, or empty |
 | `env` | environment assignments prefixed to the command |

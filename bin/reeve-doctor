@@ -102,6 +102,25 @@ for t in git herdr jq gh python3; do
   fi
 done
 
+# The household browser is optional: a dispatch never refuses for want of it,
+# the hand reports `not visually verified` instead. Counted all the same,
+# because a machine without it is one where no hand checks a page it changed,
+# and that is worth knowing before the first one comes back unchecked.
+hdr "household browser (how a hand looks at a page it changed)"
+if chrome=$(browser_check); then
+  printf '  ok          %s via npx, headless and isolated\n' "$BROWSER_PACKAGE"
+  printf '  chrome      %s\n' "$chrome"
+  offs=''
+  for o in $(office_names); do browser_wanted "$o" && offs="$offs${offs:+ }$o"; done
+  printf '  offices     %s\n' "${offs:-none allow it}"
+  printf '  first use   npx fetches the package once, so the first hand needs the network\n'
+else
+  printf '  UNAVAILABLE %s\n' "$chrome"
+  printf '  dispatch still works: hands that would look at a page report\n'
+  printf '  "not visually verified" instead.\n'
+  WARN=$((WARN+1))
+fi
+
 hdr "backends (where a hand's session lives)"
 "$BIN/reeve-backend" list | sed 's/^/  /'
 printf '  default     %s\n' "$("$BIN/reeve-backend" resolve 2>/dev/null || echo 'none resolvable')"

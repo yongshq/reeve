@@ -6,6 +6,7 @@
 #   reeve-harness list
 #   reeve-harness check <name>                 exit 0 only if installed and verified
 #   reeve-harness render <name> <brief-abs-path> --settings <path> [--model M] [--effort E] [--hand ID]
+#                        [--browser <mcp-config>]
 #   reeve-harness detect                       which harness reeve is itself running under
 #   reeve-harness get <name> <key>             read one declared key, for inspection
 
@@ -91,10 +92,11 @@ harness_check() {
 
 harness_render() {
   local n=$1 brief=$2 model=${3:-} effort=${4:-} settings_path=${5:-} extra=${6:-} hand=${7:-}
+  local browser=${8:-}
   [ -n "$brief" ] || die "render needs an absolute brief path"
   case $brief in /*) ;; *) die "brief path must be absolute, got '$brief'" ;; esac
 
-  local bin launch mode pflag perm mflag eflag line prompt dirs dflag d sep settings mcp
+  local bin launch mode pflag perm mflag eflag line prompt dirs dflag d sep settings mcp bflag
   bin=$(h_get "$n" bin "$n")
   launch=$(h_get "$n" launch '')
   [ -n "$launch" ] || die "harness '$n' declares no launch template"
@@ -120,6 +122,19 @@ harness_render() {
   # A hand suspended in an MCP consent dialog cannot append `blocked:`, so this
   # is the one class of stall the status file could never surface.
   mcp=$(h_get "$n" mcp_flag '')
+
+  # The one exception, and the household's own: the browser server, from the
+  # configuration reeve-dispatch generated for this errand. It joins the mcp
+  # slot rather than taking one of its own, so it can only ever arrive next to
+  # the flags that shut everything else off, never in place of them. Asked for
+  # on a harness that declares no way to pass it is a dispatch bug, not a hand
+  # to start without the browser it was promised.
+  if [ -n "$browser" ]; then
+    bflag=$(h_get "$n" browser_flag '')
+    [ -n "$bflag" ] \
+      || die "harness '$n' declares no browser_flag, so it cannot carry the household browser"
+    mcp="$mcp${mcp:+ }$(printf '%s' "$bflag" | sed "s|{browser}|$browser|g")"
+  fi
 
   # Grant tool access to the errand directory. A hand's working copy is its cwd,
   # but the brief, the status file and the report all live in the errand
@@ -219,7 +234,7 @@ EOS
 
 # --- cli --------------------------------------------------------------------
 cmd=${1:-}; shift 2>/dev/null || :
-sel='' office='' model='' effort='' settings_path='' extra_dirs='' hand=''
+sel='' office='' model='' effort='' settings_path='' extra_dirs='' hand='' browser=''
 args=()
 while [ $# -gt 0 ]; do
   case $1 in
@@ -230,6 +245,8 @@ while [ $# -gt 0 ]; do
     --settings) settings_path=${2:-}; shift 2 ;;
     # The errand id, so the hand's own environment says it is one.
     --hand)    hand=${2:-}; shift 2 ;;
+    # The household browser's MCP configuration, for an office that has one.
+    --browser) browser=${2:-}; shift 2 ;;
     # Repeatable. One more directory the hand may reach, beyond its own copy and
     # its errand directory.
     --add-dir) extra_dirs="$extra_dirs${extra_dirs:+ }${2:-}"; shift 2 ;;
@@ -247,7 +264,8 @@ case $cmd in
   check)   n=${1:-$(harness_resolve "$sel" "$office")}; harness_check "$n" ;;
   render)
     n=${1:-}; [ -n "$n" ] || die "render needs a harness name"
-    harness_render "$n" "${2:-}" "$model" "$effort" "$settings_path" "$extra_dirs" "$hand" ;;
+    harness_render "$n" "${2:-}" "$model" "$effort" "$settings_path" "$extra_dirs" "$hand" \
+      "$browser" ;;
   list)
     printf '%-10s %-10s %-9s %s\n' HARNESS INSTALLED VERIFIED BIN
     for n in $(harness_known); do
