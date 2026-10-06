@@ -640,7 +640,7 @@ session_state() { # session_state <sid> -> alive | dead | unknown
 # --- reeve names ------------------------------------------------------------
 # A session id is a uuid, which is identity and not something the liege can
 # read in a sidebar. So each reeve also carries a short name, and a hand it
-# sends out is labelled with it: `Scout sent by Aldric`. The id stays the
+# sends out is labelled with it: `Scout of Aldric`. The id stays the
 # authority everywhere; a name is presentation and is never matched to decide
 # anything destructive.
 #
@@ -891,7 +891,7 @@ reeve_name() {
 }
 
 # hand_label <office> <id> [<reeve name>]
-#   What a backend shows for a hand: config/hand-label, else `{Office} sent by
+#   What a backend shows for a hand: config/hand-label, else `{Office} of
 #   {reeve}`. With no name, `{Office}: {id}`, whatever the template. {Office}
 #   is the office with its first letter capitalised, {office} as written. The
 #   default leaves the id out: herdr shows it on the line under the tab, from
@@ -904,7 +904,7 @@ hand_label() {
   cap=$(printf '%s' "${office:0:1}" | tr '[:lower:]' '[:upper:]')${office:1}
   t="{Office}: {id}"
   if [ -n "$name" ]; then
-    t="{Office} sent by {reeve}"
+    t="{Office} of {reeve}"
     f=$(config_file hand-label)
     [ -f "$f" ] && f=$(head -n 1 "$f" 2>/dev/null) && [ -n "$f" ] && t=$f
   fi

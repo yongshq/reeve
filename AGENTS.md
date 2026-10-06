@@ -22,7 +22,7 @@ a skill, listed in section 11.
 | holding | one repo inside a manor |
 | backend | where a session lives: herdr |
 | harness | which agent CLI runs in it: claude, codex, pi, opencode, cursor, grok, gemini |
-| name | a reeve's short name, unique among the live reeves on one home. A hand's tab is labelled with it, `<Office> sent by <Name>`, and the reeve's own tab with the name |
+| name | a reeve's short name, unique among the live reeves on one home. A hand's tab is labelled with it, `<Office> of <Name>`, and the reeve's own tab with the name |
 
 ## 2. Hard rules
 

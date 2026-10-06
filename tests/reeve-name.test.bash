@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # A reeve has a short name, and every hand it sends out carries it:
-# `Scout sent by Aldric` on a hand's tab is which office and whose hand, and
+# `Scout of Aldric` on a hand's tab is which office and whose hand, and
 # the reeve's own tab reads its name. The session id stays the identity; the name is what the liege reads.
 #
 # What is pinned here is what makes a name worth having. Two live reeves never
@@ -240,7 +240,7 @@ brief lead fix-auth artificer
 eq "10 the brief names the reeve that sent it" "| reeve | Escanor |" \
    "$(grep '^| reeve |' "$REEVE_HOME/errands/fix-auth/brief.md")"
 eq "10 and the record keeps it" "reeve=Escanor" "$(grep '^reeve=' "$REEVE_HOME/state/fix-auth.meta")"
-eq "10 a dry run labels the hand <Office> sent by <Name>" "Artificer sent by Escanor" \
+eq "10 a dry run labels the hand <Office> of <Name>" "Artificer of Escanor" \
    "$(dry_label lead fix-auth)"
 eq "10 the dry run wrote no name for a session that had none" "" \
    "$(dry_label nameless fix-auth >/dev/null; cat "$SESS/nameless/name" 2>/dev/null)"
@@ -285,7 +285,7 @@ printf 'target=stub:1\nbackend=stub\n' >> "$REEVE_HOME/state/fix-auth.meta"
 out=$(REEVE_SESSION=heir REEVE_ROOT="$STUB" "$ROOT/bin/reeve-adopt" fix-auth 2>&1); rc=$?
 eq "15 adopted" "0" "$rc"
 eq "15 the record names the new reeve" "reeve=Percy" "$(grep '^reeve=' "$REEVE_HOME/state/fix-auth.meta")"
-eq "15 and the hand is relabelled by its target" "stub:1|Artificer sent by Percy" \
+eq "15 and the hand is relabelled by its target" "stub:1|Artificer of Percy" \
    "$(cat "$REEVE_HOME/relabels" 2>/dev/null)"
 has "15 which it says" "$out" "relabelled"
 

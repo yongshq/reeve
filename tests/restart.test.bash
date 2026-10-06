@@ -121,8 +121,8 @@ echo "--- 2. herdr: a target is checked against the pane it was made for ---"
 # One reading each: a mismatch is read again before it counts, tested below.
 export REEVE_IDENT_TRIES=1
 export STUB_CWD=$SCRATCH
-ID=$(ident_of "$SCRATCH" "Scout sent by Aldric")
-out=$(STUB_PANES='w7:p9' STUB_CWD=/a/plugin/dir h create_endpoint "$SCRATCH" "Scout sent by Aldric" "w7$S")
+ID=$(ident_of "$SCRATCH" "Scout of Aldric")
+out=$(STUB_PANES='w7:p9' STUB_CWD=/a/plugin/dir h create_endpoint "$SCRATCH" "Scout of Aldric" "w7$S")
 eq  "2 a target carries the identity of the directory asked for, and its label" "$out" "w7|w7:p9|w7:t9#$ID"
 T=$out
 eq  "2 the same pane, restored with its directory, is itself" \
@@ -133,7 +133,7 @@ STUB_PANES='w7:p9' STUB_CWD=/liege/notes h kill "$T" 2>"$SCRATCH/err"; rc=$?
 eq  "2 and it is never closed"                              "$rc" 1
 nas "2 no tab close went out"                               "$(calls)" "tab close"
 has "2 which it says"                                       "$(cat "$SCRATCH/err")" "not the pane this target was made for"
-STUB_PANES='w7:p9' STUB_CWD=/liege/notes h relabel "$T" "Scout sent by Bran" 2>/dev/null
+STUB_PANES='w7:p9' STUB_CWD=/liege/notes h relabel "$T" "Scout of Bran" 2>/dev/null
 nas "2 nor relabelled"                                      "$(calls)" "tab rename"
 STUB_PANES='w7:p9' STUB_CWD=/liege/notes h send_text_submit "$T" "carry on" 2>/dev/null
 nas "2 nor typed into"                                      "$(calls)" "pane run"
@@ -152,17 +152,17 @@ nas "2 a pane that shows neither directory nor label is never acted on" "$(calls
 # A restored shell's startup files were measured leaving it in another
 # directory for good. Its label still says whose it is.
 eq  "2 a restored tab in another directory is itself by its label" \
-    "$(STUB_PANES='w7:p9' STUB_CWD=/a/plugin/dir STUB_TLABEL="Scout sent by Aldric" STUB_FG=claude h agent_state "$T")" alive
+    "$(STUB_PANES='w7:p9' STUB_CWD=/a/plugin/dir STUB_TLABEL="Scout of Aldric" STUB_FG=claude h agent_state "$T")" alive
 eq  "2 a stranger's label on the reused id is not" \
     "$(STUB_PANES='w7:p9' STUB_CWD=/liege/notes STUB_TLABEL="notes" STUB_FG=claude h agent_state "$T")" missing
-T2=$(STUB_PANES='w7:p9' h relabel "$T" "Scout sent by Bran")
-eq  "2 a relabel hands back the target with its new label" "$T2" "w7|w7:p9|w7:t9#$(ident_of "$SCRATCH" "Scout sent by Bran")"
+T2=$(STUB_PANES='w7:p9' h relabel "$T" "Scout of Bran")
+eq  "2 a relabel hands back the target with its new label" "$T2" "w7|w7:p9|w7:t9#$(ident_of "$SCRATCH" "Scout of Bran")"
 
 # Two hands of one office from one reeve share a label: the label carries no
 # errand id. Identity still separates them, by their ids and their copies.
 CA="$SCRATCH/copy-a"; CB="$SCRATCH/copy-b"
 git init -q "$CA" && git init -q "$CB"
-L="Scout sent by Aldric"
+L="Scout of Aldric"
 TA="w7|w7:p9|w7:t9#$(ident_of "$CA" "$L")"
 TB="w7|w7:p8|w7:t8#$(ident_of "$CB" "$L")"
 STUB_PANES='w7:p9 w7:p8' STUB_CWD=$CA h kill "$TA"
@@ -226,10 +226,10 @@ eq  "5 an owner on this very pane is replaced, not alive"    "$rc" 0
 eq  "5 and the errand is this session's"                     "$(grep '^session=' "$REEVE_HOME/state/e5.meta")" session=new
 fresh
 record old Aldric dead
-errand e5b old Aldric "w7|w7:p9|w7:t9#$(ident_of "$SCRATCH" "Scout sent by Aldric")" herdr
+errand e5b old Aldric "w7|w7:p9|w7:t9#$(ident_of "$SCRATCH" "Scout of Aldric")" herdr
 REEVE_SESSION=new STUB_CWD=$SCRATCH STUB_PANES='w7:p9' "$ROOT/bin/reeve-adopt" e5b >/dev/null 2>&1
 eq  "5 an adopted hand's target keeps its new label as identity" \
-    "$(grep '^target=' "$REEVE_HOME/state/e5b.meta")" "target=w7|w7:p9|w7:t9#$(ident_of "$SCRATCH" "Scout sent by Bran")"
+    "$(grep '^target=' "$REEVE_HOME/state/e5b.meta")" "target=w7|w7:p9|w7:t9#$(ident_of "$SCRATCH" "Scout of Bran")"
 fresh
 record old Aldric alive "w3:p1$S"
 errand e5 old Aldric
@@ -362,17 +362,17 @@ export REEVE_IDENT_TRIES=1
 # A `#` inside an id, should a herdr ever hand one out, stays part of the id.
 STUB_PANES='w#1:p9' h kill "w#1|w#1:p9|w#1:t9"
 has "13 a target with no identity keeps every # in its ids" "$(calls)" "tab close w#1:t9"
-TH="w#1|w#1:p9|w#1:t9#$(ident_of "$SCRATCH" "Scout sent by Ab#c")"
+TH="w#1|w#1:p9|w#1:t9#$(ident_of "$SCRATCH" "Scout of Ab#c")"
 STUB_PANES='w#1:p9' STUB_CWD=$SCRATCH h kill "$TH"
 has "13 and one with an identity acts on its own tab"       "$(calls)" "tab close w#1:t9"
 STUB_PANES='w#1:p9' STUB_CWD=/liege/notes h kill "$TH" 2>/dev/null
 nas "13 still refusing a stranger under that id"            "$(calls)" "tab close"
 eq  "13 the pane is read whole"  "$(STUB_PANES='w#1:p9' STUB_FG=claude h agent_state "$TH")" alive
-T13=$(STUB_PANES='w#1:p9' h relabel "$TH" "Scout sent by Bran#2")
+T13=$(STUB_PANES='w#1:p9' h relabel "$TH" "Scout of Bran#2")
 eq  "13 a relabel to a label with a # keeps the ids whole" "$T13" \
-    "w#1|w#1:p9|w#1:t9#$(ident_of "$SCRATCH" "Scout sent by Bran#2")"
+    "w#1|w#1:p9|w#1:t9#$(ident_of "$SCRATCH" "Scout of Bran#2")"
 has "13 and renames that tab"                                "$(calls)" "tab rename w#1:t9"
-T13=$(STUB_PANES='w#1:p9' h relabel "w#1|w#1:p9|w#1:t9" "Scout sent by Bran")
+T13=$(STUB_PANES='w#1:p9' h relabel "w#1|w#1:p9|w#1:t9" "Scout of Bran")
 eq  "13 a target with no identity is handed back as nothing new" "$T13" ""
 unset REEVE_IDENT_TRIES
 

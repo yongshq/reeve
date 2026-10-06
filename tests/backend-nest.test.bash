@@ -167,11 +167,11 @@ out=$(STUB_LABEL=Aldric STUB_WS='w7' h ensure_group Aldric "w7$S" 2>"$SCRATCH/er
 eq  "1 and never when the socket is listed"                  "$(cat "$SCRATCH/err")" ''
 
 echo "--- 2. herdr create_endpoint ---"
-out=$(h create_endpoint "$PLAIN" "Scout sent by Aldric" "w7$S")
+out=$(h create_endpoint "$PLAIN" "Scout of Aldric" "w7$S")
 # Each ends `#<identity>`, what the endpoint was made as: tests/restart.test.bash.
 eq  "2 with a group, a three field target, no socket"     "${out%%#*}" "w7|w7:p9|w7:t9"
 has "2 carrying its identity"                              "$out" "w7|w7:p9|w7:t9#c"
-has "2 opened as a tab in that workspace"                  "$(calls)" "tab create --workspace w7 --cwd $PLAIN --label Scout sent by Aldric --no-focus"
+has "2 opened as a tab in that workspace"                  "$(calls)" "tab create --workspace w7 --cwd $PLAIN --label Scout of Aldric --no-focus"
 nas "2 and no workspace of its own"                        "$(calls)" "workspace create"
 
 out=$(h create_endpoint "$PLAIN" "scout: x")
@@ -202,11 +202,11 @@ h kill 'w5|w5:p1'
 has "4 a two field target still closes its own workspace"  "$(calls)" "workspace close w5"
 
 echo "--- 5. herdr relabel ---"
-h relabel 'w7|w7:p9|w7:t9' "Scout sent by Percy"
-has "5 a nested hand renames its tab"                      "$(calls)" "tab rename w7:t9 Scout sent by Percy"
+h relabel 'w7|w7:p9|w7:t9' "Scout of Percy"
+has "5 a nested hand renames its tab"                      "$(calls)" "tab rename w7:t9 Scout of Percy"
 nas "5 never its reeve's workspace"                        "$(calls)" "workspace rename"
-h relabel 'w5|w5:p1' "Scout sent by Percy"
-has "5 a two field target renames its workspace"           "$(calls)" "workspace rename w5 Scout sent by Percy"
+h relabel 'w5|w5:p1' "Scout of Percy"
+has "5 a two field target renames its workspace"           "$(calls)" "workspace rename w5 Scout of Percy"
 
 echo "--- 8. dispatch, with and without a group ---"
 git init -q "$SCRATCH/web"

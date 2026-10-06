@@ -28,7 +28,7 @@ knowing the rules that make dispatching safe.
 
 ## Then take up the session
 
-Take your name first. It is what every hand you send out is labelled with: `Scout sent by <Name>`.
+Take your name first. It is what every hand you send out is labelled with: `Scout of <Name>`.
 
 - Resuming a handoff (`reeve-handoff newest <manor>` finds it) whose header carries a
   `Reeve: <Name>` line: `reeve-name claim <Name>`, so you keep the name the last reeve had. If it

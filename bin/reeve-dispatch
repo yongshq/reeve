@@ -198,7 +198,7 @@ fi
 
 # --- endpoint and launch ---------------------------------------------------
 # The label names the office and the reeve that sent the hand, so the liege
-# reads `Scout sent by Aldric` on a tab and knows whose it is. The errand id is
+# reads `Scout of Aldric` on a tab and knows whose it is. The errand id is
 # on the line under it, from the terminal title. config/hand-label overrides
 # the shape, with {reeve} {Office} {office} {id}; a reeve with no name gets
 # `Scout: fix-auth`.

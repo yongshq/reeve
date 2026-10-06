@@ -77,7 +77,7 @@ _h_label_of() {
 # such reading would call the hand's own pane someone else's.
 #
 # A label is not one hand's alone: two hands of one office from one reeve both
-# read `Scout sent by Aldric`. So a label match does not count from a pane that
+# read `Scout of Aldric`. So a label match does not count from a pane that
 # sits in another git checkout: that is another hand, in its own copy, under
 # the shared label. A restored shell that wandered off lands somewhere else.
 _h_verified() {

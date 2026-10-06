@@ -9,7 +9,7 @@
 #
 # Two properties matter beyond the names themselves. The copy stays FLAT,
 # because an <office>/<id> segment would quietly create a directory per role.
-# The label is `<Office> sent by <Name>`, one quoted argument to the backend.
+# The label is `<Office> of <Name>`, one quoted argument to the backend.
 # And the steward keeps having no copy at all, because dispatch runs it in the
 # reeve's home and a recorded path it never creates is a lie in the record.
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
@@ -173,8 +173,8 @@ done
 # A reeve with a name puts it on the tab: which office, sent by whom.
 REEVE_SESSION=namer REEVE_NAME=Godric "$B" e-named "$REPO" --office scout >/dev/null \
   || { printf 'FAIL  reeve-brief refused for a named reeve\n'; FAIL=$((FAIL+1)); }
-eq "a named reeve's hand is labelled <Office> sent by <Name>" \
-   "Scout sent by Godric" "$(dry_label e-named)"
+eq "a named reeve's hand is labelled <Office> of <Name>" \
+   "Scout of Godric" "$(dry_label e-named)"
 
 echo "passed=$PASS failed=$FAIL"
 [ "$FAIL" -eq 0 ]

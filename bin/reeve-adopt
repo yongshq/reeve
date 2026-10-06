@@ -24,7 +24,7 @@
 # whose recorded reeve name is this reeve's, and names the rest.
 #
 # The errand takes this reeve's name with it, and where the backend can, the
-# hand's label is renamed to match: `<Office> sent by <Name>`.
+# hand's label is renamed to match: `<Office> of <Name>`.
 #
 # Exit: 0 adopted, 1 refused.
 
