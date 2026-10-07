@@ -151,11 +151,12 @@ and you will still be telling the liege the work is in flight. That happened. Th
 is a backstop, not a substitute for the watch: `bin/reeve-sentry` or a whole-fleet listing
 (`bin/reeve-status` bare, `--all` or `--orphans`) delivers it once, on stderr for a listing so a
 filter over the table cannot eat it. `bin/reeve-status <id>` never delivers, and
-`bin/reeve-handoff new` copies pending lines into the handoff. **Never silence or merge (`2>/dev/null`,
-`2>&1 |`) the stderr of a household command, nor filter a watch's one line** (it prints on stdout and is reported once): a
-line thrown away after it arrived is marked reported and never said again. An `undeliverable:` line from a watch, or a listing's
-`cannot be delivered` warning, means signals are stuck, not absent: say so, never "nothing in flight".
-An errand whose record names no session gets no line at all; it stays in flight for the next watch.
+`bin/reeve-handoff new` copies pending lines into the handoff. **Never silence or merge
+(`2>/dev/null`, `2>&1 |`) the stderr of a household command, nor filter a watch's one line** (it
+prints on stdout and is reported once): a line thrown away after it arrived is marked reported and
+never said again. An `undeliverable:` line from a watch, or a listing's `cannot be delivered`
+warning, means signals are stuck, not absent: say so, never "nothing in flight". An errand whose
+record names no session gets no line at all; it stays in flight for the next watch.
 What the line promises, exactly, and its other limits: `docs/supervision.md`.
 
 A dispatch that ends with `NOTHING IS WATCHING` is not a finished dispatch.
@@ -197,9 +198,9 @@ Rules you must hold to:
 
   A session that is gone opens `stale:` instead. A `blocked:` hand is not checked for `idle`,
   because it already woke you. `bin/reeve-status` shows `idle` or `wedged` in its process column
-  on the sentry's own rule, so the listing and the wake never disagree. A backend that cannot tell
-  idle from busy, or cannot capture the screen, cannot fire these checks, and the sentry says so on
-  stderr. A `needs-decision` is a hand deliberately asking, and that path is unaffected.
+  on the sentry's own rule, so the listing and the wake never disagree. A backend or harness that
+  cannot tell idle from busy, or a backend that cannot capture the screen, cannot fire these
+  checks, and the sentry says so on stderr. A `needs-decision` is a hand deliberately asking, and that path is unaffected.
 - When the sentry wakes you, handle every actionable errand before you reply to the liege. Do not
   report on one and leave two.
 - **You supervise your own errands and nobody else's.** Several reeves share one home, and an

@@ -171,7 +171,8 @@ echo "--- 2. a listing cannot lose a line to what the reeve does with its stdout
 # settles. A FILTER is a write that SUCCEEDS into something that throws the line
 # away: `| grep` for anything else consumed all three and returned 0, and since
 # delivering marks the errand reported, that was the report, permanently and
-# silently. docs/supervision.md promises both cases cost nothing.
+# silently. AGENTS.md section 6 (filter) and docs/supervision.md (trim) promise
+# both cases cost nothing.
 #
 # So a listing hands its lines over on stderr, outside the stream the reeve is
 # filtering, and both cases come out the same way.

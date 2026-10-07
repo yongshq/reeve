@@ -19,9 +19,8 @@ Additions to `AGENTS.md` section 6 (who delivers the line, and on which stream):
 - it follows the errand if another session adopts it with `bin/reeve-adopt`
 - a command asking some other question never spends one, which is what lets the handoff copy
   survive your reset
-- a spool holding something it cannot give up says so, as a line of its own opening
-  `undeliverable:`, instead of reading as an empty one. A listing says it as a `cannot be
-  delivered` warning on stderr, with no `undeliverable:` word
+- a watch says an undeliverable spool as its own wake line on stdout; a listing says it on stderr
+  as `reeve: a pending notification cannot be delivered, check <dir>`, with no `undeliverable:` word
 
 One case beyond the contract's: an undelivered line in the spool of a session `sessions_prune`
 collects once it is past `session-retain`. Legitimate under that rule, and still a line that ends
@@ -42,8 +41,8 @@ seconds a `waiting` one must.
   a watch happens to see that turn working.
 - The listing reads the sentry's clock and writes nothing; before the threshold it shows the
   silence without the word.
-- The "cannot tell idle from busy" notice is said once per watch, for a hand silent past
-  `config/hand-stale`.
+- The "a backend or harness cannot tell idle from busy" notice is said once per watch, for a hand
+  silent past `config/hand-stale`.
 - A threshold set to anything but a whole number of seconds turns its half of the check off, which
   the sentry and the listing both say on stderr.
 
@@ -66,8 +65,8 @@ the price.
   counted before then.
 - The listing shows `wedged` on the same second the sentry wakes, reading the screen again and
   writing nothing; before that a working hand shows as working.
-- The "cannot tell idle from busy" notice is said once per watch, alongside the idle limit. An
-  unreadable screen, or a backend that cannot capture, gives no wake and is said on stderr once per
-  watch for a hand silent past the window.
+- The "a backend or harness cannot tell idle from busy" notice is said once per watch, alongside the idle
+  limit. An unreadable screen, or a backend that cannot capture, gives no wake and is said on stderr
+  once per watch for a hand silent past the window.
 - A threshold that is not a whole number turns the check off, which the sentry and the listing both
   say on stderr; 0 turns it off silently.
