@@ -347,11 +347,13 @@ if [ "$same" = no ]; then
     quit "reeve $name's session $old was seen after it ended here, so it came back and is not to be taken over. trail removed"
   fi
 fi
-# The name is held again by a live reeve on another pane: nothing to offer, and
-# a resume would only be refused its claim after writing a successor record.
-# Judged as the trail's session, so a session whose successor chain ends at
-# $old (an earlier /clear of this same reeve) is not a rival.
-if [ "$same" = no ] && rival=$(REEVE_SESSION=$old name_live_elsewhere "$name" "$(reeve_pane)" "$old"); then
+# The name is held again by a live reeve elsewhere (another pane, in herdr):
+# nothing to offer, and a resume would only be refused its claim after writing
+# a successor record. Judged as the trail's session, so a session whose
+# successor chain ends at $old (an earlier /clear of this same reeve) is not a
+# rival. A session already holding the name is no rival to itself: the claim
+# step then answers "already this session's".
+if [ "$same" = no ] && [ "$(session_name "$sid")" != "$name" ] && rival=$(REEVE_SESSION=$old name_live_elsewhere "$name" "$(reeve_pane)" "$old"); then
   rival_where=elsewhere; [ -n "$(reeve_pane)" ] && rival_where='on another pane'
   if [ "$mode" = hook ]; then
     rm -f "$f"; log "the trail of $old removed: $name is live again as $rival"

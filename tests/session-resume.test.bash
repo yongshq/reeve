@@ -591,6 +591,31 @@ OUT=$(hook SessionStart s2-sid "$SCRATCH/s2.jsonl" clear | "$START" 2>&1)
 ck_eq '3d rival outside herdr: silent' "$OUT" ''
 ck_eq '3d rival outside herdr: errand kept' "$(sed -n 's/^session=//p' "$REEVE_HOME/state/e1.meta")" s1-sid
 
+# The new session claims the name itself (a fresh reeve resuming from a
+# handoff) before the liege says resume: no rival to itself, so --resume works.
+setup3 home3s prompt_input_exit
+ended_ago 2000
+OUT=$(hook SessionStart new-sid "$SCRATCH/new.jsonl" startup | "$START" 2>&1)
+ck_eq '3d self-claim: offered' "$(sys_of "$OUT")" 'Aldric was here, say resume to pick up.'
+OUT=$(REEVE_SESSION=new-sid "$ROOT/bin/reeve-name" claim Aldric 2>&1); RC=$?
+ck_eq '3d self-claim: claim ok' "$RC" 0
+OUT=$(REEVE_SESSION=new-sid "$START" --resume "$SCRATCH/work" 2>&1); RC=$?
+ck_eq '3d self-claim: --resume ok' "$RC" 0
+ck_has '3d self-claim: already its own' "$OUT" "already this session's"
+ck_eq '3d self-claim: errand adopted' "$(sed -n 's/^session=//p' "$REEVE_HOME/state/e1.meta")" new-sid
+# The chained variant: /clear, exit, then the claim and --resume.
+setup3 home3t
+hook SessionStart s1-sid "$SCRATCH/s1.jsonl" clear | "$START" >/dev/null 2>&1
+hook SessionEnd s1-sid "$SCRATCH/s1.jsonl" other | "$END"
+for s in old-sid s1-sid; do date +%s | awk '{print $1-2000}' > "$REEVE_HOME/state/sessions/$s/seen"; done
+OUT=$(hook SessionStart s2-sid "$SCRATCH/s2.jsonl" startup | "$START" 2>&1)
+ck_eq '3d chained self-claim: offered' "$(sys_of "$OUT")" 'Aldric was here, say resume to pick up.'
+OUT=$(REEVE_SESSION=s2-sid "$ROOT/bin/reeve-name" claim Aldric 2>&1); RC=$?
+ck_eq '3d chained self-claim: claim ok' "$RC" 0
+OUT=$(REEVE_SESSION=s2-sid "$START" --resume "$SCRATCH/work" 2>&1); RC=$?
+ck_eq '3d chained self-claim: --resume ok' "$RC" 0
+ck_eq '3d chained self-claim: errand adopted' "$(sed -n 's/^session=//p' "$REEVE_HOME/state/e1.meta")" s2-sid
+
 echo '--- 4. the successor record ---'
 fresh_home home4
 reeve old-sid Aldric

@@ -86,7 +86,8 @@ case $cmd in
       # A holder that crashed lets go once its pane closes or falls back to a
       # shell, or its heartbeat is session-stale old. Retrying keeps the name;
       # running bare takes a new one for good, which is the liege's call.
-      die "'$want' is held by live reeve $rival on another pane. if that reeve is gone, retry reeve-name $cmd $want once its pane is closed, or once its last heartbeat is $(config_get session-stale 900)s old. a new name from the pool (reeve-name, bare) only if the liege agrees"
+      where=elsewhere; [ -n "$(reeve_pane)" ] && where='on another pane'
+      die "'$want' is held by live reeve $rival $where. if that reeve is gone, retry reeve-name $cmd $want once its pane is closed, or once its last heartbeat is $(config_get session-stale 900)s old. a new name from the pool (reeve-name, bare) only if the liege agrees"
     fi
     # claim takes back a name a handoff recorded, so a group this session made
     # under another name is let go and claim finds the one its name kept. set
