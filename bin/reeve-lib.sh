@@ -366,7 +366,7 @@ WAKE_DELIVER_EOF
 # A failure to record is said out loud, once, in the household's own voice. The
 # line itself is already out, so what is lost is the memory of having said it,
 # which costs a duplicate report later and never the report: see delivered_set
-# for why that is the only outcome, and AGENTS.md for the promise it qualifies.
+# for why that is the only outcome, and docs/supervision.md for the promise it qualifies.
 wake_reported() { # wake_reported <errand> <lines>
   local id=${1:-} n=${2:-} cur
   case $id in ''|*[!a-z0-9-]*) return 0 ;; esac
