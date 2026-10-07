@@ -1,22 +1,40 @@
 #!/usr/bin/env bash
 # A Claude Code SessionStart hook: a reeve that comes back after /clear, an exit
-# and relaunch, or a resume picks up where it was, by itself. Same name, its
-# errands its own, the truth about its watch, and what it and the liege were
-# discussing.
+# and relaunch, or a resume picks up where it was. Same name, its errands its
+# own, the truth about its watch, and what it and the liege were discussing.
 #
 # Usage, from hooks/hooks.json (the plugin) and .claude/settings.json (a session
 # started inside the clone), matched on startup, clear and resume, never by hand:
 #   bin/reeve-session-start < <SessionStart hook input JSON>
+# By the session the offer below went to, once the liege says resume:
+#   bin/reeve-session-start --resume [<dir>]   take the trail here, print it all
+# And on its own:
 #   bin/reeve-session-start --digest <transcript.jsonl>...   print the digest only
 #
 # Acts only where bin/reeve-session-end left a trail: this pane inside herdr,
-# else this working directory. No trail, a hand (REEVE_HAND), or a trail older
-# than config/resume-window (default three days): nothing at all is said.
+# else this working directory (<dir> for --resume, default the current one).
+# Found by file name before any python runs, so a hand (REEVE_HAND) or any
+# session with no trail here exits having paid for nothing.
+#
+# Two modes, by how the last session ended:
+#   /clear   the trail says clear, this start is a clear, inside
+#            config/resume-clear-window (default 600s): the new session is
+#            certainly the reeve, so it takes the trail by itself.
+#   anything else, inside config/resume-window (default three days): an offer,
+#            one line on screen, `<Name> was here, say resume to pick up`.
+#            Nothing is taken, claimed, adopted or injected until the liege
+#            says resume and --resume runs.
+#
+# A trail is void once its session is seen after it ended, its heartbeat newer
+# than ended plus config/resume-slack (default 60s): it came back, by a resume,
+# and a live reeve is never taken over. It is removed. A resume of a reeve's
+# session anywhere also removes every other trail naming it, and stamps its
+# heartbeat, which voids any successor record written for it (successor_of).
 #
 # A trail is taken once. Two copies of this hook on one start, the plugin's and
 # the clone's, race for it by renaming it, and the loser exits silently.
 #
-# For a new session (startup, clear), in this order:
+# Taking it, for a new session, in this order:
 #   1. records it as the ended session's successor, the proof session_replaced
 #      accepts where no pane can give one, and the record a running
 #      bin/reeve-sentry follows to keep watching for the new session
@@ -25,7 +43,8 @@
 #   3. `reeve-adopt --mine`: takes only orphans under that name whose owner is
 #      gone or replaced, so never a live reeve's
 #   4. says whether a watch from before is still running, by its own marker
-#   5. points at a handoff written inside the span the digest covers, or since
+#   5. points at this reeve's newest handoff (`- **Reeve:** <Name>` in its
+#      header) when written inside the span the digest covers, or since
 #   6. the digest: the last 30 messages from the liege, verbatim, each with the
 #      reeve's reply cut to its Opening, Waiting on you and Next action blocks;
 #      no tool calls or results; oldest first; cut from the oldest end to fit
@@ -33,10 +52,11 @@
 # A resume of the very session that ended (`claude --resume`, same id) already
 # holds its conversation, so it gets steps 2 and 4 only.
 #
-# All of it goes back as SessionStart additionalContext, never to the screen.
-# Anything that fails is one line in $REEVE_HOME/state/session-hooks.log.
+# The hook's words go back as SessionStart additionalContext, never to the
+# screen, save the offer's one line, which is its systemMessage. --resume prints
+# them. Anything that fails is one line in $REEVE_HOME/state/session-hooks.log.
 #
-# Exit: always 0.
+# Exit: always 0 as a hook. --resume: 0 taken, 1 nothing to take here.
 
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/reeve-lib.sh"
 BIN=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -93,7 +113,8 @@ def opener(e):
     if e.get("type") != "user" or e.get("isMeta") or e.get("isSidechain") \
             or e.get("isCompactSummary"):
         return None
-    c = (e.get("message") or {}).get("content")
+    m = e.get("message")
+    c = m.get("content") if isinstance(m, dict) else None
     if isinstance(c, list):
         if any(isinstance(b, dict) and b.get("type") == "tool_result" for b in c):
             return None
@@ -125,10 +146,13 @@ def opener(e):
 def assistant_text(e):
     if e.get("type") != "assistant" or e.get("isSidechain"):
         return ""
-    c = (e.get("message") or {}).get("content")
+    m = e.get("message")
+    c = m.get("content") if isinstance(m, dict) else None
     if isinstance(c, str):
         return c
-    return "\n".join(b["text"] for b in c or []
+    if not isinstance(c, list):
+        return ""
+    return "\n".join(b["text"] for b in c
                      if isinstance(b, dict) and b.get("type") == "text"
                      and isinstance(b.get("text"), str))
 
@@ -181,14 +205,18 @@ turns = []
 for path in sys.argv[1:]:
     cur = None
     for e in entries(path):
-        o = opener(e)
-        if o:
-            cur = {"kind": o[0], "text": o[1], "reeve": [], "ts": epoch(e)}
-            turns.append(cur)
-        elif cur is not None:
-            t = assistant_text(e)
-            if t.strip():
-                cur["reeve"].append(t)
+        # One malformed entry costs that entry, never the digest.
+        try:
+            o = opener(e)
+            if o:
+                cur = {"kind": o[0], "text": o[1], "reeve": [], "ts": epoch(e)}
+                turns.append(cur)
+            elif cur is not None:
+                t = assistant_text(e)
+                if t.strip():
+                    cur["reeve"].append(t)
+        except Exception:
+            continue
 
 # From the 30th newest message of the liege on.
 seen, start = 0, 0
@@ -221,6 +249,7 @@ print(min(stamps) if stamps else "")
 print("\n".join(b for _, b in blocks))
 '
 
+mode=hook rdir=''
 case ${1:-} in
   -h|--help) print_help "$0"; exit 0 ;;
   --digest)
@@ -228,67 +257,118 @@ case ${1:-} in
     command -v python3 >/dev/null 2>&1 || die 'python3 not on PATH'
     python3 -c "$DIGEST_PY" "$@" | sed 1d
     exit 0 ;;
+  --resume) mode=resume; rdir=${2:-$PWD} ;;
 esac
 
-[ -z "${REEVE_HAND:-}" ] || exit 0
-input=$(cat) || exit 0
-sid=$(hook_session "$input")
-[ -n "$sid" ] || exit 0
-# The cheap exit every other session on the machine takes: no trail at all.
-[ -d "$REEVE_HOME_D/state/trails" ] || exit 0
-command -v python3 >/dev/null 2>&1 || { hook_log session-start "$sid" 'python3 not on PATH'; exit 0; }
+TRAILS="$REEVE_HOME_D/state/trails"
+tget() { sed -n "s/^$1=//p" "$2" 2>/dev/null | head -n 1; }
+num() { case $1 in ''|*[!0-9]*) printf '%s\n' "$2" ;; *) printf '%s\n' "$1" ;; esac; }
+log() { hook_log session-start "${sid:--}" "$1"; }
+# quit <why>   nothing to take: silent as a hook, said by --resume
+quit() { [ "$mode" = resume ] && die "$1"; exit 0; }
 
-out=$(printf '%s' "$input" | python3 -c '
+# trail_here <cwd>   this pane's trail, else this directory's, or nothing
+trail_here() {
+  local key k
+  for key in "$(trail_key "$1")" "cwd $1"; do
+    k=$(trail_file "$key")
+    [ -f "$k" ] && [ "$(tget key "$k")" = "$key" ] && { printf '%s\n' "$k"; return 0; }
+  done
+  return 0
+}
+
+if [ "$mode" = hook ]; then
+  [ -z "${REEVE_HAND:-}" ] || exit 0
+  input=$(cat) || exit 0
+  sid=$(hook_session "$input")
+  [ -n "$sid" ] || exit 0
+  source=$(hook_field "$input" source)
+  case $source in startup|clear|resume) ;; *) exit 0 ;; esac
+  # A reeve's own session come back: it is here, said by its heartbeat, before
+  # anything reads one.
+  [ "$source" = resume ] && [ -n "$(session_name "$sid")" ] && REEVE_SESSION=$sid session_touch
+  # The cheap exit every other session on the machine takes: no trail here,
+  # none naming it, found by name and text alone.
+  [ -d "$TRAILS" ] || exit 0
+  cwd=$(hook_field "$input" cwd); [ -n "$cwd" ] || cwd=$PWD
+  f=$(trail_here "$cwd")
+  away=''
+  [ "$source" = resume ] && away=$(grep -lxF -- "session=$sid" "$TRAILS"/* 2>/dev/null | grep -v '/[^/]*\.[^/]*$')
+  [ -n "$f$away" ] || exit 0
+  command -v python3 >/dev/null 2>&1 || { log 'python3 not on PATH'; exit 0; }
+
+  out=$(printf '%s' "$input" | python3 -c '
 import json, sys
 h = json.loads(sys.stdin.read())
 if not isinstance(h, dict):
     raise ValueError("not an object")
-vals = [h.get(k) for k in ("session_id", "source", "cwd", "transcript_path")]
+vals = [h.get(k) for k in ("session_id", "source", "cwd")]
 vals = [v if isinstance(v, str) else "" for v in vals]
 if any(c in v for v in vals for c in "\n\r\0"):
     raise ValueError("a field holds a line break")
 print("\n".join(vals))
 ' 2>/dev/null) || exit 0
-psid=$(printf '%s\n' "$out" | sed -n 1p)
-source=$(printf '%s\n' "$out" | sed -n 2p)
-cwd=$(printf '%s\n' "$out" | sed -n 3p)
-[ "$psid" = "$sid" ] || exit 0
-[ -n "$cwd" ] || cwd=$PWD
-case $source in startup|clear|resume) ;; *) exit 0 ;; esac
+  [ "$(printf '%s\n' "$out" | sed -n 1p)" = "$sid" ] || exit 0
+  [ "$(printf '%s\n' "$out" | sed -n 2p)" = "$source" ] || exit 0
+  pcwd=$(printf '%s\n' "$out" | sed -n 3p)
+  [ -n "$pcwd" ] && [ "$pcwd" != "$cwd" ] && { cwd=$pcwd; f=$(trail_here "$cwd"); }
 
-# This pane's trail, else this directory's.
-f=''
-for key in "$(trail_key "$cwd")" "cwd $cwd"; do
-  k=$(trail_file "$key")
-  [ -f "$k" ] && [ "$(sed -n 's/^key=//p' "$k" 2>/dev/null | head -n 1)" = "$key" ] && { f=$k; break; }
-done
-[ -n "$f" ] || exit 0
+  # Resumed somewhere else: what it left there is not for the next session
+  # there to take over.
+  printf '%s\n' "$away" | while IFS= read -r x; do
+    [ -n "$x" ] && [ "$x" != "$f" ] || continue
+    rm -f "$x" && log "a trail of $sid elsewhere removed: it resumed here"
+  done
+  [ -n "$f" ] || exit 0
+else
+  sid=$(reeve_session)
+  [ -n "$sid" ] || die 'this session has no id, so there is nothing to carry the reeve on as. set REEVE_SESSION from a harness that exports none'
+  source=--resume cwd=$rdir
+  f=$(trail_here "$cwd")
+  [ -n "$f" ] || die "no reeve's trail here (this pane, else $cwd), so nothing to resume. it may have been taken, or removed when its session came back"
+fi
 
-tget() { sed -n "s/^$1=//p" "$2" 2>/dev/null | head -n 1; }
-old=$(tget session "$f"); name=$(tget name "$f"); reason=$(tget reason "$f"); ended=$(tget ended "$f")
-case $ended in ''|*[!0-9]*) ended=0 ;; esac
-window=$(config_get resume-window 259200)
-case $window in ''|*[!0-9]*) window=259200 ;; esac
-[ $(( $(date +%s) - ended )) -le "$window" ] || exit 0
-valid_reeve_name "$name" || exit 0
-[ -n "$(REEVE_SESSION=$old reeve_session)" ] || exit 0
-
+old=$(tget session "$f"); name=$(tget name "$f"); reason=$(tget reason "$f")
+ended=$(num "$(tget ended "$f")" 0)
+valid_reeve_name "$name" && [ -n "$(REEVE_SESSION=$old reeve_session)" ] || quit "the trail here is unreadable: $f"
 same=no
 [ "$old" = "$sid" ] && same=yes
 # A resume of some other session is not this trail's successor: that session
 # has its own past, and this pane's last reeve is not it.
 [ "$source" = resume ] && [ "$same" = no ] && exit 0
 
+now=$(date +%s); age=$((now - ended))
+when=$(date -u -r "$ended" +%H:%MZ 2>/dev/null || date -u -d "@$ended" +%H:%MZ 2>/dev/null || printf '%s' "$ended")
+if [ "$same" = no ]; then
+  oseen=$(tr -dc '0-9' < "$(session_dir "$old")/seen" 2>/dev/null)
+  if [ -n "$oseen" ] && [ "$oseen" -gt $((ended + $(num "$(config_get resume-slack 60)" 60))) ]; then
+    rm -f "$f"; log "the trail of $old removed: seen after it ended"
+    quit "reeve $name's session $old was seen after it ended here, so it came back and is not to be taken over. trail removed"
+  fi
+fi
+[ "$age" -le "$(num "$(config_get resume-window 259200)" 259200)" ] \
+  || quit "reeve $name's trail here is ${age}s old, past config/resume-window"
+
+# After anything but /clear, the next session here may be anybody's: offer.
+if [ "$mode" = hook ] && [ "$same" = no ] && ! { [ "$reason" = clear ] && [ "$source" = clear ] \
+    && [ "$age" -le "$(num "$(config_get resume-clear-window 600)" 600)" ]; }; then
+  line="$name was here, say resume to pick up."
+  ctx="Reeve offer: reeve $name's session $old ended in this place ($reason, $when). Nothing was taken, and this session is not the reeve. Only if the liege says resume, run $BIN/reeve-session-start --resume $(printf '%q' "$cwd") and follow what it prints. Otherwise leave it alone."
+  python3 -c 'import json, sys; print(json.dumps({"systemMessage": sys.argv[1], "hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": sys.argv[2]}}))' "$line" "$ctx" \
+    || log 'could not write the offer'
+  log "offered $name's trail ($reason, $source)"
+  exit 0
+fi
+
 # Take the trail. Exactly one copy of this hook wins the rename.
 taken="$f.taken.$$"
-mv "$f" "$taken" 2>/dev/null || exit 0
+mv "$f" "$taken" 2>/dev/null || quit 'the trail here was taken a moment ago'
 trap 'rm -f "$taken"' EXIT
 transcripts=$(sed -n 's/^transcript=//p' "$taken")
 
 export REEVE_SESSION=$sid
 d=$(session_dir "$sid")
-mkdir -p "$d" 2>/dev/null || { hook_log session-start "$sid" "could not create $d"; exit 0; }
-log() { hook_log session-start "$sid" "$1"; }
+mkdir -p "$d" 2>/dev/null || { log "could not create $d"; quit "could not create $d"; }
 
 if [ "$same" = no ]; then
   # 1. The successor record, before anything asks session_replaced.
@@ -333,24 +413,34 @@ fi
 # 6, then 5, which needs the span 6 covers.
 digest='' since=''
 if [ "$same" = no ] && [ -n "$transcripts" ]; then
-  # shellcheck disable=SC2046
-  dout=$(IFS='
-'; python3 -c "$DIGEST_PY" $transcripts 2>/dev/null) || { log 'digest failed'; dout=''; }
-  since=$(printf '%s\n' "$dout" | sed -n 1p)
-  digest=$(printf '%s\n' "$dout" | sed 1d)
+  if command -v python3 >/dev/null 2>&1; then
+    # One argument per line, never split or globbed.
+    targs=()
+    while IFS= read -r t; do [ -n "$t" ] && targs+=("$t"); done <<TRANSCRIPTS_EOF
+$transcripts
+TRANSCRIPTS_EOF
+    dout=$(python3 -c "$DIGEST_PY" "${targs[@]}" 2>/dev/null) || { log 'digest failed'; dout=''; }
+    since=$(printf '%s\n' "$dout" | sed -n 1p)
+    digest=$(printf '%s\n' "$dout" | sed 1d)
+  else
+    log 'python3 not on PATH, no digest'
+  fi
 fi
 handoff_line=''
-case $since in ''|*[!0-9]*) since=$ended ;; esac
-h=$(ls -t "$REEVE_HOME_D"/handoffs/*.md 2>/dev/null | head -n 1)
+since=$(num "$since" "$ended")
+# This reeve's newest handoff, not another manor's: by the name in its header.
+h=$(ls -t "$REEVE_HOME_D"/handoffs/*.md 2>/dev/null | while IFS= read -r x; do
+      grep -qxF -- "- **Reeve:** $name" "$x" 2>/dev/null && { printf '%s\n' "$x"; break; }
+    done)
 if [ -n "$h" ] && m=$(file_mtime "$h") && [ "$m" -ge "$since" ]; then
   handoff_line="Handoff: $h was written in that span or since. Read it."
 fi
 
-when=$(date -u -r "$ended" +%H:%MZ 2>/dev/null || date -u -d "@$ended" +%H:%MZ 2>/dev/null || printf '%s' "$ended")
+if [ "$mode" = resume ]; then by='reeve-session-start --resume'; else by='The SessionStart hook'; fi
 if [ "$same" = yes ]; then
   head_line="Reeve resume: this is reeve $name's session $sid, resumed after it ended ($reason, $when)."
 else
-  head_line="Reeve resume: this session carries on reeve $name's session $old, which ended in this same place ($reason, $when). The SessionStart hook already did session start's name step and reeve-adopt --mine: do not repeat them."
+  head_line="Reeve resume: this session carries on reeve $name's session $old, which ended in this same place ($reason, $when). $by already did session start's name step and reeve-adopt --mine: do not repeat them."
 fi
 
 ctx=$(
@@ -366,7 +456,11 @@ ctx=$(
   fi
 )
 
-python3 -c 'import json, sys; print(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": sys.argv[1]}}))' "$ctx" \
-  || log 'could not write the context'
+if [ "$mode" = resume ]; then
+  printf '%s\n' "$ctx"
+else
+  python3 -c 'import json, sys; print(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": sys.argv[1]}}))' "$ctx" \
+    || log 'could not write the context'
+fi
 log "resumed from $old ($source), $(printf '%s\n' "$digest" | grep -c '^\[liege\]') liege message(s) in the digest"
 exit 0

@@ -545,11 +545,11 @@ name is the fallback. A reeve relaunched in its restored herdr pane keeps its na
 since herdr restores panes with their ids. A reeve outside herdr has no pane to key on, so off the
 claude harness each `/clear` gives it a new name: accepted, and a handoff carries the name across.
 
-**After `/clear`, an exit or a resume, on the claude harness**, this happens by itself. Two hooks,
-`bin/reeve-session-end` and `bin/reeve-session-start`, carry the last reeve of this pane (else this
-directory) into the next session: name claimed, `reeve-adopt --mine` run, the truth about the watch
-(one from before `/clear` follows you), and the recent conversation. Do the steps above it did not.
-A handoff stays for deliberate long breaks and other harnesses.
+**On the claude harness**, hooks carry the last reeve of this pane (else directory) on. After
+`/clear`, by themselves: name claimed, `reeve-adopt --mine` run, the truth about the watch (one from
+before follows you), the recent conversation. After an exit, only `<Name> was here, say resume to
+pick up`; on the liege's resume, `reeve-session-start --resume` does the same. Do the steps above
+they did not. A handoff stays for long breaks and other harnesses.
 
 If a file is absent, that means absent, not empty: `liege.md` absent means you have learned nothing
 about the liege yet, and `manors.md` absent means rebuild it with `bin/reeve-survey`.
@@ -626,7 +626,7 @@ fact per line, because you are the one reading it.
 | `bin/reeve-handoff new <manor>` | scaffold a handoff, with the factual parts already filled in |
 | `bin/reeve-context` | how full your own context window is, measured not guessed |
 | `bin/reeve-format-guard` | the Stop hook: sends a reeve reply missing Done this session or Next action back once. Never by hand |
-| `bin/reeve-session-end` / `-start` | the hooks that carry a reeve across `/clear`, exit and resume (section 10). Never by hand |
+| `bin/reeve-session-end` / `-start` | the section 10 hooks. `-start --resume` only on the liege's resume |
 | `bin/reeve-trust --check <repo>` | will claude actually be able to start in this repository |
 | `bin/reeve-backend` / `bin/reeve-harness` | the two plug axes. Mostly used by dispatch, not by you |
 

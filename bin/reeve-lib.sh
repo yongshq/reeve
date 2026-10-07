@@ -724,12 +724,13 @@ holder_live() {
 # bin/reeve-session-start writes once Claude Code itself said the old session
 # ended (SessionEnd) and this one took over its trail. The proof a pane gives,
 # for a reeve outside herdr, whose old heartbeat stays fresh for session-stale.
+# Never once that session is seen again: successor_of's rule.
 session_replaced() {
   local me
   me=$(reeve_session)
   [ -n "${1:-}" ] && [ -n "$me" ] && [ "$1" != "$me" ] || return 1
   pane_eq "$(session_pane "$1" | tr -d '[:space:]')" "$(reeve_pane)" && return 0
-  [ -f "$(session_dir "$1")/successor" ] && [ "$(session_follow "$1")" = "$me" ]
+  [ "$(session_follow "$1")" = "$me" ]
 }
 
 # session_follow <sid>   the session that carries on for <sid>: its successor
@@ -738,14 +739,33 @@ session_replaced() {
 session_follow() {
   local s=$1 n i=0
   while [ "$i" -lt 16 ]; do
-    n=''
-    [ -f "$(session_dir "$s")/successor" ] \
-      && n=$(head -n 1 "$(session_dir "$s")/successor" 2>/dev/null | tr -d '[:space:]')
-    [ -n "$n" ] && n=$(REEVE_SESSION=$n reeve_session)
+    n=$(successor_of "$s")
     [ -n "$n" ] && [ "$n" != "$1" ] && [ "$n" != "$s" ] || break
     s=$n; i=$((i + 1))
   done
   printf '%s\n' "$s"
+}
+
+# successor_of <sid>   the session its successor record names, or nothing. A
+# record older than <sid>'s newest heartbeat, past config/resume-slack (default
+# 60s), is void: <sid> was seen after it was replaced, so it came back, by a
+# resume, and carries on as itself. A live reeve never loses its name, its
+# errands or its watch to a record like that.
+successor_of() {
+  local d n m seen slack
+  d=$(session_dir "$1")
+  [ -f "$d/successor" ] || return 0
+  n=$(head -n 1 "$d/successor" 2>/dev/null | tr -d '[:space:]')
+  # Empty stays empty: reeve_session would read an empty override as unset.
+  [ -n "$n" ] && n=$(REEVE_SESSION=$n reeve_session)
+  [ -n "$n" ] || return 0
+  m=$(file_mtime "$d/successor")
+  seen=$(tr -dc '0-9' < "$d/seen" 2>/dev/null)
+  slack=$(config_get resume-slack 60)
+  case $slack in ''|*[!0-9]*) slack=60 ;; esac
+  case $m in *[!0-9]*) m='' ;; esac
+  [ -n "$m" ] && [ -n "$seen" ] && [ "$seen" -gt $((m + slack)) ] && return 0
+  printf '%s\n' "$n"
 }
 
 # --- session hooks ----------------------------------------------------------
@@ -753,13 +773,20 @@ session_follow() {
 # enough of it, by text alone, to tell a reeve from everyone else before
 # anything costlier runs: every session on the machine runs a plugin's hooks.
 
+# hook_field <hook input> <key>   a string field, by text alone, or nothing. A
+# value holding a quote or a backslash reads as nothing: a caller that parses
+# the input properly checks against that.
+hook_field() {
+  printf '%s' "$1" | tr '\n' ' ' \
+    | sed -n 's/.*"'"$2"'"[[:space:]]*:[[:space:]]*"\([^"\\]*\)".*/\1/p'
+}
+
 # hook_session <hook input>   its session_id, under reeve_session's own rule
 # for a usable id, or nothing. The last one, when a malformed input has two: a
 # caller that parses the input properly checks it against that.
 hook_session() {
   local s
-  s=$(printf '%s' "$1" | tr '\n' ' ' \
-    | sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\([^"\\]*\)".*/\1/p')
+  s=$(hook_field "$1" session_id)
   # Empty stays empty: reeve_session would read an empty override as unset.
   [ -n "$s" ] && REEVE_SESSION=$s reeve_session
   return 0

@@ -10,7 +10,11 @@
 #   3. session-start: nothing for a hand, a stranger, a stale trail or a
 #      resume of another session; for the next session the successor, the
 #      name, the errands, the watch, the handoff and the digest; one copy wins
-#   4. the successor record: adopt, name and the sentry all honour it
+#   3b. after anything but /clear an offer only, until --resume takes it
+#   3c. a session seen again, by a resume elsewhere or its heartbeat, is never
+#      taken over: its trail goes, and nobody takes its name or errands
+#   4. the successor record: adopt, name and the sentry all honour it, until
+#      the old session is seen again
 #   5. both registrations, with their matcher and short timeouts
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 END="$ROOT/bin/reeve-session-end"
@@ -179,6 +183,23 @@ ck_not '1 ... the oldest gone' "$D" 'BIG00'
 ck_eq '1 an unreadable transcript: empty' "$("$START" --digest "$SCRATCH/absent.jsonl")" ''
 printf 'not json\n{"type": "user"\n' > "$SCRATCH/junk.jsonl"
 ck_eq '1 a garbage transcript: empty' "$("$START" --digest "$SCRATCH/junk.jsonl")" ''
+# One malformed entry costs that entry, not the digest.
+python3 - "$SCRATCH/odd.jsonl" <<'PY'
+import json, sys
+rows = [{"type": "user", "message": {"role": "user", "content": "GOOD-ONE"}},
+        {"type": "assistant", "message": "oops"},
+        {"type": "user", "message": "also oops"},
+        {"type": "assistant", "message": {"content": 7}},
+        {"type": "user", "message": {"role": "user", "content": "GOOD-TWO"}},
+        {"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "My liege, REPLY-TWO."}]}}]
+with open(sys.argv[1], "w") as f:
+    for r in rows:
+        f.write(json.dumps(r) + "\n")
+PY
+D=$("$START" --digest "$SCRATCH/odd.jsonl" 2>&1)
+ck_has '1 a malformed entry: the one before kept' "$D" '[liege] GOOD-ONE'
+ck_has '1 a malformed entry: the one after kept' "$D" '[liege] GOOD-TWO'
+ck_has '1 a malformed entry: its reply kept' "$D" 'REPLY-TWO'
 
 echo '--- 2. session-end ---'
 fresh_home home2
@@ -238,8 +259,8 @@ setup3() {
   printf 'working: started\n' > "$REEVE_HOME/errands/e2/status"
   mkdir -p "$REEVE_HOME/state/sessions/gone-sid"
   printf '1\n' > "$REEVE_HOME/state/sessions/gone-sid/seen"
-  hook SessionEnd old-sid "$SCRATCH/t1.jsonl" | "$END"
-  printf '# Handoff\n' > "$REEVE_HOME/handoffs/reeve-2026-10-07-1200.md"
+  hook SessionEnd old-sid "$SCRATCH/t1.jsonl" "${2:-clear}" | "$END"
+  printf '# Handoff\n\n- **Reeve:** Aldric\n' > "$REEVE_HOME/handoffs/reeve-2026-10-07-1200.md"
 }
 setup3 home3
 OUT=$(hook SessionStart new-sid "$SCRATCH/new.jsonl" clear | REEVE_HAND=x "$START" 2>&1)
@@ -290,6 +311,18 @@ printf '%s %s 15\n' "$$" "$(date +%s)" > "$REEVE_HOME/state/.sentry.watch-old-si
 C=$(ctx_of "$(hook SessionStart new-sid "$SCRATCH/new.jsonl" clear | "$START" 2>&1)")
 ck_has '3 a live watch: still running' "$C" 'Watch, now: still running'
 ck_not '3 a live watch: no second one' "$C" 'start bin/reeve-sentry'
+# Another reeve's handoff, newer, is not this one's.
+setup3 home3d2
+printf '# Handoff\n\n- **Reeve:** Bran\n' > "$REEVE_HOME/handoffs/lantern-2026-10-07-1300.md"
+touch -t 202001010000 "$REEVE_HOME/handoffs/reeve-2026-10-07-1200.md"
+python3 -c 'import os, sys, time; os.utime(sys.argv[1], (time.time() + 60,) * 2)' "$REEVE_HOME/handoffs/lantern-2026-10-07-1300.md"
+C=$(ctx_of "$(hook SessionStart new-sid "$SCRATCH/new.jsonl" clear | "$START" 2>&1)")
+ck_not "3 another reeve's handoff: not pointed at" "$C" 'lantern-'
+setup3 home3d3
+printf '# Handoff\n\n- **Reeve:** Bran\n' > "$REEVE_HOME/handoffs/lantern-2026-10-07-1300.md"
+python3 -c 'import os, sys, time; os.utime(sys.argv[1], (time.time() + 60,) * 2)' "$REEVE_HOME/handoffs/lantern-2026-10-07-1300.md"
+C=$(ctx_of "$(hook SessionStart new-sid "$SCRATCH/new.jsonl" clear | "$START" 2>&1)")
+ck_has "3 this reeve's own, past a newer one of another's" "$C" 'reeve-2026-10-07-1200.md was written'
 # A handoff older than the digest's span is not pointed at.
 setup3 home3e
 touch -t 202001010000 "$REEVE_HOME/handoffs/"*.md
@@ -347,6 +380,143 @@ ck_eq '3 no trails, no python3: exit 0, silent' "$RC:$OUT" '0:'
 in=$(hook SessionEnd new-sid "$SCRATCH/new.jsonl")
 OUT=$(PATH=$NOPY /bin/bash "$END" <<<"$in" 2>&1); RC=$?
 ck_eq '3 end, stranger, no python3: exit 0, silent' "$RC:$OUT" '0:'
+# Trails exist, none of them here and none naming it: still no python.
+setup3 home3k
+in=$(hook SessionStart stranger-sid "$SCRATCH/new.jsonl" startup "$SCRATCH")
+OUT=$(PATH=$NOPY /bin/bash "$START" <<<"$in" 2>&1); RC=$?
+ck_eq '3 trails elsewhere, no python3: exit 0, silent' "$RC:$OUT" '0:'
+ck_not '3 trails elsewhere: never reached for python' "$(cat "$REEVE_HOME/state/session-hooks.log" 2>/dev/null)" 'python3'
+in=$(hook SessionStart stranger-sid "$SCRATCH/new.jsonl" resume "$SCRATCH")
+OUT=$(PATH=$NOPY /bin/bash "$START" <<<"$in" 2>&1); RC=$?
+ck_eq '3 a stranger resumed, trails elsewhere, no python3: exit 0, silent' "$RC:$OUT" '0:'
+ck_not '3 ... never reached for python' "$(cat "$REEVE_HOME/state/session-hooks.log" 2>/dev/null)" 'python3'
+
+# A transcript path is one argument, never globbed.
+fresh_home home3l
+reeve old-sid Aldric
+python3 - "$SCRATCH/g[ab].jsonl" "$SCRATCH/ga.jsonl" <<'PY'
+import json, sys
+for path, word in zip(sys.argv[1:], ("LITERAL-PATH", "GLOBBED-PATH")):
+    with open(path, "w") as f:
+        f.write(json.dumps({"type": "user", "message": {"role": "user", "content": word}}) + "\n")
+PY
+hook SessionEnd old-sid "$SCRATCH/g[ab].jsonl" clear | "$END"
+C=$(ctx_of "$(hook SessionStart new-sid "$SCRATCH/new.jsonl" clear | "$START" 2>&1)")
+ck_has '3 a transcript path with [ ]: read as written' "$C" 'LITERAL-PATH'
+ck_not '3 ... not globbed' "$C" 'GLOBBED-PATH'
+
+echo '--- 3b. after anything but /clear: an offer ---'
+# ended_ago <seconds>: the trail, and the old session's last heartbeat with it
+ended_ago() {
+  local t=$(( $(date +%s) - $1 ))
+  sed -i.bak "s/^ended=.*/ended=$t/" "$REEVE_HOME/state/trails/"*; rm -f "$REEVE_HOME/state/trails/"*.bak
+  printf '%s\n' "$t" > "$REEVE_HOME/state/sessions/old-sid/seen"
+}
+sys_of() { printf '%s' "$1" | python3 -c 'import json, sys; print(json.load(sys.stdin).get("systemMessage", ""))' 2>/dev/null; }
+setup3 home3m prompt_input_exit
+OUT=$(hook SessionStart new-sid "$SCRATCH/new.jsonl" startup | "$START" 2>"$SCRATCH/err"); RC=$?
+C=$(ctx_of "$OUT")
+ck_eq '3b exit: exit 0, nothing on stderr' "$RC:$(cat "$SCRATCH/err")" '0:'
+ck_eq '3b exit: one line on screen' "$(sys_of "$OUT")" 'Aldric was here, say resume to pick up.'
+ck_has '3b exit: the session told how to take it' "$C" 'reeve-session-start --resume'
+ck_has '3b exit: ... and only if the liege says so' "$C" 'Only if the liege says resume'
+ck_not '3b exit: no digest' "$C" '[liege]'
+ck_eq '3b exit: the trail stays' "$(trails)" 1
+ck_eq '3b exit: no successor' "$(ls "$REEVE_HOME/state/sessions/old-sid/successor" 2>/dev/null)" ''
+ck_eq '3b exit: no name claimed' "$(cat "$REEVE_HOME/state/sessions/new-sid/name" 2>/dev/null)" ''
+ck_eq '3b exit: nothing adopted' "$(sed -n 's/^session=//p' "$REEVE_HOME/state/e1.meta")" old-sid
+# --resume, once the liege says so: everything the /clear path does, printed.
+OUT=$(cd "$SCRATCH/work" && REEVE_SESSION=new-sid "$START" --resume 2>&1); RC=$?
+ck_eq '3b --resume: exit 0' "$RC" 0
+ck_has '3b --resume: carries on' "$OUT" "Reeve resume: this session carries on reeve Aldric's session old-sid"
+ck_has '3b --resume: says it did the steps' "$OUT" 'reeve-session-start --resume already did'
+ck_has '3b --resume: the name' "$OUT" 'Name: Aldric, claimed'
+ck_eq '3b --resume: the name recorded' "$(cat "$REEVE_HOME/state/sessions/new-sid/name" 2>/dev/null)" Aldric
+ck_eq '3b --resume: its errand adopted' "$(sed -n 's/^session=//p' "$REEVE_HOME/state/e1.meta")" new-sid
+ck_has '3b --resume: the digest' "$OUT" '[liege] liege prompt 34: please do thing 34'
+ck_eq '3b --resume: successor recorded' "$(cat "$REEVE_HOME/state/sessions/old-sid/successor" 2>/dev/null)" new-sid
+ck_eq '3b --resume: the trail is taken' "$(trails)" 0
+OUT=$(cd "$SCRATCH/work" && REEVE_SESSION=new-sid "$START" --resume 2>&1); RC=$?
+ck_eq '3b --resume twice: refused' "$RC" 1
+ck_has '3b --resume twice: said' "$OUT" 'nothing to resume'
+OUT=$(REEVE_SESSION=new-sid "$START" --resume "$SCRATCH" 2>&1); RC=$?
+ck_eq '3b --resume elsewhere: refused' "$RC" 1
+# The directory as the offer names it.
+setup3 home3n prompt_input_exit
+OUT=$(REEVE_SESSION=new-sid "$START" --resume "$SCRATCH/work" 2>&1); RC=$?
+ck_eq '3b --resume <dir>: taken' "$RC" 0
+# A /clear trail that a startup finds, not a clear: an offer.
+setup3 home3o
+OUT=$(hook SessionStart new-sid "$SCRATCH/new.jsonl" startup | "$START" 2>&1)
+ck_eq '3b a /clear trail, a startup: an offer' "$(sys_of "$OUT")" 'Aldric was here, say resume to pick up.'
+ck_eq '3b ... nothing claimed' "$(cat "$REEVE_HOME/state/sessions/new-sid/name" 2>/dev/null)" ''
+# A /clear trail past resume-clear-window: an offer; the window is config.
+setup3 home3p
+ended_ago 700
+OUT=$(hook SessionStart new-sid "$SCRATCH/new.jsonl" clear | "$START" 2>&1)
+ck_eq '3b a /clear trail past ten minutes: an offer' "$(sys_of "$OUT")" 'Aldric was here, say resume to pick up.'
+printf '1000\n' > "$REEVE_HOME/config/resume-clear-window"
+OUT=$(hook SessionStart new-sid "$SCRATCH/new.jsonl" clear | "$START" 2>&1)
+ck_has '3b config/resume-clear-window widens it' "$(ctx_of "$OUT")" 'Reeve resume: this session carries on'
+# An offer past resume-window: nothing, and --resume refuses.
+setup3 home3q prompt_input_exit
+ended_ago 259300
+OUT=$(hook SessionStart new-sid "$SCRATCH/new.jsonl" startup | "$START" 2>&1)
+ck_eq '3b an offer past three days: silent' "$OUT" ''
+OUT=$(REEVE_SESSION=new-sid "$START" --resume "$SCRATCH/work" 2>&1); RC=$?
+ck_eq '3b ... --resume refused' "$RC" 1
+printf '400000\n' > "$REEVE_HOME/config/resume-window"
+OUT=$(hook SessionStart new-sid "$SCRATCH/new.jsonl" startup | "$START" 2>&1)
+ck_eq '3b config/resume-window widens it' "$(sys_of "$OUT")" 'Aldric was here, say resume to pick up.'
+
+echo '--- 3c. a session seen again is never taken over ---'
+# The probed case: reeve A exits in pane p1, the liege resumes A in pane p2,
+# and a new session later opens in p1.
+setup3c() {
+  fresh_home "$1"
+  reeve old-sid Aldric w1:p1
+  mkdir -p "$REEVE_HOME/errands/e1"
+  printf 'office=scout\nbackend=stub\ndispatched=2026-10-07T10:00:00\nsession=old-sid\nreeve=Aldric\n' > "$REEVE_HOME/state/e1.meta"
+  printf 'working: started\n' > "$REEVE_HOME/errands/e1/status"
+  hook SessionEnd old-sid "$SCRATCH/t1.jsonl" "${2:-prompt_input_exit}" | HERDR_PANE_ID=w1:p1 "$END"
+}
+setup3c home3r
+printf '1\n' > "$REEVE_HOME/state/sessions/old-sid/seen"
+OUT=$(hook SessionStart old-sid "$SCRATCH/t1.jsonl" resume | HERDR_PANE_ID=w1:p2 "$START" 2>&1)
+ck_eq '3c resumed elsewhere: silent' "$OUT" ''
+ck_eq '3c resumed elsewhere: its trail in p1 removed' "$(trails)" 0
+ck_eq '3c resumed elsewhere: its pane now p2' "$(cat "$REEVE_HOME/state/sessions/old-sid/pane")" w1:p2
+ck_eq '3c resumed elsewhere: its heartbeat stamped' "$(REEVE_SESSION=x bash -c '. "$1/bin/reeve-lib.sh"; session_state old-sid' _ "$ROOT")" alive
+OUT=$(hook SessionStart new-sid "$SCRATCH/new.jsonl" startup | HERDR_PANE_ID=w1:p1 "$START" 2>&1)
+ck_eq '3c a new session in p1: nothing offered' "$OUT" ''
+OUT=$(REEVE_SESSION=new-sid HERDR_PANE_ID=w1:p1 "$START" --resume "$SCRATCH/work" 2>&1); RC=$?
+ck_eq '3c ... --resume refused' "$RC" 1
+OUT=$(REEVE_SESSION=new-sid HERDR_PANE_ID=w1:p1 "$ROOT/bin/reeve-name" claim Aldric 2>&1); RC=$?
+ck_eq '3c ... the live reeve keeps its name' "$RC" 1
+OUT=$(REEVE_SESSION=new-sid HERDR_PANE_ID=w1:p1 "$ROOT/bin/reeve-adopt" --mine 2>&1)
+ck_eq '3c ... and its errand' "$(sed -n 's/^session=//p' "$REEVE_HOME/state/e1.meta")" old-sid
+# The same, with no hook where it resumed (another harness, outside herdr):
+# its heartbeat, newer than the trail's end, voids the trail.
+setup3c home3s
+sed -i.bak "s/^ended=.*/ended=$(( $(date +%s) - 120 ))/" "$REEVE_HOME/state/trails/"*; rm -f "$REEVE_HOME/state/trails/"*.bak
+date +%s > "$REEVE_HOME/state/sessions/old-sid/seen"
+OUT=$(hook SessionStart new-sid "$SCRATCH/new.jsonl" startup | HERDR_PANE_ID=w1:p1 "$START" 2>&1)
+ck_eq '3c seen after it ended: nothing offered' "$OUT" ''
+ck_eq '3c seen after it ended: the trail removed' "$(trails)" 0
+ck_has '3c seen after it ended: logged' "$(cat "$REEVE_HOME/state/session-hooks.log")" 'seen after it ended'
+setup3c home3t clear
+sed -i.bak "s/^ended=.*/ended=$(( $(date +%s) - 120 ))/" "$REEVE_HOME/state/trails/"*; rm -f "$REEVE_HOME/state/trails/"*.bak
+date +%s > "$REEVE_HOME/state/sessions/old-sid/seen"
+OUT=$(hook SessionStart new-sid "$SCRATCH/new.jsonl" clear | HERDR_PANE_ID=w1:p1 "$START" 2>&1)
+ck_eq '3c a /clear trail, seen after: no takeover' "$OUT" ''
+ck_eq '3c ... no successor' "$(ls "$REEVE_HOME/state/sessions/old-sid/successor" 2>/dev/null)" ''
+ck_eq '3c ... its errand kept' "$(sed -n 's/^session=//p' "$REEVE_HOME/state/e1.meta")" old-sid
+# Inside the slack (a watch's last poll before /clear): still taken.
+setup3c home3u clear
+sed -i.bak "s/^ended=.*/ended=$(( $(date +%s) - 20 ))/" "$REEVE_HOME/state/trails/"*; rm -f "$REEVE_HOME/state/trails/"*.bak
+date +%s > "$REEVE_HOME/state/sessions/old-sid/seen"
+C=$(ctx_of "$(hook SessionStart new-sid "$SCRATCH/new.jsonl" clear | HERDR_PANE_ID=w1:p1 "$START" 2>&1)")
+ck_has '3c seen inside resume-slack: taken' "$C" 'Reeve resume: this session carries on'
 
 echo '--- 4. the successor record ---'
 fresh_home home4
@@ -358,6 +528,9 @@ printf 'working: started\n' > "$REEVE_HOME/errands/e1/status"
 OUT=$(REEVE_SESSION=new-sid "$ROOT/bin/reeve-adopt" e1 2>&1); RC=$?
 ck_eq '4 adopt from a live owner with no successor: refused' "$RC" 1
 printf 'new-sid\n' > "$REEVE_HOME/state/sessions/old-sid/successor"
+# Written a moment after any watch below starts, as /clear does to a running one.
+future() { python3 -c 'import os, sys, time; os.utime(sys.argv[1], (time.time() + 30,) * 2)' "$1"; }
+future "$REEVE_HOME/state/sessions/old-sid/successor"
 OUT=$(REEVE_SESSION=new-sid "$ROOT/bin/reeve-adopt" e1 2>&1); RC=$?
 ck_eq '4 adopt from the session it succeeded: taken' "$RC" 0
 OUT=$(REEVE_SESSION=new-sid "$ROOT/bin/reeve-name" claim Aldric 2>&1); RC=$?
@@ -374,6 +547,34 @@ ck_has '4 ... the finished errand' "$OUT" 'e1'
 rm -f "$REEVE_HOME/state/sessions/old-sid/successor"
 OUT=$(REEVE_SESSION=old-sid "$ROOT/bin/reeve-sentry" --once --poll 1 2>&1); RC=$?
 ck_eq '4 without the record: nothing of its own in flight' "$RC" 3
+# The old session resumed after /clear, and starts a watch: the record is from
+# before that watch, so it watches as itself, never as its successor.
+sed -i.bak '/^done:/d' "$REEVE_HOME/errands/e1/status"; rm -f "$REEVE_HOME/errands/e1/status.bak"
+printf 'new-sid\n' > "$REEVE_HOME/state/sessions/old-sid/successor"
+touch -t 202001010000 "$REEVE_HOME/state/sessions/old-sid/successor"
+OUT=$(REEVE_SESSION=old-sid "$ROOT/bin/reeve-sentry" --once --poll 1 2>&1); RC=$?
+ck_eq '4 a watch started after the record: watches as itself' "$RC" 3
+ck_eq '4 ... publishes its own marker' "$(ls "$REEVE_HOME/state/" | grep -c '^\.sentry\.watch-new-sid')" 0
+# The record older than the old session's heartbeat is void: it came back.
+lib() { REEVE_SESSION=$1 bash -c '. "$1/bin/reeve-lib.sh"; shift; "$@"' _ "$ROOT" "${@:2}"; }
+date +%s > "$REEVE_HOME/state/sessions/old-sid/seen"
+date +%s > "$REEVE_HOME/state/sessions/new-sid/seen"
+ck_eq '4 a void record: followed nowhere' "$(lib x session_follow old-sid)" old-sid
+lib new-sid session_replaced old-sid; ck_eq '4 a void record: not replaced' "$?" 1
+printf 'office=scout\nbackend=stub\ndispatched=2026-10-07T10:00:00\nsession=old-sid\nreeve=Aldric\n' > "$REEVE_HOME/state/e3.meta"
+mkdir -p "$REEVE_HOME/errands/e3"; printf 'working: started\n' > "$REEVE_HOME/errands/e3/status"
+OUT=$(REEVE_SESSION=new-sid "$ROOT/bin/reeve-adopt" e3 2>&1); RC=$?
+ck_eq '4 a void record: adopt from the live owner refused' "$RC" 1
+OUT=$(REEVE_SESSION=new-sid "$ROOT/bin/reeve-adopt" --mine 2>&1)
+ck_eq '4 a void record: --mine leaves it' "$(sed -n 's/^session=//p' "$REEVE_HOME/state/e3.meta")" old-sid
+rm -f "$REEVE_HOME/state/sessions/new-sid/name"
+OUT=$(REEVE_SESSION=new-sid "$ROOT/bin/reeve-name" claim Aldric 2>&1); RC=$?
+ck_eq '4 a void record: the live reeve keeps its name' "$RC" 1
+OUT=$(lib x name_live_elsewhere Aldric '' new-sid); ck_eq '4 a void record: name live elsewhere' "$OUT" old-sid
+# Inside resume-slack it stands.
+touch "$REEVE_HOME/state/sessions/old-sid/successor"
+ck_eq '4 seen inside resume-slack: still followed' "$(lib x session_follow old-sid)" new-sid
+rm -f "$REEVE_HOME/state/sessions/old-sid/successor" "$REEVE_HOME/state/e3.meta"
 # A loop in the records is bounded.
 printf 'b\n' > "$REEVE_HOME/state/sessions/old-sid/successor"
 mkdir -p "$REEVE_HOME/state/sessions/b"; printf 'old-sid\n' > "$REEVE_HOME/state/sessions/b/successor"

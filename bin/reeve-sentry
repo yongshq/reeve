@@ -234,9 +234,16 @@ watch_drop() {
 # follows the successor record bin/reeve-session-start writes: from the next
 # poll on it watches, delivers and publishes its marker as the session that
 # carries on. Rc 0 when it moved.
+#
+# Only a record written since this watch started: a watch started after its
+# session was replaced is that session come back, by a resume, and it watches
+# as itself. successor_of voids the record once it heartbeats, too.
 follow_successor() {
-  local cur
+  local cur m
   [ "$caretaker" != yes ] && [ -n "$MY_SESSION" ] || return 1
+  m=$(file_mtime "$(session_dir "$MY_SESSION")/successor") || return 1
+  case $m in ''|*[!0-9]*) return 1 ;; esac
+  [ "$m" -ge "$start" ] || return 1
   cur=$(session_follow "$MY_SESSION")
   [ -n "$cur" ] && [ "$cur" != "$MY_SESSION" ] || return 1
   watch_drop
