@@ -152,7 +152,9 @@ is a backstop, not a substitute for the watch: `bin/reeve-sentry` or a whole-fle
 (`bin/reeve-status` bare, `--all` or `--orphans`) delivers it once, on stderr for a listing so a
 filter over the table cannot eat it. `bin/reeve-status <id>` never delivers, and
 `bin/reeve-handoff new` copies pending lines into the handoff. **Never silence the stderr of a
-household command**: a line thrown away after it arrived is marked reported and never said again.
+household command, nor filter a watch's one line** (it prints on stdout and is reported once): a
+line thrown away after it arrived is marked reported and never said again. An `undeliverable:` line
+means signals are stuck, not absent: say so, never "nothing in flight".
 An errand whose record names no session gets no line at all; it stays in flight for the next watch.
 What the line promises, exactly, and its other limits: `docs/supervision.md`.
 

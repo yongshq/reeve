@@ -113,5 +113,7 @@ A blocked hand is never reaped, because it can still be steered. Neither is an e
 - `offices/README.md` the offices, and why permissions are an allow list
 - `harnesses/README.md` the harness contract and its traps
 - `backends/README.md` the backend contract
+- `docs/supervision.md` the supervision mechanism: what a caretaker's line promises, idle and wedged limits
+- `docs/context-and-handoff.md` how context fullness is measured and when a handoff is offered
 - `docs/verifying-a-harness.md` how to earn a `verified = true`
 - `docs/design-notes.md` what was measured, and what was decided against
