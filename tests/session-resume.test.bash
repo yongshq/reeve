@@ -13,6 +13,7 @@
 #   3b. after anything but /clear an offer only, until --resume takes it
 #   3c. a session seen again, by a resume elsewhere or its heartbeat, is never
 #      taken over: its trail goes, and nobody takes its name or errands
+#   3d. a name live again on another pane is never offered or resumed
 #   4. the successor record: adopt, name and the sentry all honour it, until
 #      the old session is seen again
 #   5. both registrations, with their matcher and short timeouts
@@ -339,15 +340,15 @@ ck_not '3 same session: no digest' "$C" '[liege]'
 ck_not '3 same session: no adoption' "$C" 'Errands:'
 ck_eq '3 same session: no successor' "$(ls "$REEVE_HOME/state/sessions/old-sid/successor" 2>/dev/null)" ''
 
-# A live reeve on another pane holds the name: the claim refuses, said, and
-# nothing is adopted under a pool name.
+# A live reeve on another pane holds the name: no takeover, the trail dropped
+# before anything is claimed, and nothing adopted under a pool name.
 setup3 home3g
 reeve rival-sid Aldric w7:p7
-C=$(ctx_of "$(hook SessionStart new-sid "$SCRATCH/new.jsonl" clear | "$START" 2>&1)")
-ck_has '3 claim refused: said' "$C" 'Name: claiming Aldric REFUSED'
-ck_eq '3 claim refused: no pool name' "$(cat "$REEVE_HOME/state/sessions/new-sid/name" 2>/dev/null)" ''
-ck_eq '3 claim refused: nothing adopted' "$(sed -n 's/^session=//p' "$REEVE_HOME/state/e1.meta")" old-sid
-ck_has '3 claim refused: logged' "$(cat "$REEVE_HOME/state/session-hooks.log")" 'refused'
+OUT=$(hook SessionStart new-sid "$SCRATCH/new.jsonl" clear | "$START" 2>&1)
+ck_eq '3 live holder: silent' "$OUT" ''
+ck_eq '3 live holder: no pool name' "$(cat "$REEVE_HOME/state/sessions/new-sid/name" 2>/dev/null)" ''
+ck_eq '3 live holder: nothing adopted' "$(sed -n 's/^session=//p' "$REEVE_HOME/state/e1.meta")" old-sid
+ck_has '3 live holder: logged' "$(cat "$REEVE_HOME/state/session-hooks.log")" 'is live again as rival-sid'
 
 # Inside herdr: the pane's trail, not the directory's.
 fresh_home home3h
@@ -517,6 +518,28 @@ sed -i.bak "s/^ended=.*/ended=$(( $(date +%s) - 20 ))/" "$REEVE_HOME/state/trail
 date +%s > "$REEVE_HOME/state/sessions/old-sid/seen"
 C=$(ctx_of "$(hook SessionStart new-sid "$SCRATCH/new.jsonl" clear | HERDR_PANE_ID=w1:p1 "$START" 2>&1)")
 ck_has '3c seen inside resume-slack: taken' "$C" 'Reeve resume: this session carries on'
+
+echo '--- 3d. the name is live again elsewhere: no offer ---'
+# A exits in p1 (trail left), the liege starts a fresh reeve R in p2 that
+# claims Aldric, and a plain session N then opens in p1.
+setup3c home3v
+reeve rival-sid Aldric w1:p2
+OUT=$(hook SessionStart new-sid "$SCRATCH/new.jsonl" startup | HERDR_PANE_ID=w1:p1 "$START" 2>"$SCRATCH/err"); RC=$?
+ck_eq '3d live holder: exit 0, nothing offered' "$RC:$OUT:$(cat "$SCRATCH/err")" '0::'
+ck_eq '3d live holder: the trail dropped' "$(trails)" 0
+ck_has '3d live holder: logged' "$(cat "$REEVE_HOME/state/session-hooks.log")" 'is live again as rival-sid'
+setup3c home3w
+reeve rival-sid Aldric w1:p2
+OUT=$(REEVE_SESSION=new-sid HERDR_PANE_ID=w1:p1 "$START" --resume "$SCRATCH/work" 2>&1); RC=$?
+ck_eq '3d --resume, live holder: refused' "$RC" 1
+ck_has '3d --resume, live holder: said' "$OUT" 'is live again as session rival-sid'
+ck_eq '3d --resume, live holder: no successor record' "$(ls "$REEVE_HOME/state/sessions/old-sid/successor" 2>/dev/null)" ''
+ck_eq '3d --resume, live holder: the trail not consumed' "$(trails)" 1
+ck_eq '3d --resume, live holder: errand kept' "$(sed -n 's/^session=//p' "$REEVE_HOME/state/e1.meta")" old-sid
+# The same trail, the rival gone: the offer stands.
+rm -rf "$REEVE_HOME/state/sessions/rival-sid"
+OUT=$(hook SessionStart new-sid "$SCRATCH/new.jsonl" startup | HERDR_PANE_ID=w1:p1 "$START" 2>&1)
+ck_eq '3d no live holder: offered' "$(sys_of "$OUT")" 'Aldric was here, say resume to pick up.'
 
 echo '--- 4. the successor record ---'
 fresh_home home4

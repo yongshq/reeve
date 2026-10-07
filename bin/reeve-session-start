@@ -22,8 +22,8 @@
 #            certainly the reeve, so it takes the trail by itself.
 #   anything else, inside config/resume-window (default three days): an offer,
 #            one line on screen, `<Name> was here, say resume to pick up`.
-#            Nothing is taken, claimed, adopted or injected until the liege
-#            says resume and --resume runs.
+#            Nothing is taken, claimed or adopted until the liege says resume
+#            and --resume runs. The offer note is the only thing injected.
 #
 # A trail is void once its session is seen after it ended, its heartbeat newer
 # than ended plus config/resume-slack (default 60s): it came back, by a resume,
@@ -345,6 +345,14 @@ if [ "$same" = no ]; then
     rm -f "$f"; log "the trail of $old removed: seen after it ended"
     quit "reeve $name's session $old was seen after it ended here, so it came back and is not to be taken over. trail removed"
   fi
+fi
+# The name is held again by a live reeve on another pane: nothing to offer, and
+# a resume would only be refused its claim after writing a successor record.
+if [ "$same" = no ] && rival=$(name_live_elsewhere "$name" "$(reeve_pane)" "$old"); then
+  if [ "$mode" = hook ]; then
+    rm -f "$f"; log "the trail of $old removed: $name is live again as $rival"
+  fi
+  quit "reeve $name is live again as session $rival on another pane, so there is nothing to resume here"
 fi
 [ "$age" -le "$(num "$(config_get resume-window 259200)" 259200)" ] \
   || quit "reeve $name's trail here is ${age}s old, past config/resume-window"
