@@ -51,12 +51,11 @@ pass() { [ -n "${1:-}" ] && printf 'reeve-format-guard: %s, not checked\n' "$1" 
 input=$(cat) || exit 0
 
 # Only a reeve: a session that holds a reeve name. The id is lifted from the
-# raw input by text alone, so a stranger costs no python and no transcript
-# read; python checks it against the parsed input below. reeve_session's own
-# rule decides what a usable id is; anything else is a stranger's.
-sid=$(printf '%s' "$input" | tr '\n' ' ' \
-  | sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\([^"\\]*\)".*/\1/p')
-sid=$(REEVE_SESSION=$sid reeve_session)
+# raw input by text alone (hook_session), so a stranger costs no python and no
+# transcript read; python checks it against the parsed input below.
+# reeve_session's own rule decides what a usable id is; anything else is a
+# stranger's.
+sid=$(hook_session "$input")
 [ -n "$sid" ] && [ -n "$(session_name "$sid")" ] || exit 0
 
 command -v python3 >/dev/null 2>&1 || pass 'python3 not on PATH'

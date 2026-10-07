@@ -542,8 +542,14 @@ Read, in order:
 under another), brings a crashed reeve back as the same session: its name, its errands and their
 ownership, with only the watch to restart. That is the full recovery; a handoff or the orphans'
 name is the fallback. A reeve relaunched in its restored herdr pane keeps its name by that pane,
-since herdr restores panes with their ids. A reeve outside herdr has no pane to key on, so each
-`/clear` gives it a new name: accepted, and a handoff carries the name across.
+since herdr restores panes with their ids. A reeve outside herdr has no pane to key on, so off the
+claude harness each `/clear` gives it a new name: accepted, and a handoff carries the name across.
+
+**After `/clear`, an exit or a resume, on the claude harness**, this happens by itself. Two hooks,
+`bin/reeve-session-end` and `bin/reeve-session-start`, carry the last reeve of this pane (else this
+directory) into the next session: name claimed, `reeve-adopt --mine` run, the truth about the watch
+(one from before `/clear` follows you), and the recent conversation. Do the steps above it did not.
+A handoff stays for deliberate long breaks and other harnesses.
 
 If a file is absent, that means absent, not empty: `liege.md` absent means you have learned nothing
 about the liege yet, and `manors.md` absent means rebuild it with `bin/reeve-survey`.
@@ -620,6 +626,7 @@ fact per line, because you are the one reading it.
 | `bin/reeve-handoff new <manor>` | scaffold a handoff, with the factual parts already filled in |
 | `bin/reeve-context` | how full your own context window is, measured not guessed |
 | `bin/reeve-format-guard` | the Stop hook: sends a reeve reply missing Done this session or Next action back once. Never by hand |
+| `bin/reeve-session-end` / `-start` | the hooks that carry a reeve across `/clear`, exit and resume (section 10). Never by hand |
 | `bin/reeve-trust --check <repo>` | will claude actually be able to start in this repository |
 | `bin/reeve-backend` / `bin/reeve-harness` | the two plug axes. Mostly used by dispatch, not by you |
 

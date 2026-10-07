@@ -719,11 +719,79 @@ holder_live() {
 # session_replaced <sid>   0 when that other session ran in this very pane: the
 # one /clear replaced, whatever its heartbeat says. A pane runs one harness at a
 # time, so it cannot still be there. The same rule names and groups use.
+#
+# Or when it ended and its successor record leads to this session: what
+# bin/reeve-session-start writes once Claude Code itself said the old session
+# ended (SessionEnd) and this one took over its trail. The proof a pane gives,
+# for a reeve outside herdr, whose old heartbeat stays fresh for session-stale.
 session_replaced() {
   local me
   me=$(reeve_session)
   [ -n "${1:-}" ] && [ -n "$me" ] && [ "$1" != "$me" ] || return 1
-  pane_eq "$(session_pane "$1" | tr -d '[:space:]')" "$(reeve_pane)"
+  pane_eq "$(session_pane "$1" | tr -d '[:space:]')" "$(reeve_pane)" && return 0
+  [ -f "$(session_dir "$1")/successor" ] && [ "$(session_follow "$1")" = "$me" ]
+}
+
+# session_follow <sid>   the session that carries on for <sid>: its successor
+# record, followed to the end, or <sid> itself. Bounded, so a loop in the
+# records costs a wrong answer at worst, never a hang.
+session_follow() {
+  local s=$1 n i=0
+  while [ "$i" -lt 16 ]; do
+    n=''
+    [ -f "$(session_dir "$s")/successor" ] \
+      && n=$(head -n 1 "$(session_dir "$s")/successor" 2>/dev/null | tr -d '[:space:]')
+    [ -n "$n" ] && n=$(REEVE_SESSION=$n reeve_session)
+    [ -n "$n" ] && [ "$n" != "$1" ] && [ "$n" != "$s" ] || break
+    s=$n; i=$((i + 1))
+  done
+  printf '%s\n' "$s"
+}
+
+# --- session hooks ----------------------------------------------------------
+# Claude Code hands every hook its input as JSON on stdin. These read just
+# enough of it, by text alone, to tell a reeve from everyone else before
+# anything costlier runs: every session on the machine runs a plugin's hooks.
+
+# hook_session <hook input>   its session_id, under reeve_session's own rule
+# for a usable id, or nothing. The last one, when a malformed input has two: a
+# caller that parses the input properly checks it against that.
+hook_session() {
+  local s
+  s=$(printf '%s' "$1" | tr '\n' ' ' \
+    | sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\([^"\\]*\)".*/\1/p')
+  # Empty stays empty: reeve_session would read an empty override as unset.
+  [ -n "$s" ] && REEVE_SESSION=$s reeve_session
+  return 0
+}
+
+# A trail: what bin/reeve-session-end leaves when a reeve's session ends, for
+# bin/reeve-session-start to take up in the session that follows it. One per
+# pane, else one per working directory, under state/trails: a pane runs one
+# harness at a time, and a directory is the next best guess at "the same place".
+#
+# trail_key [<cwd>]   `pane <key>` inside herdr, else `cwd <dir>`
+trail_key() {
+  local p; p=$(reeve_pane)
+  if [ -n "$p" ]; then printf 'pane %s\n' "$p"; else printf 'cwd %s\n' "${1:-$PWD}"; fi
+}
+
+trail_file() { # trail_file <key>   the file that key's trail lives in
+  printf '%s/state/trails/%s\n' "$REEVE_HOME_D" "$(printf '%s' "$1" | cksum | tr ' ' '-')"
+}
+
+# hook_log <hook> <sid> <note>   one line in state/session-hooks.log. A session
+# hook says nothing to the liege, so this is where its failures go. Kept to its
+# last 200 lines once past 64k, so it never grows without bound.
+hook_log() {
+  local f="$REEVE_HOME_D/state/session-hooks.log" sz
+  [ -d "$REEVE_HOME_D/state" ] || return 0
+  printf '%s %s %s %s\n' "$(status_stamp)" "$1" "${2:--}" "$3" >> "$f" 2>/dev/null || return 0
+  sz=$(wc -c < "$f" 2>/dev/null | tr -d ' ')
+  case $sz in ''|*[!0-9]*) return 0 ;; esac
+  [ "$sz" -le 65536 ] && return 0
+  tail -n 200 "$f" > "$f.$$" 2>/dev/null && mv -f "$f.$$" "$f" || rm -f "$f.$$"
+  return 0
 }
 
 session_name() { # session_name <sid>   the stored name, or nothing
@@ -779,6 +847,8 @@ name_live_elsewhere() {
   while read -r n st p sid; do
     [ "$n" = "$want" ] && [ "$st" = alive ] || continue
     pane_eq "$p" "$pane" && continue
+    # Nor the session this one took over from: session_replaced's rule.
+    session_replaced "$sid" && continue
     [ "$p" != - ] && pane_vacant "$p" && continue
     printf '%s\n' "$sid"; return 0
   done <<NAME_HOLDERS_EOF

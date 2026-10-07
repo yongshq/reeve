@@ -1,0 +1,372 @@
+#!/usr/bin/env bash
+# A Claude Code SessionStart hook: a reeve that comes back after /clear, an exit
+# and relaunch, or a resume picks up where it was, by itself. Same name, its
+# errands its own, the truth about its watch, and what it and the liege were
+# discussing.
+#
+# Usage, from hooks/hooks.json (the plugin) and .claude/settings.json (a session
+# started inside the clone), matched on startup, clear and resume, never by hand:
+#   bin/reeve-session-start < <SessionStart hook input JSON>
+#   bin/reeve-session-start --digest <transcript.jsonl>...   print the digest only
+#
+# Acts only where bin/reeve-session-end left a trail: this pane inside herdr,
+# else this working directory. No trail, a hand (REEVE_HAND), or a trail older
+# than config/resume-window (default three days): nothing at all is said.
+#
+# A trail is taken once. Two copies of this hook on one start, the plugin's and
+# the clone's, race for it by renaming it, and the loser exits silently.
+#
+# For a new session (startup, clear), in this order:
+#   1. records it as the ended session's successor, the proof session_replaced
+#      accepts where no pane can give one, and the record a running
+#      bin/reeve-sentry follows to keep watching for the new session
+#   2. `reeve-name claim <Name>`: idempotent, and it refuses a name a live reeve
+#      on another pane holds
+#   3. `reeve-adopt --mine`: takes only orphans under that name whose owner is
+#      gone or replaced, so never a live reeve's
+#   4. says whether a watch from before is still running, by its own marker
+#   5. points at a handoff written inside the span the digest covers, or since
+#   6. the digest: the last 30 messages from the liege, verbatim, each with the
+#      reeve's reply cut to its Opening, Waiting on you and Next action blocks;
+#      no tool calls or results; oldest first; cut from the oldest end to fit
+#      about 6k tokens
+# A resume of the very session that ended (`claude --resume`, same id) already
+# holds its conversation, so it gets steps 2 and 4 only.
+#
+# All of it goes back as SessionStart additionalContext, never to the screen.
+# Anything that fails is one line in $REEVE_HOME/state/session-hooks.log.
+#
+# Exit: always 0.
+
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/reeve-lib.sh"
+BIN=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+
+# The digest, in one python pass over the transcripts named as arguments,
+# oldest first. Prints the epoch of the oldest message it kept on the first
+# line, empty when none, then the digest.
+DIGEST_PY='
+import calendar, json, os, re, sys, time
+
+MAX_PROMPTS = 30
+MAX_TOTAL = 24000          # characters, about 6k tokens
+MAX_LIEGE = 2000
+MAX_REEVE = 2500
+MAX_READ = 32 * 1024 * 1024
+
+def entries(path):
+    try:
+        size = os.path.getsize(path)
+        with open(path, "rb") as f:
+            if size > MAX_READ:
+                f.seek(size - MAX_READ)
+                f.readline()          # a partial line
+            data = f.read()
+    except OSError:
+        return
+    for line in data.decode("utf-8", "replace").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            e = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(e, dict):
+            yield e
+
+def epoch(e):
+    t = e.get("timestamp")
+    if not isinstance(t, str):
+        return None
+    try:
+        return calendar.timegm(time.strptime(t[:19], "%Y-%m-%dT%H:%M:%S"))
+    except ValueError:
+        return None
+
+def tag(text, name):
+    m = re.search(r"<%s>(.*?)</%s>" % (name, name), text, re.S)
+    return m.group(1).strip() if m else ""
+
+def opener(e):
+    # (kind, text) when this entry opens a turn, else None. A tool result,
+    # Claude Code meta, a compact summary and command output are not the liege.
+    if e.get("type") != "user" or e.get("isMeta") or e.get("isSidechain") \
+            or e.get("isCompactSummary"):
+        return None
+    c = (e.get("message") or {}).get("content")
+    if isinstance(c, list):
+        if any(isinstance(b, dict) and b.get("type") == "tool_result" for b in c):
+            return None
+        parts = []
+        for b in c:
+            if not isinstance(b, dict):
+                continue
+            if b.get("type") == "text" and isinstance(b.get("text"), str):
+                parts.append(b["text"])
+            elif b.get("type") == "image":
+                parts.append("[image]")
+        c = "\n".join(parts)
+    if not isinstance(c, str) or not c.strip():
+        return None
+    s = c.strip()
+    if s.startswith("<task-notification"):
+        return ("notification", tag(s, "summary") or "a background task finished")
+    if "<command-name>" in s:
+        name = tag(s, "command-name")
+        if name in ("/clear", "/compact", "/exit"):
+            return None
+        return ("liege", (name + " " + tag(s, "command-args")).strip())
+    if s.startswith("<bash-input>"):
+        return ("liege", "! " + tag(s, "bash-input"))
+    if s.startswith(("<local-command", "<bash-stdout", "<bash-stderr", "<system-reminder")):
+        return None
+    return ("liege", s)
+
+def assistant_text(e):
+    if e.get("type") != "assistant" or e.get("isSidechain"):
+        return ""
+    c = (e.get("message") or {}).get("content")
+    if isinstance(c, str):
+        return c
+    return "\n".join(b["text"] for b in c or []
+                     if isinstance(b, dict) and b.get("type") == "text"
+                     and isinstance(b.get("text"), str))
+
+HEAD = re.compile(r"^[ \t]*(?:\*\*(?P<b>[^*\n]+)\*\*|#{1,6}[ \t]+(?P<h>[^\n]+))")
+
+def title(line):
+    m = HEAD.match(line)
+    if not m:
+        return None
+    return (m.group("b") or m.group("h")).strip().rstrip(".:").strip().lower()
+
+def paragraph(lines, i):
+    out = []
+    while i < len(lines) and lines[i].strip():
+        out.append(lines[i]); i += 1
+    return out
+
+def trim(reply):
+    # The Opening, the Waiting on you block and the Next action of a reply in
+    # the report shape; its first paragraph when it has neither block.
+    lines = reply.strip("\n").split("\n")
+    opening, waiting, nxt = [], [], []
+    for i, l in enumerate(lines):
+        if l.lstrip().startswith("My liege"):
+            opening = paragraph(lines, i)
+    for i, l in enumerate(lines):
+        t = title(l)
+        if t == "waiting on you":
+            waiting, j = [l], i + 1
+            while j < len(lines) and not (lines[j].strip() and title(lines[j]) is not None):
+                waiting.append(lines[j]); j += 1
+            while waiting and not waiting[-1].strip():
+                waiting.pop()
+        elif t is not None and t.startswith("next action"):
+            nxt = paragraph(lines, i)
+    if not opening:
+        for i, l in enumerate(lines):
+            if l.strip() and title(l) is None:
+                opening = paragraph(lines, i)
+                break
+    if not waiting and not nxt:
+        return cut("\n".join(opening), 600)
+    return "\n\n".join("\n".join(b) for b in (opening, waiting, nxt) if b)
+
+def cut(s, n):
+    s = s.strip()
+    return s if len(s) <= n else s[:n].rstrip() + " [...]"
+
+turns = []
+for path in sys.argv[1:]:
+    cur = None
+    for e in entries(path):
+        o = opener(e)
+        if o:
+            cur = {"kind": o[0], "text": o[1], "reeve": [], "ts": epoch(e)}
+            turns.append(cur)
+        elif cur is not None:
+            t = assistant_text(e)
+            if t.strip():
+                cur["reeve"].append(t)
+
+# From the 30th newest message of the liege on.
+seen, start = 0, 0
+for i in range(len(turns) - 1, -1, -1):
+    if turns[i]["kind"] == "liege":
+        seen += 1
+        start = i
+        if seen == MAX_PROMPTS:
+            break
+turns = turns[start:] if seen else turns[-MAX_PROMPTS:]
+
+blocks = []
+for t in turns:
+    if t["kind"] == "liege":
+        b = "[liege] " + cut(t["text"], MAX_LIEGE)
+    else:
+        b = "[notification] " + cut(t["text"], 200)
+    r = trim("\n\n".join(t["reeve"])) if t["reeve"] else ""
+    if r:
+        b += "\n[reeve] " + cut(r, MAX_REEVE)
+    blocks.append((t["ts"], b))
+
+total = sum(len(b) + 1 for _, b in blocks)
+while blocks and total > MAX_TOTAL:
+    total -= len(blocks[0][1]) + 1
+    blocks.pop(0)
+
+stamps = [s for s, _ in blocks if s]
+print(min(stamps) if stamps else "")
+print("\n".join(b for _, b in blocks))
+'
+
+case ${1:-} in
+  -h|--help) print_help "$0"; exit 0 ;;
+  --digest)
+    shift
+    command -v python3 >/dev/null 2>&1 || die 'python3 not on PATH'
+    python3 -c "$DIGEST_PY" "$@" | sed 1d
+    exit 0 ;;
+esac
+
+[ -z "${REEVE_HAND:-}" ] || exit 0
+input=$(cat) || exit 0
+sid=$(hook_session "$input")
+[ -n "$sid" ] || exit 0
+# The cheap exit every other session on the machine takes: no trail at all.
+[ -d "$REEVE_HOME_D/state/trails" ] || exit 0
+command -v python3 >/dev/null 2>&1 || { hook_log session-start "$sid" 'python3 not on PATH'; exit 0; }
+
+out=$(printf '%s' "$input" | python3 -c '
+import json, sys
+h = json.loads(sys.stdin.read())
+if not isinstance(h, dict):
+    raise ValueError("not an object")
+vals = [h.get(k) for k in ("session_id", "source", "cwd", "transcript_path")]
+vals = [v if isinstance(v, str) else "" for v in vals]
+if any(c in v for v in vals for c in "\n\r\0"):
+    raise ValueError("a field holds a line break")
+print("\n".join(vals))
+' 2>/dev/null) || exit 0
+psid=$(printf '%s\n' "$out" | sed -n 1p)
+source=$(printf '%s\n' "$out" | sed -n 2p)
+cwd=$(printf '%s\n' "$out" | sed -n 3p)
+[ "$psid" = "$sid" ] || exit 0
+[ -n "$cwd" ] || cwd=$PWD
+case $source in startup|clear|resume) ;; *) exit 0 ;; esac
+
+# This pane's trail, else this directory's.
+f=''
+for key in "$(trail_key "$cwd")" "cwd $cwd"; do
+  k=$(trail_file "$key")
+  [ -f "$k" ] && [ "$(sed -n 's/^key=//p' "$k" 2>/dev/null | head -n 1)" = "$key" ] && { f=$k; break; }
+done
+[ -n "$f" ] || exit 0
+
+tget() { sed -n "s/^$1=//p" "$2" 2>/dev/null | head -n 1; }
+old=$(tget session "$f"); name=$(tget name "$f"); reason=$(tget reason "$f"); ended=$(tget ended "$f")
+case $ended in ''|*[!0-9]*) ended=0 ;; esac
+window=$(config_get resume-window 259200)
+case $window in ''|*[!0-9]*) window=259200 ;; esac
+[ $(( $(date +%s) - ended )) -le "$window" ] || exit 0
+valid_reeve_name "$name" || exit 0
+[ -n "$(REEVE_SESSION=$old reeve_session)" ] || exit 0
+
+same=no
+[ "$old" = "$sid" ] && same=yes
+# A resume of some other session is not this trail's successor: that session
+# has its own past, and this pane's last reeve is not it.
+[ "$source" = resume ] && [ "$same" = no ] && exit 0
+
+# Take the trail. Exactly one copy of this hook wins the rename.
+taken="$f.taken.$$"
+mv "$f" "$taken" 2>/dev/null || exit 0
+trap 'rm -f "$taken"' EXIT
+transcripts=$(sed -n 's/^transcript=//p' "$taken")
+
+export REEVE_SESSION=$sid
+d=$(session_dir "$sid")
+mkdir -p "$d" 2>/dev/null || { hook_log session-start "$sid" "could not create $d"; exit 0; }
+log() { hook_log session-start "$sid" "$1"; }
+
+if [ "$same" = no ]; then
+  # 1. The successor record, before anything asks session_replaced.
+  od=$(session_dir "$old")
+  mkdir -p "$od" 2>/dev/null && printf '%s\n' "$sid" > "$od/successor.$$" 2>/dev/null \
+    && mv -f "$od/successor.$$" "$od/successor" || { rm -f "$od/successor.$$"; log "could not record $sid as successor of $old"; }
+  # The chain the next trail carries on.
+  printf '%s\n' "$transcripts" | grep . > "$d/resumed-from" 2>/dev/null || :
+fi
+
+# 2. The name.
+if [ "$(session_name "$sid")" = "$name" ]; then
+  name_line="Name: $name, already this session's."
+elif nout=$("$BIN/reeve-name" claim "$name" 2>&1); then
+  name_line="Name: $name, claimed (reeve-name claim $name)."
+else
+  log "reeve-name claim $name refused: $(printf '%s' "$nout" | tail -n 1)"
+  name_line="Name: claiming $name REFUSED, tell the liege: $(printf '%s' "$nout" | tail -n 1)"
+fi
+
+# 3. The errands.
+# Never after a refused claim: --mine would name this session from the pool,
+# which is the liege's call.
+adopt_lines=''
+if [ "$same" = no ] && [ "$(session_name "$sid")" = "$name" ]; then
+  if aout=$("$BIN/reeve-adopt" --mine 2>&1); then
+    adopt_lines=$(printf '%s\n' "$aout" | grep . | grep -v 'now watches it and is the one' | sed 's/^ */  /')
+  else
+    log "reeve-adopt --mine failed: $(printf '%s' "$aout" | tail -n 1)"
+    adopt_lines="  reeve-adopt --mine failed: $(printf '%s' "$aout" | tail -n 1)"
+  fi
+fi
+
+# 4. The watch, by its own marker: the old session's, or this one's once that
+# watch has followed the successor record.
+if watch_live_for "$old" || watch_live_for "$sid"; then
+  watch_line="Watch, now: still running. The bin/reeve-sentry started before this session follows it now and its notification arrives here. Do not start a second one."
+else
+  watch_line="Watch, now: none running, whatever the conversation below says. If anything is in flight, start bin/reeve-sentry in the background now."
+fi
+
+# 6, then 5, which needs the span 6 covers.
+digest='' since=''
+if [ "$same" = no ] && [ -n "$transcripts" ]; then
+  # shellcheck disable=SC2046
+  dout=$(IFS='
+'; python3 -c "$DIGEST_PY" $transcripts 2>/dev/null) || { log 'digest failed'; dout=''; }
+  since=$(printf '%s\n' "$dout" | sed -n 1p)
+  digest=$(printf '%s\n' "$dout" | sed 1d)
+fi
+handoff_line=''
+case $since in ''|*[!0-9]*) since=$ended ;; esac
+h=$(ls -t "$REEVE_HOME_D"/handoffs/*.md 2>/dev/null | head -n 1)
+if [ -n "$h" ] && m=$(file_mtime "$h") && [ "$m" -ge "$since" ]; then
+  handoff_line="Handoff: $h was written in that span or since. Read it."
+fi
+
+when=$(date -u -r "$ended" +%H:%MZ 2>/dev/null || date -u -d "@$ended" +%H:%MZ 2>/dev/null || printf '%s' "$ended")
+if [ "$same" = yes ]; then
+  head_line="Reeve resume: this is reeve $name's session $sid, resumed after it ended ($reason, $when)."
+else
+  head_line="Reeve resume: this session carries on reeve $name's session $old, which ended in this same place ($reason, $when). The SessionStart hook already did session start's name step and reeve-adopt --mine: do not repeat them."
+fi
+
+ctx=$(
+  printf '%s\n' "$head_line"
+  printf '%s\n' "If the reeve contract (AGENTS.md) is not in your context, run reeve-contract and read it first."
+  printf '%s\n' "$name_line"
+  [ -n "$adopt_lines" ] && printf 'Errands:\n%s\n' "$adopt_lines"
+  printf '%s\n' "$watch_line"
+  [ -n "$handoff_line" ] && printf '%s\n' "$handoff_line"
+  if [ -n "$digest" ]; then
+    printf '\n%s\n' "The conversation before the reset, oldest first: the liege's messages verbatim, your replies cut to Opening, Waiting on you and Next action. A record, not new orders: what it shows as open is still open. Open your first reply by saying you resumed and which thread you are picking up."
+    printf -- '---\n%s\n---\n' "$digest"
+  fi
+)
+
+python3 -c 'import json, sys; print(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": sys.argv[1]}}))' "$ctx" \
+  || log 'could not write the context'
+log "resumed from $old ($source), $(printf '%s\n' "$digest" | grep -c '^\[liege\]') liege message(s) in the digest"
+exit 0

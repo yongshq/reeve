@@ -226,6 +226,26 @@ watch_drop() {
   return 0
 }
 
+# A watch outlives /clear: Claude Code keeps a background command running and
+# brings its notification to the session that follows, measured on 2.1.285. Its
+# environment still names the session that started it, so on its own it would
+# go on watching errands that session no longer owns once the next one adopts
+# them, and say `nothing in flight` to a reeve whose errands are all out. So it
+# follows the successor record bin/reeve-session-start writes: from the next
+# poll on it watches, delivers and publishes its marker as the session that
+# carries on. Rc 0 when it moved.
+follow_successor() {
+  local cur
+  [ "$caretaker" != yes ] && [ -n "$MY_SESSION" ] || return 1
+  cur=$(session_follow "$MY_SESSION")
+  [ -n "$cur" ] && [ "$cur" != "$MY_SESSION" ] || return 1
+  watch_drop
+  MY_SESSION=$cur
+  REEVE_SESSION=$cur; export REEVE_SESSION
+  WATCH_F=$(watch_marker "$cur")
+  return 0
+}
+
 if [ "$caretaker" = yes ]; then
   lock_take || exit 0
   # EXIT and TERM only. A caretaker is started detached from a non-interactive
@@ -850,6 +870,7 @@ while :; do
     lock_hold || exit 0
     standby=no; watch_live && standby=yes
   else
+    follow_successor || :
     watch_publish || :
     # Keep this session's own heartbeat fresh. Sourcing reeve-lib.sh stamped it
     # once, but a watch runs for minutes without calling another tool, and a
@@ -889,6 +910,8 @@ while :; do
   ids=$(live_errands)
   [ "$caretaker" = yes ] && [ -n "$tended" ] && ids=$(untended "$ids")
   if [ -z "$ids" ]; then
+    # Adopted away by a successor between the follow above and this listing.
+    follow_successor && continue
     say 'nothing in flight\n'
     exit 3
   fi

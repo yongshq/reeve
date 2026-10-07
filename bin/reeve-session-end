@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+# A Claude Code SessionEnd hook: when a reeve's session ends, by /clear, by
+# exit or any other way, leave a trail for the session that follows it in the
+# same place, so bin/reeve-session-start can pick the work up there.
+#
+# Usage, from hooks/hooks.json (the plugin) and .claude/settings.json (a session
+# started inside the clone), never by hand:
+#   bin/reeve-session-end < <SessionEnd hook input JSON>
+#
+# Acts only on a reeve, by bin/reeve-format-guard's test: REEVE_HAND unset, and
+# the hook's session_id has a name record. Settled by text before python runs,
+# so every other session on the machine exits 0 having read nothing else.
+#
+# The trail is one file under $REEVE_HOME/state/trails, one per pane inside
+# herdr, else one per working directory (trail_key in reeve-lib.sh). A later
+# end in the same place replaces it. key=value lines:
+#   key=        `pane <id>@<socket>` or `cwd <dir>`, checked on reading
+#   session=    the session that ended
+#   name=       its reeve name
+#   reason=     what Claude Code said ended it: clear, prompt_input_exit, ...
+#   ended=      epoch seconds
+#   transcript= one per line, oldest first: this session's, after those of the
+#               sessions it resumed from, the last three in all
+#
+# /clear waits for this hook, so it does no more than that: no backend call, no
+# listing. Silent on stdout and stderr whatever happens; a failure is one line
+# in $REEVE_HOME/state/session-hooks.log.
+#
+# Exit: always 0.
+
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/reeve-lib.sh"
+
+case ${1:-} in -h|--help) print_help "$0"; exit 0 ;; esac
+
+[ -z "${REEVE_HAND:-}" ] || exit 0
+input=$(cat) || exit 0
+sid=$(hook_session "$input")
+[ -n "$sid" ] && name=$(session_name "$sid") && [ -n "$name" ] || exit 0
+
+fail() { hook_log session-end "$sid" "$1, no trail left"; exit 0; }
+
+command -v python3 >/dev/null 2>&1 || fail 'python3 not on PATH'
+
+# session id, transcript, cwd, reason: one per line, each refused if it could
+# break a line of the trail.
+out=$(printf '%s' "$input" | python3 -c '
+import json, sys
+h = json.loads(sys.stdin.read())
+if not isinstance(h, dict):
+    raise ValueError("not an object")
+vals = [h.get(k) for k in ("session_id", "transcript_path", "cwd", "reason")]
+vals = [v if isinstance(v, str) else "" for v in vals]
+if any(c in v for v in vals for c in "\n\r\0"):
+    raise ValueError("a field holds a line break")
+print("\n".join(vals))
+' 2>/dev/null) || fail 'could not parse the hook input'
+
+psid=$(printf '%s\n' "$out" | sed -n 1p)
+tr_path=$(printf '%s\n' "$out" | sed -n 2p)
+cwd=$(printf '%s\n' "$out" | sed -n 3p)
+reason=$(printf '%s\n' "$out" | sed -n 4p)
+[ "$psid" = "$sid" ] || fail 'session id read two ways disagrees'
+[ -n "$tr_path" ] || fail 'no transcript_path'
+[ -n "$cwd" ] || cwd=$PWD
+
+key=$(trail_key "$cwd")
+f=$(trail_file "$key")
+mkdir -p "$(dirname "$f")" 2>/dev/null || fail "could not create $(dirname "$f")"
+
+# The chain: what this session resumed from, then its own, the last three.
+chain=$( { cat "$(session_dir "$sid")/resumed-from" 2>/dev/null; printf '%s\n' "$tr_path"; } \
+  | grep . | awk '!seen[$0]++' | tail -n 3)
+
+{
+  printf 'key=%s\n' "$key"
+  printf 'session=%s\n' "$sid"
+  printf 'name=%s\n' "$name"
+  printf 'reason=%s\n' "${reason:-other}"
+  printf 'ended=%s\n' "$(date +%s)"
+  printf '%s\n' "$chain" | sed 's/^/transcript=/'
+} > "$f.$$" 2>/dev/null && mv -f "$f.$$" "$f" 2>/dev/null \
+  || { rm -f "$f.$$"; fail "could not write $f"; }
+exit 0
