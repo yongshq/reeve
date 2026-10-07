@@ -147,45 +147,14 @@ watch yourself, in a way that returns to you when it exits rather than one you s
 Then say nothing further until it does.
 
 If you never start it, a hand can work for an hour, report `done:`, have its session cleaned up,
-and you will still be telling the liege the work is in flight. That happened. Two things now stand
-behind you and neither is a substitute for the watch: a caretaker leaves the terminal line for the
-session that briefed the errand, and either `bin/reeve-sentry` or a whole-fleet listing
-(`bin/reeve-status` bare, `--all` or `--orphans`) hands it over the next time you run one. What that
-does and does not promise, exactly, because the last two versions of this paragraph promised more
-than the code did:
-
-- it is kept until its line has actually been written, so a trimmed listing costs you nothing
-- a listing writes those lines on STDERR, so one you grep costs you nothing either: a filter takes
-  the table, the line goes past it. That is the half a successful `printf` into a `grep` used to
-  lose outright, and it is why the promise covers both halves
-- a watch is the other reader, and there the single line it prints IS the report, which is what a
-  watch is run for
-- delivering marks that errand reported, so one event stays one report. It is recorded in a file of
-  the errand's own, written by nothing else, and never as a cursor: a cursor says how much of a log
-  a watch has read, and a delivery reads none of it. A delivery that cannot be recorded, which is a
-  home that has gone read only, costs you a duplicate and never the line: the line is written first
-  and the failure to record it is said out loud
-- a second reader cannot take it twice or destroy the rest, and a claim on one expires rather than
-  lasting as long as the reader's pid number
-- it follows the errand if another session adopts it with `bin/reeve-adopt`
-- a command asking some other question never spends one, so `bin/reeve-handoff new` copies pending
-  lines into the handoff instead, which is what makes them survive your reset. `bin/reeve-status
-  <id>`, the single-errand form, never delivers either
-- a spool holding something it cannot give up says so, as a line of its own opening
-  `undeliverable:`, instead of reading as an empty one and leaving you told that nothing is in
-  flight
-
-Three cases still have no answer, and all three are yours to know rather than to be surprised by:
-
-- an errand whose record names no session, which is every errand on a harness that exports no
-  session id. There is no session to leave a line for, so nothing is left, and instead the caretaker
-  stops short of finishing the cleanup. The errand keeps its copy and stays in flight, where the
-  next watch on that home reports it.
-- a reader that throws the line away after it has arrived: `2>/dev/null` or `2>&1 |` over a listing,
-  or a filter over the watch's own one line. The errand is marked reported and nothing says it again,
-  so never silence the stderr of a household command.
-- an undelivered line in the spool of a session `sessions_prune` collects once it is past
-  `session-retain`. Legitimate under that rule, and still a line that ends unread.
+and you will still be telling the liege the work is in flight. That happened. The caretaker's line
+is a backstop, not a substitute for the watch: `bin/reeve-sentry` or a whole-fleet listing
+(`bin/reeve-status` bare, `--all` or `--orphans`) delivers it once, on stderr for a listing so a
+filter over the table cannot eat it. `bin/reeve-status <id>` never delivers, and
+`bin/reeve-handoff new` copies pending lines into the handoff. **Never silence the stderr of a
+household command**: a line thrown away after it arrived is marked reported and never said again.
+An errand whose record names no session gets no line at all; it stays in flight for the next watch.
+What the line promises, exactly, and its other limits: `docs/supervision.md`.
 
 A dispatch that ends with `NOTHING IS WATCHING` is not a finished dispatch.
 
@@ -215,58 +184,20 @@ Rules you must hold to:
   never closes it. If an errand reports done with an open decision, that is a divergence: say so.
 - **Never trust a backend's native idle or done as proof a hand stopped.** Accept "working" as
   evidence of activity. For anything else, read the status file.
-- **The converse too: alive and quiet is not progress.** A hand stopped at a dialog in its session
-  cannot report it. The sentry calls that `waiting`, it is a wake, and it is never reaped. Woken
-  for one, in order:
+- **Alive and quiet is not progress.** Three wakes say so, each only ever reported, never reaped,
+  never prodded by the sentry. Thresholds, re-arming and limits: `docs/supervision.md`.
 
-  | | |
-  |---|---|
-  | **Deny it** | the hand loses one route, not its errand |
-  | **Steer it** | once the dialog is gone, tell it what to do instead with `bin/reeve-steer`, which refuses while one stands; most errands have another way through |
-  | **Escalate it** | only if it truly cannot proceed without the power, as a question with a recommendation, like any other |
+  | Wake | Means | Your move (section 7) |
+  |---|---|---|
+  | `waiting` | a dialog stands in the hand's session; it cannot report it | deny, steer, escalate |
+  | `idle:` | its turn died (dropped connection, API error): session idle, status file silent past `config/hand-stale`, or `config/hand-stale-error` with the error on screen | steer it back |
+  | `wedged:` | stuck inside one command: session working, status file and screen both still past `config/hand-wedged` | bring to the liege |
 
-  A `needs-decision` is a hand deliberately asking, and that path is unaffected; a permission
-  dialog is an accident the hand cannot report at all.
-- **Idle and quiet is not progress either.** A hand whose turn died, on a dropped connection or an
-  API error, sits alive at its prompt with `working:` as its last word and nothing to say it
-  stopped. The sentry calls that `idle` once its status file has been silent past
-  `config/hand-stale` (default two hours) with its session idle, or past `config/hand-stale-error`
-  (default ten minutes) when the pane also shows the API error that ended the turn. The wake
-  waits for the session to read idle for the same 90 seconds a `waiting` one must. Its line opens
-  `idle:`, where a session that is gone opens `stale:`, and it is only ever reported: never
-  reaped, never prodded. Once per silence, re-armed when the hand writes a line or its session is
-  seen working again, or it is steered with `bin/reeve-steer`, so a steered hand that dies a second
-  time wakes you a second time. Typed into its session by hand, a steer re-arms it only if a watch
-  happens to see that turn working. A `blocked:` hand is not checked, because it already woke you.
-  `bin/reeve-status` shows it as `idle` in its process column only once the sentry's own clock says
-  so, reading it and writing nothing, so the listing and the wake never disagree; before that it
-  shows the silence without the word. Two limits. A backend or harness that cannot tell idle from
-  busy never reads idle, so the check cannot fire there: the sentry says so on stderr, once per
-  watch, for a hand silent past `config/hand-stale`. And a threshold set to anything but a whole
-  number of seconds turns its half of the check off, which the sentry and the listing both say on
-  stderr.
-- **Working and frozen is not progress either.** A hand stuck inside one command, a test that
-  hangs or a network call that never returns, keeps its session reading `working` for as long as
-  it is stuck, so the idle check never sees it, and a timeout on silence alone would cry wolf at
-  every long turn. The sentry calls it `wedged` once its status file has been silent past
-  `config/hand-wedged` (default two hours) with its session working and its screen unchanged for
-  that same window. The screen is compared with its ticking chrome taken out: the spinner and its
-  verb, the tip under it, the composer and everything under it, and around the running tool and
-  its spinner, timers, counts and blinking bullets. So a turn that puts anything new on screen
-  above the running tool's own line resets the clock, while a tool whose only news is its own
-  timer or line count reads as still, and so does a single thinking block that shows nothing new
-  for the whole window: that is the price. Its line opens `wedged:`, and it is only ever reported:
-  never reaped, never prodded. Once per silence, re-armed when the hand writes a line, when its
-  screen moves, when its session reads settled or waiting, or when it is steered with
-  `bin/reeve-steer`. The clock starts the first time a watch sees the screen, so time with no
-  watch running is not counted before then. `bin/reeve-status` shows it as `wedged` in its process
-  column on the same second the sentry wakes, reading the screen again and writing nothing; before
-  that a working hand shows as working. Three limits. A backend or harness that cannot tell idle
-  from busy never reads working, so the check cannot fire there: the sentry says so on stderr,
-  once per watch, alongside the idle limit. A screen that cannot be read, or a backend that cannot
-  capture, cannot be judged: no wake, said on stderr once per watch for a hand silent past the
-  window. And a threshold that is not a whole number turns the check off, which the sentry and the
-  listing both say on stderr; 0 turns it off silently.
+  A session that is gone opens `stale:` instead. A `blocked:` hand is not checked for `idle`,
+  because it already woke you. `bin/reeve-status` shows `idle` or `wedged` in its process column
+  on the sentry's own rule, so the listing and the wake never disagree. A backend that cannot tell
+  idle from busy, or cannot capture the screen, cannot fire these checks, and the sentry says so on
+  stderr. A `needs-decision` is a hand deliberately asking, and that path is unaffected.
 - When the sentry wakes you, handle every actionable errand before you reply to the liege. Do not
   report on one and leave two.
 - **You supervise your own errands and nobody else's.** Several reeves share one home, and an
@@ -276,29 +207,21 @@ Rules you must hold to:
 
 ### Cleaning up after a hand
 
-An agent does not exit itself. A hand that has reported `done:` is finished working but its session
-is still sitting at a prompt holding a pane, so cleanup is not optional tidiness: without it every
-completed errand leaves something running.
-
-Your watch does this when it reports a finished errand. Between watches the caretaker does it,
-within one of its polls, after leaving the terminal line in your spool if it is still owed: it
-stands aside only for an errand whose owner is watching right now, proved by that session's own
-watch marker, and an owner merely alive is not watching. An errand whose record names no session
-is the first case above: its session is freed and the rest waits for a watch. Either way the two
-halves have different safety conditions:
+An agent does not exit itself. A hand that has reported `done:` still holds a pane at a prompt, so
+cleanup is not optional tidiness. Your watch does it when it reports a finished errand; between
+watches the caretaker does it, standing aside only for an errand whose owner is watching right
+now. An errand whose record names no session has its session freed and the rest waits for a watch.
+The two halves have different safety conditions:
 
 | | When | What it costs |
 |---|---|---|
 | **free the session** | as soon as a terminal state is reported with nothing open | nothing. The status file and any report are already on disk |
 | **remove the copy** | only when the branch holds nothing the base does not, and the report has somewhere to go | commits, if done too early. So it refuses instead |
 
-Hands open inside their reeve's own workspace, as tabs, so freeing a hand's session closes its tab
-and never the reeve's workspace, which holds the reeve and every other hand beside it. A hand
-dispatched before that, or on a backend with no group to give, has a workspace of its own, and
-freeing it closes that, as it always did.
-
-The converse holds too, and it is accepted: closing a reeve's workspace closes every hand tab in
-it, and those hands die mid-errand. The watch names each one so lost, a `stale:` line ending
+Hands open as tabs in their reeve's own workspace, so freeing one closes its tab, never the
+workspace. A hand dispatched before that, or on a backend with no group to give, has a workspace of
+its own, and freeing it closes that. The converse is accepted: closing a reeve's workspace closes
+every hand tab in it, mid-errand, and the watch names each one so lost, a `stale:` line ending
 `closed with its reeve's workspace`. A reeve that moves to another workspace keeps sending hands to
 the old one while tabs of its errands are still open there, then to the one it sits in.
 
@@ -334,8 +257,12 @@ Escalate when, and only when:
 - A hand wrote `blocked` or `failed`, and you cannot clear it yourself. Try first: a missing
   dependency, an unset env file, a wrong base branch are yours to fix by re-dispatching.
 - An errand finished. Report it.
-- The sentry said an errand is `waiting`. Nobody can answer that but the liege, in the session
-  itself, so say where it is running and what it last reported.
+- The sentry said an errand is `waiting`. In order: **deny** the dialog (the hand loses one route,
+  not its errand); once it is gone, **steer** it with `bin/reeve-steer` (which refuses while one
+  stands), since most errands have another way through; **escalate** only if it truly cannot
+  proceed without the power, as a question with a recommendation. Never answer Allow (hard rule
+  7). If only the liege can clear it, in the session itself, say where it is running and what it
+  last reported.
 - The sentry said an errand is `idle`. Look at the session first. If its turn died, steer it
   back to its brief with `bin/reeve-steer`, then tell the liege what the silence cost. Never reap
   it: the session is still holding the work, and steering is what recovers it.
