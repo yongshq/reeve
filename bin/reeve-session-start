@@ -27,7 +27,8 @@
 #
 # A trail is void once its session is seen after it ended, its heartbeat newer
 # than ended plus config/resume-slack (default 60s): it came back, by a resume,
-# and a live reeve is never taken over. It is removed. A resume of a reeve's
+# and a live reeve is never taken over. It is removed, as is a trail whose
+# name a live reeve elsewhere holds again (the hook only). A resume of a reeve's
 # session anywhere also removes every other trail naming it, and stamps its
 # heartbeat, which voids any successor record written for it (successor_of).
 #
@@ -348,11 +349,14 @@ if [ "$same" = no ]; then
 fi
 # The name is held again by a live reeve on another pane: nothing to offer, and
 # a resume would only be refused its claim after writing a successor record.
-if [ "$same" = no ] && rival=$(name_live_elsewhere "$name" "$(reeve_pane)" "$old"); then
+# Judged as the trail's session, so a session whose successor chain ends at
+# $old (an earlier /clear of this same reeve) is not a rival.
+if [ "$same" = no ] && rival=$(REEVE_SESSION=$old name_live_elsewhere "$name" "$(reeve_pane)" "$old"); then
+  rival_where=elsewhere; [ -n "$(reeve_pane)" ] && rival_where='on another pane'
   if [ "$mode" = hook ]; then
     rm -f "$f"; log "the trail of $old removed: $name is live again as $rival"
   fi
-  quit "reeve $name is live again as session $rival on another pane, so there is nothing to resume here"
+  quit "reeve $name is live again as session $rival ${rival_where}, so there is nothing to resume here"
 fi
 [ "$age" -le "$(num "$(config_get resume-window 259200)" 259200)" ] \
   || quit "reeve $name's trail here is ${age}s old, past config/resume-window"

@@ -13,7 +13,8 @@
 #   3b. after anything but /clear an offer only, until --resume takes it
 #   3c. a session seen again, by a resume elsewhere or its heartbeat, is never
 #      taken over: its trail goes, and nobody takes its name or errands
-#   3d. a name live again on another pane is never offered or resumed
+#   3d. a name live again on another pane is never offered or resumed, but
+#      the reeve's own earlier sessions are no rival (chained /clear)
 #   4. the successor record: adopt, name and the sentry all honour it, until
 #      the old session is seen again
 #   5. both registrations, with their matcher and short timeouts
@@ -350,6 +351,24 @@ ck_eq '3 live holder: no pool name' "$(cat "$REEVE_HOME/state/sessions/new-sid/n
 ck_eq '3 live holder: nothing adopted' "$(sed -n 's/^session=//p' "$REEVE_HOME/state/e1.meta")" old-sid
 ck_has '3 live holder: logged' "$(cat "$REEVE_HOME/state/session-hooks.log")" 'is live again as rival-sid'
 
+# The claim refused after the pre-check passed: a rival appears in between.
+# Said, no pool name, nothing adopted. Run through a copy of bin/ whose
+# reeve-name creates the rival first.
+setup3 home3g2
+rm -rf "$SCRATCH/binrace"; cp -R "$ROOT/bin" "$SCRATCH/binrace"
+cat > "$SCRATCH/binrace/reeve-name" <<STUB
+#!/usr/bin/env bash
+d="\$REEVE_HOME/state/sessions/rival-sid"
+mkdir -p "\$d"; printf 'Aldric\n' > "\$d/name"; printf 'w7:p7\n' > "\$d/pane"; date +%s > "\$d/seen"
+exec "$ROOT/bin/reeve-name" "\$@"
+STUB
+chmod +x "$SCRATCH/binrace/reeve-name"
+C=$(ctx_of "$(hook SessionStart new-sid "$SCRATCH/new.jsonl" clear | "$SCRATCH/binrace/reeve-session-start" 2>&1)")
+ck_has '3 claim refused: said' "$C" 'Name: claiming Aldric REFUSED'
+ck_eq '3 claim refused: no pool name' "$(cat "$REEVE_HOME/state/sessions/new-sid/name" 2>/dev/null)" ''
+ck_eq '3 claim refused: nothing adopted' "$(sed -n 's/^session=//p' "$REEVE_HOME/state/e1.meta")" old-sid
+ck_has '3 claim refused: logged' "$(cat "$REEVE_HOME/state/session-hooks.log")" 'refused'
+
 # Inside herdr: the pane's trail, not the directory's.
 fresh_home home3h
 reeve old-sid Aldric w1:p2
@@ -540,6 +559,37 @@ ck_eq '3d --resume, live holder: errand kept' "$(sed -n 's/^session=//p' "$REEVE
 rm -rf "$REEVE_HOME/state/sessions/rival-sid"
 OUT=$(hook SessionStart new-sid "$SCRATCH/new.jsonl" startup | HERDR_PANE_ID=w1:p1 "$START" 2>&1)
 ck_eq '3d no live holder: offered' "$(sys_of "$OUT")" 'Aldric was here, say resume to pick up.'
+
+# Outside herdr, the reeve's own earlier session is no rival: A (fresh
+# heartbeat) is cleared into S1, S1 is cleared again into S2 within the stale
+# window. S2 takes over.
+setup3 home3x
+hook SessionStart s1-sid "$SCRATCH/s1.jsonl" clear | "$START" >/dev/null 2>&1
+hook SessionEnd s1-sid "$SCRATCH/s1.jsonl" clear | "$END"
+C=$(ctx_of "$(hook SessionStart s2-sid "$SCRATCH/s2.jsonl" clear | "$START" 2>&1)")
+ck_has '3d chained /clear: taken over' "$C" 'Reeve resume: this session carries on'
+ck_eq '3d chained /clear: the name' "$(cat "$REEVE_HOME/state/sessions/s2-sid/name" 2>/dev/null)" Aldric
+ck_eq '3d chained /clear: errand adopted' "$(sed -n 's/^session=//p' "$REEVE_HOME/state/e1.meta")" s2-sid
+# Clear, then exit, then a plain start and --resume.
+setup3 home3y
+hook SessionStart s1-sid "$SCRATCH/s1.jsonl" clear | "$START" >/dev/null 2>&1
+hook SessionEnd s1-sid "$SCRATCH/s1.jsonl" other | "$END"
+OUT=$(hook SessionStart s2-sid "$SCRATCH/s2.jsonl" startup | "$START" 2>&1)
+ck_eq '3d clear then exit: offered' "$(sys_of "$OUT")" 'Aldric was here, say resume to pick up.'
+OUT=$(REEVE_SESSION=s2-sid "$START" --resume "$SCRATCH/work" 2>&1); RC=$?
+ck_eq '3d clear then exit: --resume ok' "$RC" 0
+ck_eq '3d clear then exit: errand adopted' "$(sed -n 's/^session=//p' "$REEVE_HOME/state/e1.meta")" s2-sid
+# A genuine live rival still blocks, outside herdr too.
+setup3 home3z
+hook SessionStart s1-sid "$SCRATCH/s1.jsonl" clear | "$START" >/dev/null 2>&1
+hook SessionEnd s1-sid "$SCRATCH/s1.jsonl" clear | "$END"
+reeve rival-sid Aldric
+OUT=$(REEVE_SESSION=s2-sid "$START" --resume "$SCRATCH/work" 2>&1); RC=$?
+ck_eq '3d rival outside herdr: --resume refused' "$RC" 1
+ck_has '3d rival outside herdr: says elsewhere' "$OUT" 'is live again as session rival-sid elsewhere'
+OUT=$(hook SessionStart s2-sid "$SCRATCH/s2.jsonl" clear | "$START" 2>&1)
+ck_eq '3d rival outside herdr: silent' "$OUT" ''
+ck_eq '3d rival outside herdr: errand kept' "$(sed -n 's/^session=//p' "$REEVE_HOME/state/e1.meta")" s1-sid
 
 echo '--- 4. the successor record ---'
 fresh_home home4
