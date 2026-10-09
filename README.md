@@ -67,8 +67,8 @@ claude
 
 ## Skills
 
-`/court` `/muster` `/errand` `/inscribe` `/strike` `/recall` `/glean` `/self-update`
-`/survey` `/handoff`
+`/start` `/court` `/muster` `/errand` `/memory` `/inscribe` `/strike` `/recall` `/glean`
+`/self-update` `/survey` `/handoff`
 
 ## How an errand actually flows
 
