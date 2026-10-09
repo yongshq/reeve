@@ -4,7 +4,7 @@
 #
 # PROCESS read `never-dispatched` for any errand with an empty `target=`, which
 # is every errand whose session has been freed: 46 of the 49 on the day this was
-# written, so the column said the fleet had never gone out.
+# written, so the column said no errands had ever gone out.
 #
 # The office line read `artificer on  via ?` because reeve-brief writes
 # `harness=` present and empty before dispatch fills it, and meta_get's fallback

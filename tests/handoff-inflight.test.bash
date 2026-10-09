@@ -54,7 +54,7 @@ ck "the empty case opens no code fence" 0 "$(printf '%s\n' "$sec" | grep -c '^``
 ck "the empty case keeps the way back to the record" 1 "$(printf '%s\n' "$sec" | grep -c 'reeve-status --all')"
 ck "the heading survives" 1 "$(printf '%s\n' "$sec" | grep -c '^## In flight')"
 
-echo "--- a mixed fleet ---"
+echo "--- mixed errands ---"
 seed done-torn      artificer 2026-09-14T01:00:00 'working: building' 'done: landed'
 seed failed-torn    artificer 2026-09-14T02:00:00 'working: building' 'failed: gave up'
 seed done-kept      artificer -                   'working: building' 'done: branch ready'
@@ -67,7 +67,7 @@ f=$(scaffold mixed)
 [ -n "$f" ] && [ -f "$f" ] || { printf 'FAIL  new did not scaffold a second file\n'; exit 1; }
 sec=$(section "$f")
 
-ck "the count is the live errands, not the fleet" 1 "$(printf '%s\n' "$sec" | grep -c '^4 errand(s) still live')"
+ck "the count is the live errands, not all errands" 1 "$(printf '%s\n' "$sec" | grep -c '^4 errand(s) still live')"
 for i in done-kept still-working asking not-dispatched; do
   ck "$i is listed" 1 "$(printf '%s\n' "$sec" | grep -c "^$i ")"
 done

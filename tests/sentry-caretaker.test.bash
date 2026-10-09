@@ -157,7 +157,7 @@ errand stuck    no "working: installing"              "blocked: pnpm install fai
 errand asking   no "working: reading the brief"       "needs-decision [key=scope]: rewrite the parser or patch it?"
 errand busy     no "working: still going"
 
-# The foreground watch first, on the same fleet, and with --no-reap so it changes
+# The foreground watch first, on the same errands, and with --no-reap so it changes
 # nothing. Two things come out of it: the reason lines a caretaker must never
 # print, and a full set of wake cursors. A caretaker that read those cursors
 # would then find nothing new and clean up nothing, which is exactly the case
@@ -180,7 +180,7 @@ eq  "1 the watch left cursors behind" \
 
 OUT=$("$ROOT/bin/reeve-sentry" --caretaker --once --poll 1 2>&1); RC=$?
 eq  "1 the caretaker says nothing at all"        "$OUT" ""
-eq  "1 and never exits 0 on an actionable fleet" "$RC" 4
+eq  "1 and never exits 0 on actionable errands" "$RC" 4
 eq  "1 the finished hand is cleaned up anyway, cursors or no cursors" "$(reaped finished)" yes
 eq  "1 and its session was freed"                "$(killed stub:1)" yes
 eq  "1 a blocked hand is not reaped"             "$(reaped stuck)" no

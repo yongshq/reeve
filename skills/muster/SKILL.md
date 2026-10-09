@@ -9,7 +9,7 @@ allowed-tools: Bash, Read, Glob, Grep, Write, Edit
 
 # muster
 
-A full accounting of the fleet, on demand. Where `court` is a conversation, muster is a table.
+A full accounting of every errand in flight, on demand. Where `court` is a conversation, muster is a table.
 
 ## Steps
 

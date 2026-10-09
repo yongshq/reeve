@@ -178,7 +178,7 @@ fi
 
 hdr "errands"
 # --no-wake, because this is a command run to ask a different question. Without
-# it a pending signal was consumed here and printed indented inside the fleet
+# it a pending signal was consumed here and printed indented inside the errand
 # block, where it read as part of the errand table rather than as the one thing
 # nobody had been told.
 "$BIN/reeve-status" --all --no-wake 2>/dev/null | sed 's/^/  /'

@@ -232,7 +232,7 @@ nas "3 another reeve does not take it" "$OUT" "theirs is done"
 eq  "3 and it is still waiting for its own" "$(wake_count alice)" 1
 
 OUT=$(REEVE_SESSION=alice "$ROOT/bin/reeve-status" 2>&1) || :
-has "3 the reeve that briefed it is told when it next looks at the fleet" "$OUT" "theirs is done"
+has "3 the reeve that briefed it is told when it next looks at its errands" "$OUT" "theirs is done"
 eq  "3 and told once"                                                     "$(wake_count alice)" 0
 
 echo "--- 4. a dispatch that leaves nobody watching says so ---"

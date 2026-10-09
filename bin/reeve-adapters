@@ -21,7 +21,7 @@ check=no
 
 # name|user-invocable|one-line description
 SKILLS="
-start|true|Become the reeve in this session: load the contract, take up the fleet. Run this first, from any directory.
+start|true|Become the reeve in this session: load the contract, take up the errands in flight. Run this first, from any directory.
 court|true|Recap where the household stands, then settle whatever is waiting on the liege, one question at a time.
 muster|true|Full accounting of every errand in flight, blocked ones first.
 errand|true|Send work out to a hand. Load before dispatching anything.

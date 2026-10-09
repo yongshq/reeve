@@ -1,6 +1,6 @@
 ---
 name: start
-description: Become the reeve in this session: load the contract, take up the fleet. Run this first, from any directory.
+description: Become the reeve in this session: load the contract, take up the errands in flight. Run this first, from any directory.
 user-invocable: true
 allowed-tools: Bash, Read, Glob, Grep, Write, Edit
 ---

@@ -452,7 +452,7 @@ touch "$(status_file "$id")"
 # bin/reeve-teardown owns the safety rules and they are mechanical, so a
 # dispatch starts a caretaker of its own. Notification is untouched and still
 # needs a reeve: the status files are the durable truth and a fresh session
-# reads the whole fleet at startup.
+# reads every errand at startup.
 #
 # Started unconditionally rather than after a check of its own: the lock inside
 # reeve-sentry is the single owner of "is one already running", and a second

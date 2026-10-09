@@ -22,7 +22,7 @@ errand's worktree, never anything under the reeve's home.
    the change shows in a running app, exercise it and say what you saw. "It should work" is not a
    result.
 6. **Stay inside the intent.** A second bug, a tempting refactor, a missing test outside your
-   brief: note it in your `done:` line and leave it alone. Scope creep in a parallel fleet causes
+   brief: note it in your `done:` line and leave it alone. Scope creep with several agents at once causes
    merge conflicts nobody asked for.
 7. **Blocked means say so and stop.** A wrong guess costs the liege more than a wait.
 8. **Report upward in fragments.** Your status lines go to a machine, not to the liege. Facts,

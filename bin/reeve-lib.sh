@@ -154,7 +154,7 @@ watch_live_for() { # watch_live_for <session>
 # looking yet.
 #
 # A reeve that resets does not need these: a new session has a new id, and the
-# contract already has it rebuild the entire fleet from the status files at
+# contract already has it rebuild every errand from the status files at
 # startup, which is the stronger recovery path and the reason nothing here has
 # to survive a change of owner.
 #
@@ -380,7 +380,7 @@ wake_reported() { # wake_reported <errand> <lines>
 }
 
 # The pending lines without taking any of them, for a caller that is answering
-# some other question. Anything that reads the fleet programmatically goes
+# some other question. Anything that reads the errands programmatically goes
 # through this or through `reeve-status --no-wake`: a wake consumed by a command
 # run to ask something else is a wake nobody ever sees.
 wake_peek() { # wake_peek [<session>]

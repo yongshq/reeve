@@ -8,7 +8,7 @@
 #
 # A handoff exists because of a specific gap. Nearly everything the reeve knows
 # already survives a reset: errand records, briefs, reports, status logs and
-# memory are all on disk, and `bin/reeve-status --all` rebuilds the fleet from them.
+# memory are all on disk, and `bin/reeve-status --all` rebuilds all errands from them.
 # What does NOT survive is the conversation: the goal above the individual
 # errands, threads raised but not yet dispatched, and decisions made in chat
 # that never reached a brief. That is about one page, and this is where it goes.
@@ -18,7 +18,7 @@
 # because a handoff written by a script is a status report and not a handoff.
 #
 # For the same reason `## In flight` carries a count and the live rows only, not
-# the whole fleet table: an errand that finished and was cleaned up is already
+# the full errand table: an errand that finished and was cleaned up is already
 # rebuilt by `bin/reeve-status --all`, and copying it in here buries the part that
 # is not.
 

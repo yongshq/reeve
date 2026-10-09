@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Stand watch over the fleet. Wakes the reeve once per actionable change.
+# Watch every errand. Wakes the reeve once per actionable change.
 #
 # Usage:
 #   reeve-sentry [--poll SECONDS] [--timeout SECONDS] [--once] [--no-reap] [--all]

@@ -26,7 +26,7 @@
 # accord, and a reeve that dispatched and then sat idle does the second long
 # before the first.
 #
-# That delivery is for a reeve reading its own fleet, so anything that runs this
+# That delivery is for a reeve reading its own errands, so anything that runs this
 # to answer some OTHER question passes --no-wake. Without it a wake is consumed
 # by a script that had no way to report it: bin/reeve-handoff drained the whole
 # spool into a table it then filtered the signals back out of, at the one moment
