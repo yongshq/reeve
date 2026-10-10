@@ -1,8 +1,8 @@
 # Supervision: the mechanism
 
 `AGENTS.md` section 6 holds the rules a reeve acts on. This file holds only what that section does
-not say: what a caretaker's line promises, and the exact thresholds and limits behind `idle` and
-`wedged`. Read it when a wake, a listing or a silence does not match what you expected.
+not say: what a caretaker's line promises, why a `waiting` wake must be followed by a new watch at
+once, and the exact thresholds and limits behind `idle` and `wedged`. Read it when a wake, a listing or a silence does not match what you expected.
 
 ## What a caretaker's line promises
 
@@ -29,6 +29,22 @@ unread.
 An owner's watching right now (the caretaker stands aside for it, `AGENTS.md` section 6) is proved
 by that session's own watch marker; an owner merely alive is not watching. The caretaker acts
 within one of its polls, after leaving the terminal line in your spool if it is still owed.
+
+## After a `waiting` wake: watch again at once
+
+Every wake ends the watch, `waiting` included. A `waiting` errand is usually cleared by the liege
+answering the dialog in the hand's own session, which gives you no turn: no reply arrives, so
+nothing prompts you to watch again. Start `bin/reeve-sentry` again in the same turn as the wake,
+before you report it, whatever the liege is asked.
+
+- Safe while the dialog still stands: that one stall wakes once, so the new watch stays quiet until
+  something changes.
+- Once the dialog is answered, the listing shows the hand `working` again and no wake comes for it:
+  progress, not news.
+- The hand's later `done:`, `failed:`, `blocked:` or `needs-decision` reaches that watch as an
+  ordinary wake. With no watch running, the caretaker frees the finished hand and leaves the line in
+  your notifications, which arrive only when you next watch or list: if you never do, you go on
+  reporting a finished hand as stuck.
 
 ## `idle`: thresholds and limits
 

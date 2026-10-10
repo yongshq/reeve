@@ -699,7 +699,16 @@ check_one() {
       last=$(status_field "$i" last)
       # Never reaped, for the reason `blocked:` is never reaped: it can still be
       # steered, and the session is the only place the question exists.
-      printf 'signal: %s is waiting for an answer in its session and cannot report it, last said %s\n' \
+      #
+      # The second sentence is the half that was missing. This wake ends the
+      # watch like every other, but this one is usually cleared by the liege
+      # typing into the hand's own session, which gives the reeve no turn at
+      # all: no reply, no command, nothing to start the next watch on. So the
+      # hand finished, reported `done:`, the caretaker left that line in the
+      # spool, and the reeve went on calling it stuck. The code delivered it to
+      # the next watch every time; there was no next watch. Re-arming at once
+      # is safe: the latch above keeps this same dialog from waking it again.
+      printf 'signal: %s is waiting for an answer in its session and cannot report it, last said %s. This watch has ended: run bin/reeve-sentry again now, or the answer given in its session and the done that follows reach nobody\n' \
         "$i" "${last:-nothing}"
       return 0
     fi
