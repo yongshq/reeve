@@ -53,9 +53,15 @@ before you report it, whatever the liege is asked.
 `bin/reeve-watch-guard`, a Stop hook beside `bin/reeve-format-guard`, holds this in code after any
 wake, not only `waiting`: a reeve that ends a turn with an errand of its own unfinished (not `done`
 or `failed`) and no live watch marker for its session is sent back once, to start `reeve-sentry` in
-the background. A `reeve-sentry` run anywhere in that turn counts as started, however soon it
-exited, and so does a spool it could not deliver from. An errand whose session is gone (the
-sentry's `stale:`) does not count as in flight, since no watch could stay running on it.
+the background. Before its marker is up, a fresh watch counts as started only if it is the turn's
+last `reeve-sentry` run (a Bash command, not a mention elsewhere), went to the background, and no
+notification of its exit has reached the turn since. A watch that ran in the foreground, or whose
+exit the turn already saw, has stopped, so the marker alone decides: a compliant reeve whose fresh
+watch exits at once on a line it already reported is sent back once for that turn, never in a
+loop. A spool it could not deliver from also counts as started. An errand whose session is gone
+(the sentry's `stale:`) does not count as in flight, since no watch could stay running on it. The
+marker is read before any errand record, and the records are narrowed by one search for this
+session, so a reeve with a watch running pays almost nothing per turn.
 
 ## `stale`: once per gone session
 

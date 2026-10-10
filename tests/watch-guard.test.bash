@@ -16,11 +16,15 @@
 #   7. every unfinished state is in flight: blocked, an open question, a
 #      divergence, no line yet
 #   8. a stale errand (session dead or missing) is not in flight; unreadable is
-#   9. a watch started this turn counts, however it ended; one from an earlier
-#      turn, --once, --caretaker or a mere mention does not
+#   9. the last watch of this turn counts while it is still starting: run in
+#      the background and no notification of its exit since. One that ran in
+#      the foreground or was told exiting, one from an earlier turn, --once,
+#      --caretaker, a mention, another tool's text or a heredoc body does not
 #  10. a spool that cannot be delivered passes
 #  11. malformed input or a missing tool passes: one stderr note for a reeve
 #  12. the plugin and the clone both register it for Stop
+#  13. cost: a live watch reads no errand record, and records are narrowed by
+#      one grep, counted rather than timed
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 G="$ROOT/bin/reeve-watch-guard"
 
@@ -284,23 +288,107 @@ ck_has '8 stale and live together: sent back' "$OUT" "$BLOCK"
 ck_has '8 naming only the live one' "$OUT" 'running: l8.'
 
 # --- 9. a watch started this turn ------------------------------------------------------------
+# tx <file> <step>...: a transcript from steps, after an opening prompt.
+#   prompt                      a real user prompt, opening a turn
+#   bg:<id>:<cmd>               a Bash call run in the background, and its result
+#   fg:<id>:<cmd>               a Bash call in the foreground, and its result
+#   tool:<name>:<field>:<text>  another tool's call, carrying text
+#   qc:<id>                     the notification of <id>'s exit, queued into the turn
+#   qo:<id>                     the same notification, only enqueued
+#   note:<id>                   the same notification, delivered as a turn of its own
+tx() {
+  python3 -c '
+import json, sys
+path, steps = sys.argv[1], sys.argv[2:]
+def notice(i):
+    return ("<task-notification>\n<task-id>b%s</task-id>\n<tool-use-id>%s</tool-use-id>\n"
+            "<status>completed</status>\n<summary>Background command completed (exit code 0)</summary>\n"
+            "</task-notification>") % (i, i)
+def call(i, block):
+    return [{"type": "assistant", "message": {"role": "assistant", "content": [block]}},
+            {"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": i, "content": "ok"}]}}]
+rows, n = [{"type": "user", "uuid": "p-0", "message": {"role": "user", "content": "send a scout"}}], 0
+for s in steps:
+    kind, _, rest = s.partition(":")
+    if kind == "prompt":
+        n += 1
+        rows.append({"type": "user", "uuid": "p-%d" % n, "message": {"role": "user", "content": "how goes it"}})
+    elif kind in ("bg", "fg"):
+        i, _, cmd = rest.partition(":")
+        inp = {"command": cmd}
+        if kind == "bg":
+            inp["run_in_background"] = True
+        rows += call(i, {"type": "tool_use", "id": i, "name": "Bash", "input": inp})
+    elif kind == "tool":
+        name, field, text = rest.split(":", 2)
+        i = "x%d" % len(rows)
+        rows += call(i, {"type": "tool_use", "id": i, "name": name, "input": {"file_path": "/x/brief.md", field: text}})
+    elif kind == "qc":
+        rows.append({"type": "attachment", "uuid": "q%d" % len(rows), "attachment": {
+            "type": "queued_command", "prompt": notice(rest), "commandMode": "task-notification",
+            "origin": {"kind": "task-notification"}}})
+    elif kind == "qo":
+        rows.append({"type": "queue-operation", "operation": "enqueue", "content": notice(rest)})
+    elif kind == "note":
+        rows.append({"type": "user", "uuid": "n%d" % len(rows), "origin": {"kind": "task-notification"},
+                     "message": {"role": "user", "content": notice(rest)}})
+rows.append({"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "My liege, still running."}]}})
+with open(path, "w") as f:
+    for r in rows:
+        f.write(json.dumps(r) + "\n")' "$@"
+}
+# guard9 <pass|back> <label> <step>...
+guard9() {
+  local want=$1 label=$2; shift 2
+  tx "$SCRATCH/t9.jsonl" "$@"
+  run "$(hook reeve-sid "$SCRATCH/t9.jsonl")"
+  if [ "$want" = pass ]; then ck_eq "9 $label: passes" "$OUT" ''
+  else ck_has "9 $label: sent back" "$OUT" "$BLOCK"; fi
+}
+W9=bin/reeve-sentry
 fresh 9
 errand e9 reeve-sid "working: going"
-for cmd in 'bin/reeve-sentry' 'reeve-sentry --poll 15' '"/Users/x/reeve"/bin/reeve-sentry --timeout 3600' \
-           'cd /x && bin/reeve-sentry' 'REEVE_SESSION=s nohup bin/reeve-sentry'; do
-  transcript "$SCRATCH/t9.jsonl" p-nine '' "$cmd"
-  run "$(hook reeve-sid "$SCRATCH/t9.jsonl")"
-  ck_eq "9 started this turn [$cmd]: passes" "$OUT" ''
+for cmd in "$W9" 'reeve-sentry --poll 15' '"/Users/x/reeve"/bin/reeve-sentry --timeout 3600' \
+           "cd /x && $W9" "REEVE_SESSION=s nohup $W9" "timeout 600 $W9"; do
+  guard9 pass "started in the background this turn [$cmd]" prompt "bg:t1:$cmd"
 done
-transcript "$SCRATCH/t9.jsonl" p-nine 'bin/reeve-sentry' ''
-run "$(hook reeve-sid "$SCRATCH/t9.jsonl")"
-ck_has '9 started in an earlier turn only: sent back' "$OUT" "$BLOCK"
-for cmd in 'bin/reeve-sentry --once' 'bin/reeve-sentry --caretaker' 'bin/reeve-sentry --help' \
+guard9 back 'started in an earlier turn only' "bg:t0:$W9" prompt
+for cmd in "$W9 --once" "$W9 --caretaker" "$W9 --help" \
            'grep -n reeve-sentry AGENTS.md' 'bin/reeve-sentryx' 'bin/reeve-status'; do
-  transcript "$SCRATCH/t9.jsonl" p-nine '' "$cmd"
-  run "$(hook reeve-sid "$SCRATCH/t9.jsonl")"
-  ck_has "9 not a watch [$cmd]: sent back" "$OUT" "$BLOCK"
+  guard9 back "not a watch [$cmd]" prompt "bg:t1:$cmd"
 done
+# Seen to end inside the turn: the marker alone decides.
+guard9 back 'ran in the foreground (probe B)' prompt "fg:t1:$W9"
+guard9 back 'its exit queued into the turn (probe C)' prompt "bg:t1:$W9" qc:t1
+guard9 back 'its exit only enqueued' prompt "bg:t1:$W9" qo:t1
+guard9 pass 'another call notified' prompt "bg:t1:$W9" qc:t7
+guard9 back 'its exit a turn of its own, not restarted (probe A)' prompt "bg:t1:$W9" note:t1
+guard9 pass 'its exit a turn of its own, restarted there' prompt "bg:t1:$W9" note:t1 "bg:t2:$W9"
+guard9 back 'background, then a foreground run that ended' prompt "bg:t1:$W9" "fg:t2:$W9"
+guard9 pass 'foreground, then a background run' prompt "fg:t1:$W9" "bg:t2:$W9"
+guard9 pass 'exited and restarted in one turn' prompt "bg:t1:$W9" qc:t1 "bg:t2:$W9"
+guard9 pass 'a later --once is not a watch run' prompt "bg:t1:$W9" "fg:t2:$W9 --once"
+# Only what a Bash call runs.
+guard9 back 'Write content naming it (probe E)' prompt "tool:Write:content:spec
+$W9
+more"
+guard9 back 'Edit text naming it' prompt "tool:Edit:new_string:$W9 --poll 15"
+guard9 pass 'a watch, then a Write naming it: still the last run' prompt "bg:t1:$W9" "tool:Write:content:$W9"
+guard9 back 'heredoc body naming it (probe F5)' prompt "bg:t1:cat > /x/brief.md <<'END'
+$W9
+END"
+guard9 back 'indented heredoc body naming it' prompt "bg:t1:cat > /x/brief.md <<-END
+	$W9
+	END"
+guard9 pass 'heredoc, then the watch after it' prompt "bg:t1:cat > /x/b <<END
+$W9
+END
+$W9"
+guard9 pass 'indented heredoc, then the watch after it' prompt "bg:t1:cat > /x/b <<-END
+	$W9
+	END
+$W9"
+guard9 pass 'a here-string is not a heredoc' prompt "bg:t1:cat <<<x; $W9"
 
 # --- 10. an undeliverable spool ----------------------------------------------------------------
 fresh 10
@@ -354,6 +442,36 @@ h = json.load(open(sys.argv[1]))["hooks"]["Stop"]
 print("\n".join(x["command"] for e in h for x in e["hooks"]))' "$ROOT/$f" 2>/dev/null)
   ck_has "12 $f registers the guard for Stop" "$cmd" '/bin/reeve-watch-guard'
 done
+
+# --- 13. cost --------------------------------------------------------------------------------------
+# A grep that logs each call naming an errand record: reads counted, never timed.
+fresh 13
+SPY="$SCRATCH/spy"; mkdir -p "$SPY"
+REALGREP=$(command -v grep)
+printf '#!/bin/sh\ncase "$*" in *.meta*) printf "%%s\\n" "$*" >> "%s" ;; esac\nexec "%s" "$@"\n' \
+  "$SCRATCH/spy.log" "$REALGREP" > "$SPY/grep"
+chmod +x "$SPY/grep"
+for n in $(seq 1 40); do errand "x$n" other-sid "working: going"; done
+spy() {
+  rm -rf "$REEVE_HOME"/state/sessions/*/watch-guard.*
+  : > "$SCRATCH/spy.log"
+  OUT=$(PATH="$SPY:$PATH" "$G" <<<"$(hook reeve-sid "$T")" 2>&1)
+}
+spy
+ck_eq '13 none owned: passes' "$OUT" ''
+ck_eq '13 none owned: one grep over the records' "$(grep -c . "$SCRATCH/spy.log")" 1
+errand o13 reeve-sid "working: going"
+spy
+ck_has '13 one owned, no watch: sent back' "$OUT" "$BLOCK"
+ck_not '13 one owned: no other record read on its own' "$(grep -v -- '-l' "$SCRATCH/spy.log")" '/x'
+marker reeve-sid $$
+spy
+ck_eq '13 live watch: passes' "$OUT" ''
+ck_eq '13 live watch: no errand record read' "$(grep -c . "$SCRATCH/spy.log")" 0
+rm -f "$REEVE_HOME/state/.sentry.watch-reeve-sid" "$REEVE_HOME/state/o13.meta"
+printf 'session=reeve-sid\n' >> "$REEVE_HOME/state/x1.meta"
+spy
+ck_eq '13 a later session= line, not the owner: passes' "$OUT" ''
 
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

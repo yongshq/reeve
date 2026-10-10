@@ -28,11 +28,16 @@
 # started before the /clear follows its successor and moves its marker within
 # one poll.
 #
-# Counts as started, the rule's last sentence, so a watch that exits at once is
-# never asked for again in the same turn:
-#   - a reeve-sentry run anywhere in this turn, read from transcript_path: a
-#     tool call whose command runs it, not as --caretaker, --once or --help.
-#     The turn is everything since the last real user prompt, as for
+# Counts as started, though no marker is up yet:
+#   - the turn's last reeve-sentry run, read from transcript_path, when it went
+#     to the background and nothing in the turn since says it exited (a task
+#     notification naming its tool call). That covers only the moment before a
+#     fresh watch writes its marker. A run the turn saw finish, in the
+#     foreground or by its notification, is a watch that has stopped, so the
+#     marker alone decides; a watch that at once repeats a line already
+#     reported costs one send-back, never a loop. A run is a Bash tool call
+#     whose command runs it, not as --caretaker, --once or --help. The turn is
+#     everything since the last real user prompt, as for
 #     bin/reeve-format-guard, so a watch from an earlier turn does not count.
 #   - a wake spool holding lines it cannot give up (the sentry's
 #     `undeliverable:`), since every watch would exit on it at once.
@@ -69,9 +74,12 @@ sid=$(hook_session "$input")
 
 # Owned, sent out, not torn down, not finished. The reconciled state, never the
 # last line: status_field is the one reader.
+# One grep over every record narrows to the ones naming this session at all;
+# meta_get, which reads the first session= line, still decides.
 candidates() {
   local f i
-  for f in "$REEVE_HOME_D/state"/*.meta; do
+  grep -l -x -F -e "session=$sid" -- "$REEVE_HOME_D/state"/*.meta 2>/dev/null |
+  while IFS= read -r f; do
     [ -f "$f" ] || continue
     i=$(basename "$f" .meta)
     [ "$(meta_get "$i" session '')" = "$sid" ] || continue
@@ -102,15 +110,17 @@ spool_stuck() {
   [ -n "$(wake_pending "$sid")" ] && [ ! -w "$d" ]
 }
 
-ids=$(candidates)
-[ -n "$ids" ] || exit 0
+# The marker first: a reeve with a watch running reads no errand record.
 watching && exit 0
 spool_stuck && exit 0
+ids=$(candidates)
+[ -n "$ids" ] || exit 0
 
 command -v python3 >/dev/null 2>&1 || pass 'python3 not on PATH'
 
 # One python pass, one field per line: session id, whether a stop hook is
-# already active, whether this turn ran a watch, then the turn's claim key.
+# already active, whether this turn left a watch starting, then the turn's
+# claim key.
 out=$(printf '%s' "$input" | python3 -c '
 import hashlib, json, re, sys
 
@@ -130,25 +140,37 @@ def is_prompt(e):
 # arguments run to the end of that command.
 SENTRY = re.compile(
     r"(?:^|[;&|(\n]|\$\()\s*"
-    r"(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+|(?:nohup|exec|command|env|bash|sh)\s+)*"
+    r"(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+|(?:nohup|exec|command|env|bash|sh|timeout\s+\S+)\s+)*"
     r"(?:\S*/)?reeve-sentry(?=$|[\s;&|)\"\x27])([^;&|\n)]*)")
 NOT_A_WATCH = re.compile(r"(?:^|\s)(?:--caretaker|--once|-h|--help)(?=$|\s)")
 
-def strings(v):
-    if isinstance(v, str):
-        yield v
-    elif isinstance(v, dict):
-        for x in v.values():
-            yield from strings(x)
-    elif isinstance(v, list):
-        for x in v:
-            yield from strings(x)
+# A heredoc body is data, not commands: a brief written with cat <<EOF that
+# names the sentry on a line of its own runs nothing.
+HEREDOC = re.compile(r"(?<!<)<<(?!<)(-?)\s*([\"\x27]?)([A-Za-z_][A-Za-z0-9_]*)\2")
 
-def runs_watch(tool_input):
-    for s in strings(tool_input):
-        for m in SENTRY.finditer(s):
-            if not NOT_A_WATCH.search(m.group(1)):
-                return True
+def unheredoc(cmd):
+    kept, ends = [], []
+    for line in cmd.split("\n"):
+        if ends:
+            strip, word = ends[0]
+            if (line.lstrip("\t") if strip else line) == word:
+                ends.pop(0)
+            continue
+        kept.append(line)
+        ends = [(m.group(1) == "-", m.group(3)) for m in HEREDOC.finditer(line)]
+    return "\n".join(kept)
+
+def runs_watch(b):
+    # Only what a Bash call runs: a Write whose content names the sentry is not
+    # a watch.
+    if not isinstance(b, dict) or b.get("type") != "tool_use" or b.get("name") != "Bash":
+        return False
+    cmd = (b.get("input") or {}).get("command")
+    if not isinstance(cmd, str):
+        return False
+    for m in SENTRY.finditer(unheredoc(cmd)):
+        if not NOT_A_WATCH.search(m.group(1)):
+            return True
     return False
 
 def turn(path):
@@ -157,22 +179,35 @@ def turn(path):
         for line in f:
             line = line.strip()
             if line:
-                entries.append(json.loads(line))
-    ran, marker = False, "n%d" % len(entries)
-    for e in reversed(entries):
-        if not isinstance(e, dict):
-            continue
-        kind = e.get("type")
-        if kind == "user" and is_prompt(e):
+                entries.append((line, json.loads(line)))
+    start, marker = 0, "n%d" % len(entries)
+    for n in range(len(entries) - 1, -1, -1):
+        e = entries[n][1]
+        if isinstance(e, dict) and e.get("type") == "user" and is_prompt(e):
             if isinstance(e.get("uuid"), str) and e["uuid"]:
                 marker = "u" + e["uuid"]
+            start = n + 1
             break
-        if kind == "assistant":
-            for b in (e.get("message") or {}).get("content") or []:
-                if isinstance(b, dict) and b.get("type") == "tool_use" \
-                        and runs_watch(b.get("input")):
-                    ran = True
-    return ran, marker
+    # The last watch of the turn, and where it sits.
+    last, at = None, -1
+    for n in range(start, len(entries)):
+        e = entries[n][1]
+        if not isinstance(e, dict) or e.get("type") != "assistant":
+            continue
+        for b in (e.get("message") or {}).get("content") or []:
+            if runs_watch(b):
+                last, at = b, n
+    if last is None or (last.get("input") or {}).get("run_in_background") is not True:
+        return False, marker
+    tid = last.get("id")
+    if not isinstance(tid, str) or not tid:
+        return False, marker
+    # Its exit, told in this turn: a queued notification, delivered or not.
+    tag = "<tool-use-id>%s</tool-use-id>" % tid
+    for line, _ in entries[at + 1:]:
+        if tag in line:
+            return False, marker
+    return True, marker
 
 h = json.loads(sys.stdin.read())
 if not isinstance(h, dict):
