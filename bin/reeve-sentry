@@ -519,7 +519,7 @@ wake_owed() { # wake_owed <id>
 
 # Absorb or escalate. One errand, one verdict.
 check_one() {
-  local i=$1 f seen now again st open div bk tgt live
+  local i=$1 f seen now again st open div bk tgt live own
   local attn af since woke nowsec last stale how mark latch wedge prc w why
 
   # Counted BEFORE the verdict is read, and again after. The cursor is what says
@@ -741,6 +741,12 @@ check_one() {
   # back, or a terminal line above, ends the episode. `unreadable` ends nothing, as
   # `unknown` re-arms nothing for the idle latch. Never reaped either way, and
   # the listing reads the session itself, so it still shows the hand gone.
+  #
+  # Only the owner's watch writes the latch, by live_errands' own test. An
+  # `--all` watch over another reeve's errand is for understanding, never
+  # acting, so it says the line and leaves the one wake for the reeve meant to
+  # act on it. It still reads the latch: a line the owner was already told is
+  # not news to anyone.
   live=$("$BIN/reeve-backend" call agent_state "$tgt" --backend "$bk" 2>/dev/null || echo unreadable)
   case "$live:$st" in
     alive:*) rm -f "$(stale_file "$i" gone)" ;;
@@ -748,8 +754,11 @@ check_one() {
     dead:*|missing:*)
       mark=$(stale_mark "$i")
       latch=$(stale_latch "$i" "$mark" gone) && [ "${latch#* }" = yes ] && return 1
-      stale_write "$i" "$(attn_now)" "$mark" yes gone \
-        || latch_warn "gone:$i" "cannot write $(stale_file "$i" gone), so $i's stale wake is not recorded as reported and will be said again, ahead of any other errand's"
+      own=$(meta_get "$i" session '')
+      if [ "$every" != yes ] || [ "$own" = "$MY_SESSION" ] || [ -z "$own" ]; then
+        stale_write "$i" "$(attn_now)" "$mark" yes gone \
+          || latch_warn "gone:$i" "cannot write $(stale_file "$i" gone), so $i's stale wake is not recorded as reported and will be said again, ahead of any other errand's"
+      fi
       # A hand opens inside its reeve's workspace, so closing that workspace
       # takes every hand in it. Said, so each one lost that way is named with
       # its cause rather than only as vanished.

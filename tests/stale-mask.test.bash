@@ -10,7 +10,8 @@
 # So these cases pin:
 #
 #   1. the gone session is still reported, the first time
-#   2. once, not on every watch, so the sibling's done reaches the next watch
+#   2. once, not on every watch, so the sibling's done reaches the next watch,
+#      and once only by the owner's watch, never by another reeve's --all
 #   3. the same within one long watch, with the done landing between polls
 #   4. never reaped, and the listing still shows it gone
 #   5. a new episode wakes again: the session came back and went, or the hand
@@ -106,6 +107,29 @@ sentry --once
 ck_eq  "2b a sibling's dialog wakes the next watch"       "$RC" 0
 ck_has "2b as waiting"                                    "$OUT" "bbb is waiting for an answer in its session"
 
+# 2c. a dead session, not only a missing one, is said once.
+fresh h2c
+printf 'dead\n' > "$STUB_GONE"
+sentry --once
+ck_has "2c a dead session wakes the reeve"                "$OUT" "stale: aaa left no result and its session is dead"
+sentry --once
+ck_eq  "2c the next watch is quiet over it"               "$RC" 4
+ck_not "2c and does not repeat it"                        "$OUT" "stale: aaa"
+
+# 2d. another reeve's --all watch says it but leaves the one wake to the owner.
+fresh h2d
+REEVE_SESSION=reeve-b hand aaa artificer
+sentry --all --once
+ck_has "2d an --all watch says the owner's gone session"  "$OUT" "stale: aaa"
+ck_eq  "2d without marking it said"                       "$([ -f "$(LATCH)" ] && echo kept || echo gone)" gone
+REEVE_SESSION=reeve-b sentry --once
+ck_eq  "2d the owner's own watch still wakes"             "$RC" 0
+ck_has "2d for the gone session"                          "$OUT" "stale: aaa"
+REEVE_SESSION=reeve-b sentry --once
+ck_eq  "2d then the owner's watch is quiet"               "$RC" 4
+sentry --all --once
+ck_not "2d and an --all watch does not repeat what the owner was told" "$OUT" "stale: aaa"
+
 # --- 3. one long watch, the done landing between polls -----------------------
 step3() {
   case $1 in
@@ -140,6 +164,22 @@ printf 'dead\n' > "$STUB_GONE"
 sentry --once
 ck_eq  "5a gone again wakes again"                        "$RC" 0
 ck_has "5a as stale"                                      "$OUT" "stale: aaa left no result and its session is dead"
+
+# 5a'. the same for a hand that reported blocked: its session back still ends
+#      the episode, whatever its last word.
+fresh h5ab
+report aaa 'blocked: needs a token'
+sentry --once
+ck_has "5a' the blocked line wakes first"                 "$OUT" "signal: aaa is blocked"
+sentry --once
+ck_has "5a' then its gone session"                        "$OUT" "stale: aaa left no result and its session is missing, last reported blocked"
+printf 'alive\n' > "$STUB_GONE"
+sentry --once
+ck_eq  "5a' the session back clears the latch"            "$([ -f "$(LATCH)" ] && echo kept || echo gone)" gone
+printf 'dead\n' > "$STUB_GONE"
+sentry --once
+ck_eq  "5a' gone again wakes again"                       "$RC" 0
+ck_has "5a' as stale"                                     "$OUT" "stale: aaa left no result and its session is dead, last reported blocked"
 
 # 5b. the hand reported a line since: progress is absorbed, the gone session is
 #     said again with it.
