@@ -60,7 +60,9 @@ would hide every other errand's wake for as long as it stands in flight.
 - Once per errand for the whole home, not per reeve: a reeve that adopts it is not told again, and
   only the listing shows it gone.
 - Only the owner's watch marks it said. An `--all` watch over another reeve's errand says the line
-  and leaves the one wake to the owner.
+  once for itself, in a latch of its own, and leaves the one wake to the owner. So an orphan, whose
+  owner never watches again, masks no `--all` watch past its first saying. A watch that cannot name
+  its session shares that latch with every other such watch.
 - Never cleaned up, and the listing still shows the session gone after the wake.
 
 ## `idle`: thresholds and limits

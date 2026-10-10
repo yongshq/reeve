@@ -1626,11 +1626,16 @@ attn_now() { printf '%s' "${REEVE_ATTN_NOW:-$(date +%s)}"; }
 # <woke>`. Both are read and written by stale_latch and stale_write, so the rule
 # about a steer and the rule about an atomic write hold for both by construction.
 # The gone latch, `gone`, is the sentry's `stale:` line under the same machinery
-# and the idle latch's mark: `<since> <lines> <mtime> <woke>`.
-stale_file() { # stale_file <id> [idle|wedged|gone]
+# and the idle latch's mark: `<since> <lines> <mtime> <woke>`. `gone@<session>`
+# is the same line said by one `--all` watch over an errand not its own, kept
+# apart so it never stands for the owner's: `<session>` is the watching one, empty
+# for a watch that cannot name its session. An errand id holds no `@` and a
+# session id no `/`, so neither can reach another errand's file.
+stale_file() { # stale_file <id> [idle|wedged|gone|gone@<session>]
   case ${2:-idle} in
     wedged) printf '%s/state/.wedged-%s\n' "$REEVE_HOME_D" "$1" ;;
     gone)   printf '%s/state/.gone-%s\n' "$REEVE_HOME_D" "$1" ;;
+    gone@*) printf '%s/state/.gone-%s@%s\n' "$REEVE_HOME_D" "$1" "${2#gone@}" ;;
     *)      printf '%s/state/.stale-%s\n' "$REEVE_HOME_D" "$1" ;;
   esac
 }

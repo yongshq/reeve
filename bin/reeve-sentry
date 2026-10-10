@@ -287,6 +287,10 @@ attn_file() { printf '%s/state/.attn-%s\n' "$REEVE_HOME_D" "$1"; }
 # Errands whose idle latch this process could not write, one id per line, so a
 # read only home is said once per watch rather than every poll.
 unlatched=''
+# The end of a gone session's episode: the owner's latch and every `--all`
+# watch's, so each of them says the next one again.
+gone_clear() { rm -f "$(stale_file "$1" gone)" "$(stale_file "$1" gone)"@*; }
+
 latch_warn() { # latch_warn <id> <message>
   lines_has "$1" "$unlatched" && return 0
   unlatched="$unlatched$1
@@ -519,7 +523,7 @@ wake_owed() { # wake_owed <id>
 
 # Absorb or escalate. One errand, one verdict.
 check_one() {
-  local i=$1 f seen now again st open div bk tgt live own
+  local i=$1 f seen now again st open div bk tgt live own kind
   local attn af since woke nowsec last stale how mark latch wedge prc w why
 
   # Counted BEFORE the verdict is read, and again after. The cursor is what says
@@ -630,7 +634,7 @@ check_one() {
   [ "$now" = "$again" ] || return 1
 
   # A terminal line ends a gone session's episode, below, whichever poll says it.
-  case $st in done|failed) rm -f "$(stale_file "$i" gone)" ;; esac
+  case $st in done|failed) gone_clear "$i" ;; esac
 
   seen=$(cat "$(cursor_file "$i")" 2>/dev/null || echo 0)
   seen=$(printf '%s' "$seen" | tr -d '[:space:]'); seen=${seen:-0}
@@ -747,18 +751,25 @@ check_one() {
   # acting, so it says the line and leaves the one wake for the reeve meant to
   # act on it. It still reads the latch: a line the owner was already told is
   # not news to anyone.
+  #
+  # And it says it once itself, in a latch of its own, `gone@<its session>`.
+  # Without one, an errand whose owner never watches again (an orphan: exactly
+  # the reeve that is gone) was said first by every `--all` watch, forever, and
+  # masked every sibling there. Read and written by that watch alone, so the
+  # owner's latch, and the owner's one wake, stay as they were.
   live=$("$BIN/reeve-backend" call agent_state "$tgt" --backend "$bk" 2>/dev/null || echo unreadable)
   case "$live:$st" in
-    alive:*) rm -f "$(stale_file "$i" gone)" ;;
+    alive:*) gone_clear "$i" ;;
     dead:done|dead:failed|missing:done|missing:failed) : ;;
     dead:*|missing:*)
       mark=$(stale_mark "$i")
       latch=$(stale_latch "$i" "$mark" gone) && [ "${latch#* }" = yes ] && return 1
       own=$(meta_get "$i" session '')
-      if [ "$every" != yes ] || [ "$own" = "$MY_SESSION" ] || [ -z "$own" ]; then
-        stale_write "$i" "$(attn_now)" "$mark" yes gone \
-          || latch_warn "gone:$i" "cannot write $(stale_file "$i" gone), so $i's stale wake is not recorded as reported and will be said again, ahead of any other errand's"
-      fi
+      kind=gone
+      [ "$every" != yes ] || [ "$own" = "$MY_SESSION" ] || [ -z "$own" ] || kind="gone@$MY_SESSION"
+      [ "$kind" = gone ] || { latch=$(stale_latch "$i" "$mark" "$kind") && [ "${latch#* }" = yes ] && return 1; }
+      stale_write "$i" "$(attn_now)" "$mark" yes "$kind" \
+        || latch_warn "$kind:$i" "cannot write $(stale_file "$i" "$kind"), so $i's stale wake is not recorded as reported and will be said again, ahead of any other errand's"
       # A hand opens inside its reeve's workspace, so closing that workspace
       # takes every hand in it. Said, so each one lost that way is named with
       # its cause rather than only as vanished.

@@ -11,7 +11,8 @@
 #
 #   1. the gone session is still reported, the first time
 #   2. once, not on every watch, so the sibling's done reaches the next watch,
-#      and once only by the owner's watch, never by another reeve's --all
+#      and once only by the owner's watch, never by another reeve's --all,
+#      which says it once for itself, so an orphan masks no --all watch either
 #   3. the same within one long watch, with the done landing between polls
 #   4. never reaped, and the listing still shows it gone
 #   5. a new episode wakes again: the session came back and went, or the hand
@@ -130,6 +131,46 @@ ck_eq  "2d then the owner's watch is quiet"               "$RC" 4
 sentry --all --once
 ck_not "2d and an --all watch does not repeat what the owner was told" "$OUT" "stale: aaa"
 
+# 2e. the owner is gone too, so never watches again: an --all watch says it
+#     once for itself, then reaches the sibling, then is quiet.
+fresh h2e
+REEVE_SESSION=reeve-dead hand aaa artificer
+report bbb 'done: report.md written'
+printf 'settled\n' > "$STUB_ATTN"
+sentry --all --once
+ck_has "2e an --all watch says the orphan's gone session" "$OUT" "stale: aaa"
+ck_eq  "2e in a latch of its own"                         "$([ -f "$(LATCH)@reeve-a" ] && echo kept || echo gone)" kept
+ck_eq  "2e not the owner's"                               "$([ -f "$(LATCH)" ] && echo kept || echo gone)" gone
+sentry --all --once
+ck_eq  "2e the next --all watch wakes for the sibling"    "$RC" 0
+ck_has "2e for its done"                                  "$OUT" "signal: bbb is done - report.md written"
+ck_not "2e not masked by the gone one"                    "$OUT" "stale: aaa"
+sentry --all --once
+ck_eq  "2e then quiet"                                    "$RC" 4
+REEVE_SESSION=reeve-c sentry --all --once
+ck_has "2e another reeve's --all watch says it once too"  "$OUT" "stale: aaa"
+REEVE_SESSION=reeve-dead sentry --once
+ck_has "2e and the owner, back, still gets its one wake"  "$OUT" "stale: aaa"
+printf 'alive\n' > "$STUB_GONE"
+sentry --all --once
+ck_eq  "2e the session back clears every --all latch"     "$(ls "$REEVE_HOME/state" | grep -c '^\.gone-aaa')" 0
+printf 'dead\n' > "$STUB_GONE"
+sentry --all --once
+ck_has "2e gone again, the --all watch says it again"     "$OUT" "stale: aaa left no result and its session is dead"
+
+# 2f. the same for a watch that cannot name its session.
+fresh h2f
+REEVE_SESSION=reeve-dead hand aaa artificer
+report bbb 'done: report.md written'
+printf 'settled\n' > "$STUB_ATTN"
+OUT=$(REEVE_SESSION='' CLAUDE_CODE_SESSION_ID='' REEVE_ATTN_DWELL=0 "$ROOT/bin/reeve-sentry" --all --once 2>&1); RC=$?
+ck_has "2f an unnamed --all watch says it"                "$OUT" "stale: aaa"
+OUT=$(REEVE_SESSION='' CLAUDE_CODE_SESSION_ID='' REEVE_ATTN_DWELL=0 "$ROOT/bin/reeve-sentry" --all --once 2>&1); RC=$?
+ck_eq  "2f the next unnamed --all watch wakes for the sibling" "$RC" 0
+ck_has "2f for its done"                                  "$OUT" "signal: bbb is done - report.md written"
+ck_not "2f not masked by the gone one"                    "$OUT" "stale: aaa"
+ck_eq  "2f the owner's latch untouched"                   "$([ -f "$(LATCH)" ] && echo kept || echo gone)" gone
+
 # --- 3. one long watch, the done landing between polls -----------------------
 step3() {
   case $1 in
@@ -208,6 +249,16 @@ sentry --once
 ck_eq  "6 the terminal line wakes the reeve"              "$RC" 0
 ck_has "6 as an ordinary failure"                         "$OUT" "signal: aaa failed - pane died"
 ck_eq  "6 and the latch is gone"                          "$([ -f "$(LATCH)" ] && echo kept || echo gone)" gone
+
+# 6b. and every --all watch's latch with it.
+fresh h6b
+REEVE_SESSION=reeve-dead hand aaa artificer
+sentry --all --once
+ck_eq  "6b the --all latch stands before the line"        "$([ -f "$(LATCH)@reeve-a" ] && echo kept || echo gone)" kept
+report aaa 'failed: pane died'
+sentry --all --once
+ck_has "6b the terminal line wakes the --all watch"       "$OUT" "signal: aaa failed - pane died"
+ck_eq  "6b and its latch is gone"                         "$([ -f "$(LATCH)@reeve-a" ] && echo kept || echo gone)" gone
 
 echo
 echo "passed=$PASS failed=$FAIL"
