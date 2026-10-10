@@ -115,8 +115,9 @@
 #
 # - Ignored files. A copy's ignored files are deleted with it, silently:
 #   `git status --porcelain` does not list them and `git worktree remove` does
-#   not object. Right for build output, wrong for a hand's local env file. An
-#   open product decision with the liege, not a settled limit.
+#   not object. Right for build output, and an accepted limit for a hand's local
+#   env file, decided with the liege on 2026-10-03: a hand's env file only ever
+#   comes from the original checkout, so removing the copy loses nothing.
 #
 # Every hole found in this file so far has been the same mistake in a new
 # costume: the guard identifies a copy by the record's DESCRIPTION of it rather
