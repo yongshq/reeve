@@ -2,8 +2,8 @@
 
 `AGENTS.md` section 6 holds the rules a reeve acts on. This file holds only what that section does
 not say: what a caretaker's line promises, why a `waiting` wake must be followed by a new watch at
-once, and the exact thresholds and limits behind `idle` and `wedged`. Read it when a wake, a
-listing or a silence does not match what you expected.
+once, how often `stale` is said, and the exact thresholds and limits behind `idle` and `wedged`.
+Read it when a wake, a listing or a silence does not match what you expected.
 
 ## What a caretaker's line promises
 
@@ -49,6 +49,15 @@ before you report it, whatever the liege is asked.
   ordinary wake. With no watch running, the caretaker frees the finished hand and leaves the line in
   your notifications, which arrive only when you next watch or list: if you never do, you go on
   reporting a finished hand as stuck.
+
+## `stale`: once per gone session
+
+A watch stops at the first errand with something to say, so a gone session said on every watch
+would hide every other errand's wake for as long as it stands in flight.
+
+- Once per gone session, across watches, re-armed when the hand writes a line or its session is
+  seen alive again. A terminal line ends it. A session that cannot be read re-arms nothing.
+- Never cleaned up, and the listing still shows the session gone after the wake.
 
 ## `idle`: thresholds and limits
 

@@ -629,6 +629,9 @@ check_one() {
   again=$(status_lines "$f")
   [ "$now" = "$again" ] || return 1
 
+  # A terminal line ends a gone session's episode, below, whichever poll says it.
+  case $st in done|failed) rm -f "$(stale_file "$i" gone)" ;; esac
+
   seen=$(cat "$(cursor_file "$i")" 2>/dev/null || echo 0)
   seen=$(printf '%s' "$seen" | tr -d '[:space:]'); seen=${seen:-0}
 
@@ -727,10 +730,26 @@ check_one() {
 
   # A hand that vanished without a terminal line is the failure mode that would
   # otherwise wait forever, so it is worth a wake on its own.
+  #
+  # One gone session, one wake, in the gone latch. Without it this line came
+  # back on every poll of every watch, and the loop below stops at the first
+  # errand with something to say, so one dead hand that stays in flight (an
+  # artificer's unlanded branch) hid every sibling's `done:` and `waiting` for
+  # as long as it stood. Keyed on the status file as the idle latch is, so a
+  # line reported since is a new episode, and an errand dispatched again under
+  # the same id after a cleanup never matches the old file. The session coming
+  # back, or a terminal line above, ends the episode. `unreadable` ends nothing, as
+  # `unknown` re-arms nothing for the idle latch. Never reaped either way, and
+  # the listing reads the session itself, so it still shows the hand gone.
   live=$("$BIN/reeve-backend" call agent_state "$tgt" --backend "$bk" 2>/dev/null || echo unreadable)
   case "$live:$st" in
+    alive:*) rm -f "$(stale_file "$i" gone)" ;;
     dead:done|dead:failed|missing:done|missing:failed) : ;;
     dead:*|missing:*)
+      mark=$(stale_mark "$i")
+      latch=$(stale_latch "$i" "$mark" gone) && [ "${latch#* }" = yes ] && return 1
+      stale_write "$i" "$(attn_now)" "$mark" yes gone \
+        || latch_warn "gone:$i" "cannot write $(stale_file "$i" gone), so $i's stale wake is not recorded as reported and will be said again, ahead of any other errand's"
       # A hand opens inside its reeve's workspace, so closing that workspace
       # takes every hand in it. Said, so each one lost that way is named with
       # its cause rather than only as vanished.
