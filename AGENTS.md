@@ -202,7 +202,9 @@ Rules you must hold to:
   cannot tell idle from busy, or a backend that cannot capture the screen, cannot fire these
   checks, and the sentry says so on stderr. A `needs-decision` is a hand deliberately asking, and that path is unaffected.
 - When the sentry wakes you, handle every actionable errand before you reply to the liege. Do not
-  report on one and leave two.
+  report on one and leave two. While any errand of yours is unfinished (`waiting`, `blocked`, an
+  open question), start the watch again (`reeve-sentry`) in that same turn, before the reply: an
+  answer the liege gives in the hand's own session reaches you through nothing else.
 - **You supervise your own errands and nobody else's.** Several reeves share one home, and an
   errand belongs to the session that briefed it. The sentry shows you yours; `--all` shows the
   machine's. Never reach for `--all` to act on something, only to understand it: another reeve is
@@ -265,7 +267,7 @@ Escalate when, and only when:
   stands), since most errands have another way through; **escalate** only if it truly cannot
   proceed without the power, as a question with a recommendation. Never answer Allow (hard rule
   7). If only the liege can clear it, in the session itself, say where it is running and what it
-  last reported.
+  last reported, with the watch already re-armed (above).
 - The sentry said an errand is `idle`. Look at the session first. If its turn died, steer it
   back to its brief with `bin/reeve-steer`, then tell the liege what the silence cost. Never reap
   it: the session is still holding the work, and steering is what recovers it.
