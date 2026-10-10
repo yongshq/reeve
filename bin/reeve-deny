@@ -14,8 +14,10 @@
 # an errand that is not known, cleaned up, or whose session is gone.
 #
 # The backend looks once more just before the key, and sends nothing if the
-# dialog went meanwhile, most likely answered in the session. That narrows the
-# race with the liege's own answer; it cannot close it.
+# dialog went meanwhile, most likely answered in the session. From that read to
+# the key is one herdr spawn, the send itself, since the session is resolved
+# once up front. That narrows the race with the liege's own answer; it cannot
+# close it, since herdr has no conditional send.
 #
 # After sending, reads the session again and says whether the dialog is gone.
 # Gone, the hand settled, steer it next with bin/reeve-steer, which refuses

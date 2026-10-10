@@ -90,7 +90,6 @@ ck_has "1 and says to steer next"                          "$OUT" "steer it next
 ck_eq  "1 one fact per line, two lines"                    "$(printf '%s\n' "$OUT" | grep -c .)" 2
 ck_not "1 nothing is typed, only the key"                  "$(sent)" "send "
 
-
 # --- 2. a dialog that stays --------------------------------------------------
 fresh waiting waiting
 deny hung
@@ -235,6 +234,7 @@ case "$1 $2" in
   'tab get')        printf '{"result":{"tab":{"tab_id":"%s","label":"someone else"}}}\n' "$3" ;;
   'pane send-keys') [ -n "${STUB_KEYFAIL:-}" ] && exit 1; printf '{"result":{"type":"ok"}}\n' ;;
   'agent explain')  printf '%s\n' "${STUB_EXPLAIN-{\"state\":\"blocked\"}}" ;;
+  'session list')   printf '{"sessions":[{"name":"stub","default":true}]}\n' ;;
   *) exit 1 ;;
 esac
 HERDR
@@ -263,6 +263,11 @@ HERDR
   ck_has "7 so"                                            "$(cat "$STUB_LOG")" "pane send-keys w7:p9 esc"
   ck_eq  "7 the screen is read again, after the identity, just before the key" \
          "$(cut -d' ' -f1,2 "$STUB_LOG" | tr '\n' ,)" "pane get,agent explain,pane send-keys,"
+  : > "$STUB_LOG"; ( PATH="$FAKE:$PATH" REEVE_IDENT_TRIES=1; unset REEVE_HERDR_SESSION; \
+    . "$ROOT/backends/herdr.sh"; reeve_backend_herdr_dismiss_dialog 'w7|w7:p9|w7:t9' ) 2>/dev/null; rc=$?
+  ck_eq  "7 with no session set, the deny still goes"      "$rc" 0
+  ck_eq  "7 the session is resolved once, up front, so nothing spawns between the read and the key" \
+         "$(cut -d' ' -f1,2 "$STUB_LOG" | tr '\n' ,)" "session list,agent explain,pane send-keys,"
   STUB_CWD=/elsewhere hd "w7|w7:p9|w7:t9#c${sum}l1"; rc=$?
   ck_eq  "7 a pane that is someone else's now is refused"  "$rc" 1
   ck_not "7 and gets no key"                               "$(cat "$STUB_LOG")" "send-keys"
