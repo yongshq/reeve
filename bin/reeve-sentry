@@ -278,7 +278,12 @@ fi
 # writer, and wake_reported is that file's only writer.
 # Alongside the cursor, and for the same reason: what this errand looked like
 # last time, so a condition that is only interesting once is only reported once.
-attn_file() { printf '%s/state/.attn-%s\n' "$REEVE_HOME_D" "$1"; }
+# With a second argument, the copy one `--all` watch keeps over an errand not its
+# own, `<id>@<its session>`, as cursor_file and stale_file keep theirs.
+attn_file() { # attn_file <id> [<watching session>]
+  if [ $# -ge 2 ]; then printf '%s/state/.attn-%s@%s\n' "$REEVE_HOME_D" "$1" "$2"
+  else printf '%s/state/.attn-%s\n' "$REEVE_HOME_D" "$1"; fi
+}
 # The idle latch, stale_file, lives in bin/reeve-lib.sh with stale_write, as does
 # the wedged latch, the same machinery under a kind of its own, and so
 # do attn_dwell and attn_now: the listing reads the latch this process writes and
@@ -452,17 +457,28 @@ reapable() { # reapable <state> <divergence>
 # for it was ever written. `dispatched=` is the durable record that it went out
 # and nothing ever clears it; an errand briefed before that stamp existed still
 # carries a target, so either one proves it.
+#
+# An `--all` watch over another reeve's errand has said a finished one once its
+# own cursor covers the log, so that errand stops counting as in flight for it
+# then, rather than when its owner watches, which an owner that is gone never
+# does.
 live_errands() {
   local mine own; mine=$(reeve_session)
   ls "$REEVE_HOME_D/state"/*.meta 2>/dev/null | while read -r f; do
     i=$(basename "$f" .meta)
     [ -n "$(meta_get "$i" target '')" ] || [ -n "$(meta_get "$i" dispatched '')" ] || continue
     [ -z "$(meta_get "$i" tornDown '')" ] || continue
+    own=$(meta_get "$i" session '')
     if [ "$every" != yes ]; then
-      own=$(meta_get "$i" session '')
       [ "$own" = "$mine" ] || [ -z "$own" ] || continue
     fi
-    [ "$caretaker" = yes ] || ! reported_done "$i" || continue
+    if [ "$caretaker" != yes ]; then
+      if [ "$every" = yes ] && [ -n "$own" ] && [ "$own" != "$mine" ]; then
+        ! reported_done "$i" "$mine" || continue
+      else
+        ! reported_done "$i" || continue
+      fi
+    fi
     printf '%s\n' "$i"
   done
 }
@@ -491,12 +507,21 @@ live_errands() {
 # This is the lifetime that keying in-flight off `target=` used to give a watch
 # by accident, restored deliberately: it ends the watch once it has said its
 # piece, instead of ending it the moment a cleanup blanked a field.
-reported_done() { # reported_done <id>
+#
+# With a watching session, the `--all` watch's own cursor over an errand not its
+# own counts as a third, for that watch alone. Only live_errands passes one: the
+# caretaker never does, so whether a wake is still owed stays the owner's
+# question.
+reported_done() { # reported_done <id> [<watching session>]
   local i=$1 total seen
   case $(status_field "$i" state) in done|failed) ;; *) return 1 ;; esac
   total=$(status_lines "$(status_file "$i")")
   seen=$(cat "$(cursor_file "$i")" 2>/dev/null | tr -d '[:space:]')
   case $seen in ''|*[!0-9]*) ;; *) [ "$seen" = "$total" ] && return 0 ;; esac
+  if [ $# -ge 2 ]; then
+    seen=$(cat "$(cursor_file "$i" "$2")" 2>/dev/null | tr -d '[:space:]')
+    case $seen in ''|*[!0-9]*) ;; *) [ "$seen" = "$total" ] && return 0 ;; esac
+  fi
   # delivered_get is the one reader of that file, and it answers absent,
   # unreadable and malformed the same way: nothing reported here.
   seen=$(delivered_get "$i") || return 1
@@ -523,8 +548,8 @@ wake_owed() { # wake_owed <id>
 
 # Absorb or escalate. One errand, one verdict.
 check_one() {
-  local i=$1 f seen now again st open div bk tgt live own kind cur mine
-  local attn af since woke nowsec last stale how mark latch wedge prc w why
+  local i=$1 f seen now again st open div bk tgt live own kind cur mine at
+  local attn af aw since woke nowsec last stale how mark latch wedge prc w why said
 
   # Counted BEFORE the verdict is read, and again after. The cursor is what says
   # a line has been dealt with, so advancing it past a line the verdict did not
@@ -646,9 +671,15 @@ check_one() {
   # told. Such a watch keeps a cursor of its own instead, read and written by it
   # alone, so it says each line once to itself and moves on. It still reads the
   # owner's: a line the owner was already told is not news to anyone.
+  #
+  # The waiting, idle, wedged and gone latches below split the same way, on the
+  # same test: `at` is empty for the owner's watch and `@<its session>` for such
+  # an `--all` watch, the suffix of its own copy of each.
   cur=$(cursor_file "$i")
   own=$(meta_get "$i" session '')
+  at=''
   if [ "$every" = yes ] && [ -n "$own" ] && [ "$own" != "$MY_SESSION" ]; then
+    at="@$MY_SESSION"
     cur=$(cursor_file "$i" "$MY_SESSION")
     mine=$(cat "$cur" 2>/dev/null | tr -d '[:space:]')
     case $mine in ''|*[!0-9]*) ;; *) [ "$mine" -gt "$seen" ] && seen=$mine ;; esac
@@ -723,8 +754,18 @@ check_one() {
     # that gets answered and stalls again is reported again if either was seen
     # between. A second dialog that followed the first with no line between and
     # no poll that saw the hand working reads as the first, and stays silent.
-    if [ "${woke:-no}" != yes ] && [ $(( nowsec - since )) -ge "$attn_dwell" ]; then
-      printf '%s yes %s\n' "$since" "$now" > "$af"
+    #
+    # An `--all` watch over another reeve's errand says the stall once for
+    # itself and writes `yes` only in its own copy, `<since> yes <lines>`, so the
+    # owner's watch still wakes for it. The owner's latch stays the one clock:
+    # starting it, above, and deleting it, below, can only ever cost the owner a
+    # second wake, never its one. Its copy counts only for the owner's `since`
+    # and this count of lines, so whatever re-arms the owner's re-arms it too.
+    aw=$af; said=''
+    [ -z "$at" ] || { aw=$(attn_file "$i" "${at#@}"); [ -f "$aw" ] && read -r said < "$aw"; }
+    if [ "${woke:-no}" != yes ] && [ "$said" != "$since yes $now" ] \
+       && [ $(( nowsec - since )) -ge "$attn_dwell" ]; then
+      printf '%s yes %s\n' "$since" "$now" > "$aw"
       last=$(status_field "$i" last)
       # Never reaped, for the reason `blocked:` is never reaped: it can still be
       # steered, and the session is the only place the question exists.
@@ -779,10 +820,8 @@ check_one() {
     dead:*|missing:*)
       mark=$(stale_mark "$i")
       latch=$(stale_latch "$i" "$mark" gone) && [ "${latch#* }" = yes ] && return 1
-      own=$(meta_get "$i" session '')
-      kind=gone
-      [ "$every" != yes ] || [ "$own" = "$MY_SESSION" ] || [ -z "$own" ] || kind="gone@$MY_SESSION"
-      [ "$kind" = gone ] || { latch=$(stale_latch "$i" "$mark" "$kind") && [ "${latch#* }" = yes ] && return 1; }
+      kind="gone$at"
+      [ -z "$at" ] || { latch=$(stale_latch "$i" "$mark" "$kind") && [ "${latch#* }" = yes ] && return 1; }
       stale_write "$i" "$(attn_now)" "$mark" yes "$kind" \
         || latch_warn "$kind:$i" "cannot write $(stale_file "$i" "$kind"), so $i's stale wake is not recorded as reported and will be said again, ahead of any other errand's"
       # A hand opens inside its reeve's workspace, so closing that workspace
@@ -823,8 +862,12 @@ check_one() {
     fi
     if [ $(( nowsec - since )) -ge "$attn_dwell" ]; then
       [ "$woke" = yes ] && return 1
-      stale_write "$i" "$since" "$mark" yes \
-        || latch_warn "$i" "cannot write $(stale_file "$i"), so $i's idle wake is not recorded as reported and will be said again"
+      # An `--all` watch over another reeve's errand, as for waiting above: says
+      # it once for itself, `yes` only in its own copy and only on the owner's
+      # `since`, and the owner's latch keeps its one wake for the owner's watch.
+      [ -n "$at" ] && latch=$(stale_latch "$i" "$mark" "idle$at") && [ "$latch" = "$since yes" ] && return 1
+      stale_write "$i" "$since" "$mark" yes "idle$at" \
+        || latch_warn "$i" "cannot write $(stale_file "$i" "idle$at"), so $i's idle wake is not recorded as reported and will be said again"
       last=$(status_field "$i" last)
       case ${stale#* } in
         error) how='idle after an API error' ;;
@@ -874,8 +917,11 @@ check_one() {
       fi
       if wedge_due "${wedge%% *}" "$since"; then
         [ "$woke" = yes ] && return 1
-        stale_write "$i" "$since" "$mark" yes wedged \
-          || latch_warn "wedged:$i" "cannot write $(stale_file "$i" wedged), so $i's wedged wake is not recorded as reported and will be said again"
+        # And split as the idle latch is, for an `--all` watch over another
+        # reeve's errand: the clock stays the owner's, the wake does too.
+        [ -n "$at" ] && latch=$(stale_latch "$i" "$mark" "wedged$at") && [ "$latch" = "$since yes" ] && return 1
+        stale_write "$i" "$since" "$mark" yes "wedged$at" \
+          || latch_warn "wedged:$i" "cannot write $(stale_file "$i" "wedged$at"), so $i's wedged wake is not recorded as reported and will be said again"
         last=$(status_field "$i" last)
         # `wedged:`, a word of its own: `idle:` is a turn that ended and this is
         # one that never does, and the two want different things looked at.

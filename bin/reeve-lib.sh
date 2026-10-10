@@ -1632,17 +1632,19 @@ attn_now() { printf '%s' "${REEVE_ATTN_NOW:-$(date +%s)}"; }
 # <woke>`. Both are read and written by stale_latch and stale_write, so the rule
 # about a steer and the rule about an atomic write hold for both by construction.
 # The gone latch, `gone`, is the sentry's `stale:` line under the same machinery
-# and the idle latch's mark: `<since> <lines> <mtime> <woke>`. `gone@<session>`
-# is the same line said by one `--all` watch over an errand not its own, kept
+# and the idle latch's mark: `<since> <lines> <mtime> <woke>`. `<kind>@<session>`
+# is the same wake said by one `--all` watch over an errand not its own, kept
 # apart so it never stands for the owner's: `<session>` is the watching one, empty
 # for a watch that cannot name its session. An errand id holds no `@` and a
 # session id no `/`, so neither can reach another errand's file.
-stale_file() { # stale_file <id> [idle|wedged|gone|gone@<session>]
+stale_file() { # stale_file <id> [idle|wedged|gone][@<session>]
   case ${2:-idle} in
-    wedged) printf '%s/state/.wedged-%s\n' "$REEVE_HOME_D" "$1" ;;
-    gone)   printf '%s/state/.gone-%s\n' "$REEVE_HOME_D" "$1" ;;
-    gone@*) printf '%s/state/.gone-%s@%s\n' "$REEVE_HOME_D" "$1" "${2#gone@}" ;;
-    *)      printf '%s/state/.stale-%s\n' "$REEVE_HOME_D" "$1" ;;
+    wedged)   printf '%s/state/.wedged-%s\n' "$REEVE_HOME_D" "$1" ;;
+    wedged@*) printf '%s/state/.wedged-%s@%s\n' "$REEVE_HOME_D" "$1" "${2#wedged@}" ;;
+    gone)     printf '%s/state/.gone-%s\n' "$REEVE_HOME_D" "$1" ;;
+    gone@*)   printf '%s/state/.gone-%s@%s\n' "$REEVE_HOME_D" "$1" "${2#gone@}" ;;
+    idle@*)   printf '%s/state/.stale-%s@%s\n' "$REEVE_HOME_D" "$1" "${2#idle@}" ;;
+    *)        printf '%s/state/.stale-%s\n' "$REEVE_HOME_D" "$1" ;;
   esac
 }
 
@@ -1712,7 +1714,7 @@ stale_mark() {
   printf '%s %s\n' "$(status_lines "$f")" "$(status_mtime "$f")"
 }
 
-# stale_latch <id> <mark> [idle|wedged|gone]
+# stale_latch <id> <mark> [idle|wedged|gone][@<session>]
 #
 # Prints `<since> <woke>` when the latch records the silence <mark> describes,
 # returns 1 when there is no latch, it records an earlier one, or it started
@@ -1731,7 +1733,7 @@ stale_latch() {
   printf '%s %s\n' "$since" "${woke:-no}"
 }
 
-# stale_write <id> <since> <mark> <woke> [idle|wedged|gone]
+# stale_write <id> <since> <mark> <woke> [idle|wedged|gone][@<session>]
 #
 # The sentry's alone: it is the one clock, and the listing writes nothing. The
 # dwell is the attention probe's own, for the reason it has one: a hand between

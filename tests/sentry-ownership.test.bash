@@ -46,7 +46,8 @@ reeve_backend_stub_describe()        { printf 'stub backend\n'; }
 reeve_backend_stub_create_endpoint() { printf 'stub:1\n'; }
 reeve_backend_stub_launch()          { return 0; }
 reeve_backend_stub_agent_state()     { printf '%s\n' "${STUB_STATE:-alive}"; }
-reeve_backend_stub_attention_state() { printf 'settled\n'; }
+reeve_backend_stub_attention_state() { printf '%s\n' "${STUB_ATTN:-settled}"; }
+reeve_backend_stub_capture()         { printf 'a screen that never moves\n'; }
 reeve_backend_stub_wait_change()     { return 2; }
 reeve_backend_stub_kill()            { printf '%s\n' "$1" >> "$STUB_KILLS"; return 0; }
 ADAPTER
@@ -487,7 +488,8 @@ eq  "12 the owner's cursor untouched"           "$(cur bbb)" none
 eq  "12 in a cursor of its own"                 "$(cur bbb@reeve-a)" 2
 eq  "12 and nothing reaped"                     "$(reaped bbb)" no
 OUT=$(all_as reeve-a); RC=$?
-eq  "12 reeve-a's next --all is quiet on it"    "$RC" 4
+eq  "12 reeve-a's next --all has nothing in flight" "$RC" 3
+has "12 since it has said bbb's done"           "$OUT" "nothing in flight"
 nas "12 and does not repeat it"                 "$OUT" "bbb is done"
 OUT=$(watch_as reeve-b); RC=$?
 eq  "12 reeve-b's own watch still gets the done" "$RC" 0
@@ -534,6 +536,125 @@ has "12e the owner is told first"               "$OUT" "ggg is blocked"
 OUT=$(all_as reeve-a); RC=$?
 eq  "12e then reeve-a's --all is quiet on it"   "$RC" 4
 eq  "12e and keeps no cursor for it"            "$(cur ggg@reeve-a)" none
+
+# 12f. an orphan's done, said by --all, is still owed to its owner: the
+# caretaker reads only the owner's cursor, so the line still goes to its spool.
+export REEVE_HOME="$SCRATCH/home12f"
+mkdir -p "$REEVE_HOME/state"
+errand zzz reeve-gone "working: x" "done: y"
+OUT=$(all_as reeve-a); RC=$?
+has "12f --all says the orphan's done"          "$OUT" "zzz is done"
+OUT=$(all_as reeve-a); RC=$?
+eq  "12f then --all has nothing in flight"      "$RC" 3
+eq  "12f the caretaker still cleans it up"      "$(care zzz)" yes
+has "12f and leaves the line for its owner"     "$(spool reeve-gone)" "zzz is done"
+
+echo "--- 13. an --all watch never spends the owner's waiting, idle or wedged wake ---"
+# The latches were shared, so another reeve's --all watch said the stall and
+# wrote woke=yes in the owner's latch, and the owner's own watch stayed quiet:
+# the stuck hand the liege asked about, lost a second way.
+latch() { cat "$REEVE_HOME/state/.$1" 2>/dev/null || echo none; }
+export REEVE_ATTN_DWELL=0
+
+# 13a. waiting
+# The clock held still, so a copy can be re-armed only by its count of lines.
+export REEVE_HOME="$SCRATCH/home13w" STUB_ATTN=waiting REEVE_ATTN_NOW=$(date +%s)
+mkdir -p "$REEVE_HOME/state"
+errand www reeve-b "working: x"
+OUT=$(all_as reeve-a); RC=$?
+eq  "13a reeve-a's --all wakes"                 "$RC" 0
+has "13a for www waiting"                       "$OUT" "www is waiting"
+eq  "13a the owner's latch not marked said"     "$(latch attn-www | awk '{print $2}')" no
+eq  "13a in a latch of its own"                 "$(latch attn-www@reeve-a | awk '{print $2}')" yes
+OUT=$(all_as reeve-a); RC=$?
+eq  "13a reeve-a's next --all is quiet"         "$RC" 4
+nas "13a and does not repeat it"                "$OUT" "is waiting"
+OUT=$(all_as reeve-c); RC=$?
+eq  "13a reeve-c's --all says it once too"      "$RC" 0
+OUT=$(watch_as reeve-b); RC=$?
+eq  "13a reeve-b's own watch still wakes"       "$RC" 0
+has "13a for www waiting"                       "$OUT" "www is waiting"
+OUT=$(watch_as reeve-b); RC=$?
+eq  "13a then the owner is quiet over it"       "$RC" 4
+OUT=$(all_as reeve-d); RC=$?
+eq  "13a an --all after the owner is quiet"     "$RC" 4
+eq  "13a and keeps no latch for it"             "$(latch attn-www@reeve-d)" none
+# A line reported since is a new stall, for the owner and for every copy.
+printf 'working: answered, then stuck again\n' >> "$REEVE_HOME/errands/www/status"
+OUT=$(all_as reeve-a); RC=$?
+eq  "13a a new stall wakes reeve-a's --all"     "$RC" 0
+OUT=$(watch_as reeve-b); RC=$?
+eq  "13a and still the owner's watch"           "$RC" 0
+has "13a as waiting"                            "$OUT" "www is waiting"
+# Its own errand and one nobody owns keep the one latch; an unnamed watch
+# keeps the shared unnamed copy.
+errand own reeve-a "working: x"
+errand nob ''      "working: x"
+all_as reeve-a >/dev/null; all_as reeve-a >/dev/null; all_as reeve-a >/dev/null
+eq  "13a its own errand marks the owner's latch" "$(latch attn-own | awk '{print $2}')" yes
+eq  "13a an unowned one does too"               "$(latch attn-nob | awk '{print $2}')" yes
+eq  "13a and keeps no second latch"             "$(latch attn-own@reeve-a)$(latch attn-nob@reeve-a)" nonenone
+export REEVE_HOME="$SCRATCH/home13u"
+mkdir -p "$REEVE_HOME/state"
+errand uuu reeve-b "working: x"
+OUT=$(REEVE_SESSION='' CLAUDE_CODE_SESSION_ID='' "$ROOT/bin/reeve-sentry" --all --once --poll 1 2>&1)
+has "13a an unnamed --all watch says it"        "$OUT" "uuu is waiting"
+eq  "13a the owner's latch not marked said"     "$(latch attn-uuu | awk '{print $2}')" no
+eq  "13a in the shared unnamed latch"           "$(latch attn-uuu@ | awk '{print $2}')" yes
+OUT=$(watch_as reeve-b); RC=$?
+eq  "13a and the owner still wakes"             "$RC" 0
+
+# 13b. idle
+unset REEVE_ATTN_NOW
+export REEVE_HOME="$SCRATCH/home13i" STUB_ATTN=settled REEVE_NOW=$(( $(date +%s) + 3600 ))
+mkdir -p "$REEVE_HOME/state" "$REEVE_HOME/config"
+printf '60\n' > "$REEVE_HOME/config/hand-stale"
+errand iii reeve-b "working: x"
+OUT=$(all_as reeve-a); RC=$?
+eq  "13b reeve-a's --all wakes"                 "$RC" 0
+has "13b for iii idle"                          "$OUT" "idle: iii"
+eq  "13b the owner's latch not marked said"     "$(latch stale-iii | awk '{print $NF}')" no
+eq  "13b in a latch of its own"                 "$(latch stale-iii@reeve-a | awk '{print $NF}')" yes
+OUT=$(all_as reeve-a); RC=$?
+eq  "13b reeve-a's next --all is quiet"         "$RC" 4
+nas "13b and does not repeat it"                "$OUT" "idle: iii"
+OUT=$(watch_as reeve-b); RC=$?
+eq  "13b reeve-b's own watch still wakes"       "$RC" 0
+has "13b for iii idle"                          "$OUT" "idle: iii"
+OUT=$(watch_as reeve-b); RC=$?
+eq  "13b then the owner is quiet over it"       "$RC" 4
+OUT=$(all_as reeve-d); RC=$?
+eq  "13b an --all after the owner is quiet"     "$RC" 4
+OUT=$(REEVE_SESSION=reeve-b "$ROOT/bin/reeve-status" --no-wake 2>&1)
+has "13b the listing still reads the owner's latch" "$OUT" "idle"
+
+# 13c. wedged: the first look starts the screen's clock, an hour later it is due.
+export REEVE_HOME="$SCRATCH/home13d" STUB_ATTN=working
+mkdir -p "$REEVE_HOME/state" "$REEVE_HOME/config"
+printf '60\n' > "$REEVE_HOME/config/hand-wedged"
+errand ddd reeve-b "working: x"
+T=$(date +%s)
+OUT=$(REEVE_ATTN_NOW=$T all_as reeve-a); RC=$?
+eq  "13c the first look only starts the clock"  "$RC" 4
+export REEVE_ATTN_NOW=$(( T + 3600 ))
+OUT=$(all_as reeve-a); RC=$?
+eq  "13c reeve-a's --all wakes"                 "$RC" 0
+has "13c for ddd wedged"                        "$OUT" "wedged: ddd"
+eq  "13c the owner's latch not marked said"     "$(latch wedged-ddd | awk '{print $NF}')" no
+eq  "13c in a latch of its own"                 "$(latch wedged-ddd@reeve-a | awk '{print $NF}')" yes
+OUT=$(all_as reeve-a); RC=$?
+eq  "13c reeve-a's next --all is quiet"         "$RC" 4
+nas "13c and does not repeat it"                "$OUT" "wedged: ddd"
+OUT=$(watch_as reeve-b); RC=$?
+eq  "13c reeve-b's own watch still wakes"       "$RC" 0
+has "13c for ddd wedged"                        "$OUT" "wedged: ddd"
+OUT=$(watch_as reeve-b); RC=$?
+eq  "13c then the owner is quiet over it"       "$RC" 4
+OUT=$(all_as reeve-d); RC=$?
+eq  "13c an --all after the owner is quiet"     "$RC" 4
+OUT=$(REEVE_SESSION=reeve-b "$ROOT/bin/reeve-status" --no-wake 2>&1)
+has "13c the listing still reads the owner's latch" "$OUT" "wedged"
+unset REEVE_ATTN_DWELL REEVE_NOW REEVE_ATTN_NOW STUB_ATTN
 
 printf '\npassed=%s failed=%s\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

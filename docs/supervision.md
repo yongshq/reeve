@@ -49,8 +49,11 @@ before you report it, whatever the liege is asked.
   ordinary wake. With no watch running, the caretaker frees the finished hand and leaves the line in
   your notifications, which arrive only when you next watch or list: if you never do, you go on
   reporting a finished hand as stuck.
-- Only the owner's watch spends that wake. An `--all` watch over another reeve's errand says each
-  such line once for itself, on a cursor of its own, and the owner's next watch still wakes for it.
+- Only the owner's watch spends that wake, or the `waiting` wake itself. An `--all` watch over
+  another reeve's errand says each such line, and each stall, once for itself, on a cursor and a
+  latch of its own, and the owner's next watch still wakes for it. A finished errand it has said
+  stops counting as in flight for that watch, so it still ends `nothing in flight` over an owner
+  that never watches again.
 
 `bin/reeve-watch-guard`, a Stop hook beside `bin/reeve-format-guard`, holds this in code after any
 wake, not only `waiting`: a reeve that ends a turn with an errand of its own unfinished (not `done`
@@ -95,6 +98,8 @@ seconds a `waiting` one must.
   a watch happens to see that turn working.
 - The listing reads the sentry's clock and writes nothing; before the threshold it shows the
   silence without the word.
+- Only the owner's watch marks it said, as for `stale` above. An `--all` watch over another
+  reeve's errand says it once for itself, and the owner's watch still wakes for it.
 - The "a backend or harness cannot tell idle from busy" notice is said once per watch, for a hand
   silent past `config/hand-stale`.
 - A threshold set to anything but a whole number of seconds turns its half of the check off, which
@@ -119,6 +124,7 @@ the price.
   counted before then.
 - The listing shows `wedged` on the same second the sentry wakes, reading the screen again and
   writing nothing; before that a working hand shows as working.
+- Only the owner's watch marks it said, as for `idle`.
 - The "a backend or harness cannot tell idle from busy" notice is said once per watch, alongside the idle
   limit. An unreadable screen, or a backend that cannot capture, gives no wake and is said on stderr
   once per watch for a hand silent past the window.
