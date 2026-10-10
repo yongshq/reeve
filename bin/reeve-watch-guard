@@ -1,0 +1,236 @@
+#!/usr/bin/env bash
+# A Claude Code Stop hook: send a reeve back when it ends its turn with an
+# errand of its own in flight and no watch running, the AGENTS.md section 6
+# rule. Without a watch nothing tells it the hand finished, or that a question
+# answered in the hand's own session was answered.
+#
+# Usage, from hooks/hooks.json (the plugin) and .claude/settings.json (a session
+# started inside the clone), never by hand:
+#   bin/reeve-watch-guard < <Stop hook input JSON>
+#
+# Acts only on a reeve, by bin/reeve-format-guard's test: REEVE_HAND unset, and
+# the hook's session_id has a name record under $REEVE_HOME/state/sessions/<sid>/name.
+# Every other session, a hand or a stranger, exits 0 with nothing said at all.
+#
+# In flight: an errand whose record names this session as its owner, that went
+# out (target= or dispatched=, live_errands' test in bin/reeve-sentry) and was
+# not torn down, and whose reconciled state is not done or failed. So working,
+# waiting, idle, wedged, blocked and an open question all count, a divergence
+# included, and a finished hand does not. An errand with no recorded owner is
+# not this reeve's to answer for.
+#
+# Not in flight, because no watch could stay running on it: an errand whose
+# hand's session is gone (agent_state dead or missing, the sentry's `stale:`),
+# which makes every watch exit at once on the same line.
+#
+# A watch is running when this session's watch marker is live (watch_live_for),
+# or the marker of a session that this one succeeded after /clear: a watch
+# started before the /clear follows its successor and moves its marker within
+# one poll.
+#
+# Counts as started, the rule's last sentence, so a watch that exits at once is
+# never asked for again in the same turn:
+#   - a reeve-sentry run anywhere in this turn, read from transcript_path: a
+#     tool call whose command runs it, not as --caretaker, --once or --help.
+#     The turn is everything since the last real user prompt, as for
+#     bin/reeve-format-guard, so a watch from an earlier turn does not count.
+#   - a wake spool holding lines it cannot give up (the sentry's
+#     `undeliverable:`), since every watch would exit on it at once.
+#
+# When it sends the reeve back it prints
+#   {"hookSpecificOutput":{"hookEventName":"Stop","additionalContext":"..."}}
+# with one line naming the errands and telling it to start reeve-sentry in the
+# background before ending the turn. Claude Code continues the turn.
+#
+# Never wedges a session:
+#   - stop_hook_active true means this turn was already sent back once, by this
+#     hook or another, so it passes. One correction per turn, never a loop.
+#   - a claim per turn, keyed by the prompt that opened it, so two copies of
+#     this hook on one stop (plugin and project settings) send back once, and a
+#     later stop in the same turn passes even without stop_hook_active.
+#   - anything it cannot read or parse passes, with one note on stderr.
+#
+# Exit: always 0. The decision is the JSON on stdout.
+
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/reeve-lib.sh"
+
+case ${1:-} in -h|--help) print_help "$0"; exit 0 ;; esac
+
+BIN=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+
+# Fail open, said once. Only ever reached once the session is known a reeve's.
+pass() { [ -n "${1:-}" ] && printf 'reeve-watch-guard: %s, not checked\n' "$1" >&2; exit 0; }
+
+[ -z "${REEVE_HAND:-}" ] || exit 0
+input=$(cat) || exit 0
+
+sid=$(hook_session "$input")
+[ -n "$sid" ] && [ -n "$(session_name "$sid")" ] || exit 0
+
+# Owned, sent out, not torn down, not finished. The reconciled state, never the
+# last line: status_field is the one reader.
+candidates() {
+  local f i
+  for f in "$REEVE_HOME_D/state"/*.meta; do
+    [ -f "$f" ] || continue
+    i=$(basename "$f" .meta)
+    [ "$(meta_get "$i" session '')" = "$sid" ] || continue
+    [ -n "$(meta_get "$i" target '')" ] || [ -n "$(meta_get "$i" dispatched '')" ] || continue
+    [ -z "$(meta_get "$i" tornDown '')" ] || continue
+    case $(status_field "$i" state) in done|failed) continue ;; esac
+    printf '%s\n' "$i"
+  done
+}
+
+# This session's own marker, or a predecessor's that has not followed yet.
+watching() {
+  local f s
+  watch_live_for "$sid" && return 0
+  for f in "$REEVE_HOME_D/state"/.sentry.watch-*; do
+    [ -f "$f" ] || continue
+    s=${f##*/.sentry.watch-}
+    [ "$s" != "$sid" ] && [ "$(session_follow "$s")" = "$sid" ] || continue
+    marker_alive "$(marker_read "$f")" && return 0
+  done
+  return 1
+}
+
+# Lines in the spool that wake_deliver could not claim: every watch would print
+# `undeliverable:` and exit.
+spool_stuck() {
+  local d; d=$(wake_dir "$sid")
+  [ -n "$(wake_pending "$sid")" ] && [ ! -w "$d" ]
+}
+
+ids=$(candidates)
+[ -n "$ids" ] || exit 0
+watching && exit 0
+spool_stuck && exit 0
+
+command -v python3 >/dev/null 2>&1 || pass 'python3 not on PATH'
+
+# One python pass, one field per line: session id, whether a stop hook is
+# already active, whether this turn ran a watch, then the turn's claim key.
+out=$(printf '%s' "$input" | python3 -c '
+import hashlib, json, re, sys
+
+def is_prompt(e):
+    # bin/reeve-format-guard: a tool result and Claude Code meta entries are
+    # part of the turn they sit in, anything else a user entry is opens one.
+    if e.get("isMeta"):
+        return False
+    c = (e.get("message") or {}).get("content")
+    if isinstance(c, list) and c and all(
+            isinstance(b, dict) and b.get("type") == "tool_result" for b in c):
+        return False
+    return True
+
+# reeve-sentry at a command position: the start, or after ; & | ( or a
+# newline, past any VAR=value assignments and the usual wrappers. Its own
+# arguments run to the end of that command.
+SENTRY = re.compile(
+    r"(?:^|[;&|(\n]|\$\()\s*"
+    r"(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+|(?:nohup|exec|command|env|bash|sh)\s+)*"
+    r"(?:\S*/)?reeve-sentry(?=$|[\s;&|)\"\x27])([^;&|\n)]*)")
+NOT_A_WATCH = re.compile(r"(?:^|\s)(?:--caretaker|--once|-h|--help)(?=$|\s)")
+
+def strings(v):
+    if isinstance(v, str):
+        yield v
+    elif isinstance(v, dict):
+        for x in v.values():
+            yield from strings(x)
+    elif isinstance(v, list):
+        for x in v:
+            yield from strings(x)
+
+def runs_watch(tool_input):
+    for s in strings(tool_input):
+        for m in SENTRY.finditer(s):
+            if not NOT_A_WATCH.search(m.group(1)):
+                return True
+    return False
+
+def turn(path):
+    entries = []
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line:
+                entries.append(json.loads(line))
+    ran, marker = False, "n%d" % len(entries)
+    for e in reversed(entries):
+        if not isinstance(e, dict):
+            continue
+        kind = e.get("type")
+        if kind == "user" and is_prompt(e):
+            if isinstance(e.get("uuid"), str) and e["uuid"]:
+                marker = "u" + e["uuid"]
+            break
+        if kind == "assistant":
+            for b in (e.get("message") or {}).get("content") or []:
+                if isinstance(b, dict) and b.get("type") == "tool_use" \
+                        and runs_watch(b.get("input")):
+                    ran = True
+    return ran, marker
+
+h = json.loads(sys.stdin.read())
+if not isinstance(h, dict):
+    raise ValueError("hook input is not an object")
+sid = h.get("session_id")
+if not isinstance(sid, str) or not sid:
+    raise ValueError("no session_id")
+active = h.get("stop_hook_active") is True
+print(sid)
+print("1" if active else "0")
+if active:
+    sys.exit(0)
+path = h.get("transcript_path")
+if not isinstance(path, str) or not path:
+    raise ValueError("no transcript_path")
+ran, marker = turn(path)
+print("1" if ran else "0")
+print(hashlib.sha1((sid + "\0" + marker).encode("utf-8")).hexdigest())
+' 2>/dev/null) || pass 'could not parse the hook input or transcript'
+
+psid=$(printf '%s\n' "$out" | sed -n 1p)
+active=$(printf '%s\n' "$out" | sed -n 2p)
+ran=$(printf '%s\n' "$out" | sed -n 3p)
+key=$(printf '%s\n' "$out" | sed -n 4p)
+
+[ "$active" = 0 ] || exit 0
+[ "$psid" = "$sid" ] || pass 'session id read two ways disagrees'
+[ "$ran" = 0 ] || exit 0
+
+# The costly half last: one backend call per errand still standing. A session
+# that is gone is the sentry's `stale:`, not work a watch could wait on. One
+# that cannot be read is not proof of anything, so it stays in flight.
+left=''
+while IFS= read -r i; do
+  [ -n "$i" ] || continue
+  if errand_session "$i" "$BIN"; then
+    case $live in dead|missing) continue ;; esac
+  fi
+  left="$left${left:+, }$i"
+done <<EOS
+$ids
+EOS
+[ -n "$left" ] || exit 0
+
+# One correction per turn, however many copies of this hook run on it. A claim
+# is a directory, so exactly one copy creates it. Keyed by the turn, so claims
+# older than an hour are a past turn's and go first.
+d=$(session_dir "$sid")
+mkdir -p "$d" 2>/dev/null || pass 'session record not writable'
+now=$(date +%s)
+for c in "$d"/watch-guard.*; do
+  [ -d "$c" ] || continue
+  m=$(file_mtime "$c") || continue
+  [ $((now - m)) -le 3600 ] || rmdir "$c" 2>/dev/null
+done
+case $key in ''|*[!0-9a-f]*) pass 'no turn hash' ;; esac
+mkdir "$d/watch-guard.$key" 2>/dev/null || exit 0
+
+reason="In flight with no watch running: $left. Start reeve-sentry in the background now, before ending this turn (AGENTS.md section 6), or nothing tells you when they finish or are answered in their own session."
+python3 -c 'import json, sys; print(json.dumps({"hookSpecificOutput": {"hookEventName": "Stop", "additionalContext": sys.argv[1]}}))' "$reason" \
+  || pass 'could not write the correction'

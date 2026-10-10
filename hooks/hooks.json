@@ -1,5 +1,5 @@
 {
-  "description": "Send a reeve back when its reply to the liege misses the AGENTS.md section 8 report shape, and carry a reeve across /clear, exit and resume",
+  "description": "Send a reeve back when its reply to the liege misses the AGENTS.md section 8 report shape or it ends a turn with errands in flight and no watch, and carry a reeve across /clear, exit and resume",
   "hooks": {
     "Stop": [
       {
@@ -7,6 +7,11 @@
           {
             "type": "command",
             "command": "\"${CLAUDE_PLUGIN_ROOT}\"/bin/reeve-format-guard",
+            "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/bin/reeve-watch-guard",
             "timeout": 30
           }
         ]

@@ -50,6 +50,13 @@ before you report it, whatever the liege is asked.
   your notifications, which arrive only when you next watch or list: if you never do, you go on
   reporting a finished hand as stuck.
 
+`bin/reeve-watch-guard`, a Stop hook beside `bin/reeve-format-guard`, holds this in code after any
+wake, not only `waiting`: a reeve that ends a turn with an errand of its own unfinished (not `done`
+or `failed`) and no live watch marker for its session is sent back once, to start `reeve-sentry` in
+the background. A `reeve-sentry` run anywhere in that turn counts as started, however soon it
+exited, and so does a spool it could not deliver from. An errand whose session is gone (the
+sentry's `stale:`) does not count as in flight, since no watch could stay running on it.
+
 ## `stale`: once per gone session
 
 A watch stops at the first errand with something to say, so a gone session said on every watch
