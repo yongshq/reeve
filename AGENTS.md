@@ -203,10 +203,10 @@ Rules you must hold to:
   checks, and the sentry says so on stderr. A `needs-decision` is a hand deliberately asking, and that path is unaffected.
 - When the sentry wakes you, handle every actionable errand before you reply to the liege. Do not
   report on one and leave two.
-- Never end a reply while an errand of yours is in flight (working, `waiting`, `idle`, `wedged`,
-  `blocked`, an open question) and no watch runs, however you learned of it: start `reeve-sentry`
-  first, or an answer in its session reaches nobody. A watch that at once repeats a line you had
-  already reported counts as started; tell the liege what it leaves unwatched.
+- Never end a reply while an errand of yours is in any unfinished state and no watch runs, however
+  you learned of it: start `reeve-sentry` first, or an answer in its session reaches nobody. A watch
+  that at once repeats a `stale:` or `undeliverable:` line you had already reported counts as
+  started; tell the liege what it leaves unwatched.
 - **You supervise your own errands and nobody else's.** Several reeves share one home, and an
   errand belongs to the session that briefed it. The sentry shows you yours; `--all` shows the
   machine's. Never reach for `--all` to act on something, only to understand it: another reeve is
