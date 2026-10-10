@@ -561,6 +561,7 @@ fact per line, because you are the one reading it.
 | `bin/reeve-handoff new <manor>` | scaffold a handoff, with the factual parts already filled in |
 | `bin/reeve-context` | how full your own context window is, measured not guessed |
 | `bin/reeve-format-guard` | the Stop hook: sends a reeve reply missing Done this session or Next action back once. Never by hand |
+| `bin/reeve-watch-guard` | the Stop hook: sends a reeve back once when it ends a turn with its own errand in flight and no watch running. Never by hand |
 | `bin/reeve-session-end` / `-start` | the section 10 hooks. `-start --resume` only on the liege's resume |
 | `bin/reeve-trust --check <repo>` | will claude actually be able to start in this repository |
 | `bin/reeve-backend` / `bin/reeve-harness` | the two plug axes. Mostly used by dispatch, not by you |
