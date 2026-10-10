@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+# Deny the dialog standing in a hand's session, through its backend.
+#
+# Usage:
+#   bin/reeve-deny <id>
+#
+# The first move when the sentry wakes you with `waiting`: the hand loses one
+# route, not its errand. Never Allow, which hard rule 7 keeps from the reeve:
+# the backend sends its own way of saying no (herdr presses Escape) and nothing
+# that could be read as yes.
+#
+# Refuses unless the session reads `waiting`, so no key ever lands in a session
+# that is working, settled, or cannot be told from one at a dialog. Refuses too
+# an errand that is not known, cleaned up, or whose session is gone.
+#
+# After sending, reads the session again and says whether the dialog is gone.
+# Gone, steer the hand next with bin/reeve-steer, which refuses while one
+# stands. Still standing, it may be the next dialog, or the key did not take.
+#
+# Writes one line to the errand's record, `denied=<time> <outcome>`, so the
+# denial is on disk, and never the status file, which is the hand's.
+#
+# Exit: 0 the dialog is gone, 1 refused or nothing sent, 2 sent but a dialog
+# still stands or the session cannot be read.
+
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/reeve-lib.sh"
+BIN=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+
+case ${1:-} in -h|--help) print_help "$0"; exit 0 ;; esac
+id=${1:-}; require_id "$id"
+[ -f "$(meta_file "$id")" ] || die "no errand '$id'"
+[ -z "$(meta_get "$id" tornDown '')" ] || die "errand '$id' was cleaned up. Nothing to deny."
+
+errand_session "$id" "$BIN" || die "errand '$id' has no session, so no dialog to deny."
+[ "$live" = alive ] || die "the hand is $live at $target. Nothing was sent."
+
+attn() { "$BIN/reeve-backend" call attention_state "$target" --backend "$backend" 2>/dev/null || :; }
+
+# Only a session positively at a dialog gets the key. Escape in a working
+# session interrupts its turn, and in an unverified harness, which answers
+# `unknown` whatever is on the screen, it is a guess.
+a=$(attn)
+case $a in
+  waiting) : ;;
+  settled|working) die "the hand at $target is $a, not at a dialog. Nothing was sent." ;;
+  *) die "cannot tell whether the hand at $target is at a dialog: backend $backend answered ${a:-nothing}. Nothing was sent. Look at the session yourself." ;;
+esac
+
+"$BIN/reeve-backend" call dismiss_dialog "$target" --backend "$backend" \
+  || die "could not deny the dialog at $target. Nothing was recorded. Look at the session yourself, or bring it to the liege."
+
+# A screen takes a moment to repaint after the key, so a dialog still on it is
+# read again before it counts.
+n=1
+while :; do
+  a=$(attn)
+  [ "$a" = waiting ] && [ "$n" -lt "${REEVE_DENY_TRIES:-3}" ] || break
+  n=$((n + 1)); sleep 1
+done
+
+case $a in
+  settled|working) out=cleared ;;
+  waiting)         out=still-standing ;;
+  *)               out=unknown ;;
+esac
+meta_set "$id" denied "$(date +%Y-%m-%dT%H:%M:%S) $out" 2>/dev/null \
+  || warn "cannot write $(meta_file "$id"), so this denial is not on disk"
+
+case $out in
+  cleared)
+    info "denied the dialog at $target: it is gone, the hand is $a"
+    info "steer it next: bin/reeve-steer $id <text>" ;;
+  still-standing)
+    info "denied the dialog at $target, but a dialog still stands: the next one, or the key did not take"
+    info "deny again: bin/reeve-deny $id, or bring it to the liege"
+    exit 2 ;;
+  *)
+    info "denied the dialog at $target, but cannot tell whether it is gone: backend $backend answered ${a:-nothing}"
+    info "look at the session yourself before steering it"
+    exit 2 ;;
+esac

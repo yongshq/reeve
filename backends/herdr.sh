@@ -386,6 +386,15 @@ reeve_backend_herdr_send_text_submit() {
   _h pane run "$pane" "$text" >/dev/null || return 1
 }
 
+reeve_backend_herdr_dismiss_dialog() {
+  # Optional. Escape, the one key every harness reads as no to a dialog it
+  # paints. Never Enter, never a typed answer: either could be Allow. The
+  # caller has already seen the session waiting and reads it again after, so
+  # this says only that the key was sent.
+  _h_verified "$1" || { _h_refuse "$1"; return 1; }
+  _h pane send-keys "$(_h_pane "$1")" esc >/dev/null
+}
+
 reeve_backend_herdr_target_exists() {
   local doc
   doc=$(_h pane get "$(_h_pane "$1")") || return 1

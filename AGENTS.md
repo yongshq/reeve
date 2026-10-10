@@ -264,8 +264,8 @@ Escalate when, and only when:
 - A hand wrote `blocked` or `failed`, and you cannot clear it yourself. Try first: a missing
   dependency, an unset env file, a wrong base branch are yours to fix by re-dispatching.
 - An errand finished. Report it.
-- The sentry said an errand is `waiting`. In order: **deny** the dialog (the hand loses one route,
-  not its errand); once it is gone, **steer** it with `bin/reeve-steer` (which refuses while one
+- The sentry said an errand is `waiting`. In order: **deny** the dialog with `bin/reeve-deny` (the
+  hand loses one route, not its errand); once it is gone, **steer** it with `bin/reeve-steer` (which refuses while one
   stands), since most errands have another way through; **escalate** only if it truly cannot
   proceed without the power, as a question with a recommendation. Never answer Allow (hard rule
   7). If only the liege can clear it, in the session itself, say where it is running and what it
@@ -552,6 +552,7 @@ fact per line, because you are the one reading it.
 | `bin/reeve-answer <id> <key> <answer>` | close an open question, durably, then tell the hand |
 | `bin/reeve-say <file> <state> <note>` | a hand's one way to append a status line, stamped in UTC |
 | `bin/reeve-steer <id> <text>` | tell a live hand what to do next, and re-arm its idle and wedged alarms. Refuses a session at a dialog, or one it cannot tell is not |
+| `bin/reeve-deny <id>` | say no to the dialog standing in a hand's session, never Allow, and report whether it went. Refuses unless the session reads waiting |
 | `bin/reeve-sentry` | stand watch, print one reason line, exit. A hand idle and silent past its threshold is one of them, opening `idle:`, and a working hand whose screen has not moved past its threshold another, opening `wedged:` |
 | `bin/reeve-teardown <id>` | remove a finished errand's copy, refusing on unlanded work |
 | `bin/reeve-teardown --prove-landed <holding> <branch>` | verdict: may `branch -D` run. Read only |

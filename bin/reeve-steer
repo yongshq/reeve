@@ -57,7 +57,7 @@ errand_session "$id" "$BIN" || die "errand '$id' has no session to steer. relaun
 attn=$("$BIN/reeve-backend" call attention_state "$target" --backend "$backend" 2>/dev/null) || attn=''
 case $attn in
   settled|working) : ;;
-  waiting) die "the hand at $target is waiting at a dialog in its session. Typing would answer it, so nothing was sent. Deny it there, or bring it to the liege." ;;
+  waiting) die "the hand at $target is waiting at a dialog in its session. Typing would answer it, so nothing was sent. Deny it with bin/reeve-deny $id, or bring it to the liege." ;;
   *) die "cannot tell whether the hand at $target is at a dialog: backend $backend answered ${attn:-nothing}. Typing into one would answer it, so nothing was sent. Look at the session yourself: an unverified harness cannot be told apart from a dialog." ;;
 esac
 
