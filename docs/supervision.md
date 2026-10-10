@@ -39,7 +39,8 @@ nothing prompts you to watch again. Start `reeve-sentry` again in the same turn 
 before you report it, whatever the liege is asked.
 
 - Safe while the dialog still stands: that one stall wakes once. The new watch stays quiet over it
-  until the hand reports a line, or a poll sees its session working; after either, its next
+  until the hand reports a line, or a poll reads its session as anything but waiting (working,
+  settled, even unknown, so it errs to an extra wake, never a missed one); after either, its next
   dialog wakes again. A second dialog that follows the first with neither between reads as the
   first, and stays silent.
 - Once the dialog is answered, the listing shows the hand `working` again and no wake comes for it:

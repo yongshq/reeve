@@ -715,7 +715,8 @@ check_one() {
       # spool, and the reeve went on calling it stuck. The code delivered it to
       # the next watch every time; there was no next watch. Re-arming at once
       # is safe: the latch above keeps a dialog that stands from waking it
-      # again, until the hand reports a line or a poll sees it working.
+      # again, until the hand reports a line or a poll reads its session as
+      # anything but waiting (unknown included: an extra wake, never a missed one).
       printf 'signal: %s is waiting for an answer in its session and cannot report it, last said %s. This watch has ended: run reeve-sentry again now, or the answer given in its session and the done that follows reach nobody\n' \
         "$i" "${last:-nothing}"
       return 0
