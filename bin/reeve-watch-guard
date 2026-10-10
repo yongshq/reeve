@@ -19,9 +19,13 @@
 # included, and a finished hand does not. An errand with no recorded owner is
 # not this reeve's to answer for.
 #
-# Not in flight, because no watch could stay running on it: an errand whose
-# hand's session is gone (agent_state dead or missing, the sentry's `stale:`),
-# which makes every watch exit at once on the same line.
+# Not in flight, because no watch could wait on it: an errand whose hand's
+# session is gone (agent_state dead or missing, the sentry's `stale:`). The
+# sentry says that once per gone session, so a watch started after it keeps
+# running over the rest, and the rest are still checked: one send-back, never a
+# loop. Where the sentry cannot record it said (its gone latch unwritten and
+# state/ not writable), every watch repeats it and exits at once, and that
+# counts as started for the whole session.
 #
 # A watch is running when this session's watch marker is live (watch_live_for),
 # or the marker of a session that this one succeeded after /clear: a watch
@@ -30,11 +34,14 @@
 #
 # Counts as started, though no marker is up yet:
 #   - the turn's last reeve-sentry run, read from transcript_path, when it went
-#     to the background and nothing in the turn since says it exited (a task
-#     notification naming its tool call). That covers only the moment before a
-#     fresh watch writes its marker. A run the turn saw finish, in the
-#     foreground or by its notification, is a watch that has stopped, so the
-#     marker alone decides; a watch that at once repeats a line already
+#     to the background and no notification of its exit (a task notification
+#     naming its tool call) was delivered into the turn since, as a
+#     queued_command attachment or a user entry. That covers only the moment
+#     before a fresh watch writes its marker. A notification only enqueued or
+#     dequeued has not reached the reeve: it arrives as the next turn, which
+#     wakes the reeve anyway, so it passes. A run the turn saw finish, in the
+#     foreground or by a delivered notification, is a watch that has stopped,
+#     so the marker alone decides; a watch that at once repeats a line already
 #     reported costs one send-back, never a loop. A run is a Bash tool call
 #     whose command runs it, not as --caretaker, --once or --help. The turn is
 #     everything since the last real user prompt, as for
@@ -149,16 +156,22 @@ NOT_A_WATCH = re.compile(r"(?:^|\s)(?:--caretaker|--once|-h|--help)(?=$|\s)")
 HEREDOC = re.compile(r"(?<!<)<<(?!<)(-?)\s*([\"\x27]?)([A-Za-z_][A-Za-z0-9_]*)\2")
 
 def unheredoc(cmd):
-    kept, ends = [], []
+    kept, ends, held = [], [], []
     for line in cmd.split("\n"):
         if ends:
+            held.append(line)
             strip, word = ends[0]
             if (line.lstrip("\t") if strip else line) == word:
                 ends.pop(0)
+                if not ends:
+                    held = []
             continue
         kept.append(line)
         ends = [(m.group(1) == "-", m.group(3)) for m in HEREDOC.finditer(line)]
-    return "\n".join(kept)
+    # No terminator by the end: a <<WORD bash did not take for a heredoc, or
+    # whose real word runs longer than the one read here. Its lines are
+    # commands after all, so they are kept.
+    return "\n".join(kept + held)
 
 def runs_watch(b):
     # Only what a Bash call runs: a Write whose content names the sentry is not
@@ -202,10 +215,17 @@ def turn(path):
     tid = last.get("id")
     if not isinstance(tid, str) or not tid:
         return False, marker
-    # Its exit, told in this turn: a queued notification, delivered or not.
+    # Its exit, delivered into this turn: a notification queued into it as an
+    # attachment, or a user entry. A queue-operation line is written the
+    # moment the watch exits, before the reeve has seen anything, and its
+    # notification then arrives as the next turn and wakes the reeve anyway.
     tag = "<tool-use-id>%s</tool-use-id>" % tid
-    for line, _ in entries[at + 1:]:
-        if tag in line:
+    for line, e in entries[at + 1:]:
+        if tag not in line or not isinstance(e, dict):
+            continue
+        kind = e.get("type")
+        if kind == "user" or (kind == "attachment" and
+                              (e.get("attachment") or {}).get("type") == "queued_command"):
             return False, marker
     return True, marker
 
@@ -237,6 +257,15 @@ key=$(printf '%s\n' "$out" | sed -n 4p)
 [ "$psid" = "$sid" ] || pass 'session id read two ways disagrees'
 [ "$ran" = 0 ] || exit 0
 
+# A gone session's `stale:` that no watch can record as said: every watch says
+# it again and exits at once, which the sentry warns about, and AGENTS.md
+# section 6 counts that repeat as started. Recorded, a watch stays quiet over it.
+gone_stuck() {
+  local latch
+  latch=$(stale_latch "$1" "$(stale_mark "$1")" gone) && [ "${latch#* }" = yes ] && return 1
+  [ ! -w "$REEVE_HOME_D/state" ]
+}
+
 # The costly half last: one backend call per errand still standing. A session
 # that is gone is the sentry's `stale:`, not work a watch could wait on. One
 # that cannot be read is not proof of anything, so it stays in flight.
@@ -244,7 +273,7 @@ left=''
 while IFS= read -r i; do
   [ -n "$i" ] || continue
   if errand_session "$i" "$BIN"; then
-    case $live in dead|missing) continue ;; esac
+    case $live in dead|missing) gone_stuck "$i" && exit 0; continue ;; esac
   fi
   left="$left${left:+, }$i"
 done <<EOS

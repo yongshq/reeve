@@ -15,11 +15,16 @@
 #      another session's, nobody's
 #   7. every unfinished state is in flight: blocked, an open question, a
 #      divergence, no line yet
-#   8. a stale errand (session dead or missing) is not in flight; unreadable is
+#   8. a stale errand (session dead or missing) is not in flight; unreadable is.
+#      Beside a live one it is sent back once, and a real sentry's next watch
+#      keeps running past the gone session, so no loop; where the sentry cannot
+#      record it said, the at once repeat counts as started
 #   9. the last watch of this turn counts while it is still starting: run in
-#      the background and no notification of its exit since. One that ran in
-#      the foreground or was told exiting, one from an earlier turn, --once,
-#      --caretaker, a mention, another tool's text or a heredoc body does not
+#      the background and no notification of its exit delivered into the turn
+#      since (only enqueued or dequeued is not delivered). One that ran in the
+#      foreground or was told exiting, one from an earlier turn, --once,
+#      --caretaker, a mention, another tool's text or a heredoc body does not;
+#      a heredoc start with no terminator keeps its lines
 #  10. a spool that cannot be delivered passes
 #  11. malformed input or a missing tool passes: one stderr note for a reeve
 #  12. the plugin and the clone both register it for Stop
@@ -284,8 +289,39 @@ cat >> "$STUB/backends/stub.sh" <<'ADAPTER'
 reeve_backend_stub_agent_state() { case $1 in stub:2) printf 'alive\n' ;; *) printf '%s\n' "${STUB_STATE:-alive}" ;; esac; }
 ADAPTER
 OUT=$(STUB_STATE=dead "$G" <<<"$(hook reeve-sid "$T")" 2>&1)
-ck_has '8 stale and live together: sent back' "$OUT" "$BLOCK"
+ck_has '8 stale and live together, no watch: sent back' "$OUT" "$BLOCK"
 ck_has '8 naming only the live one' "$OUT" 'running: l8.'
+# The sentry says the gone session once, so the watch the send-back asks for
+# keeps running over the live one: one send-back, never a loop.
+sentry8() { STUB_STATE=dead REEVE_SESSION=reeve-sid "$ROOT/bin/reeve-sentry" --poll 1 --timeout 20 --no-reap 2>/dev/null; }
+OUT=$(sentry8); RC=$?
+ck_has '8 a first watch says the gone session' "$RC $OUT" '0 stale: s8 '
+sentry8 >/dev/null & W=$!
+n=0
+while [ ! -f "$REEVE_HOME/state/.sentry.watch-reeve-sid" ] && kill -0 "$W" 2>/dev/null && [ "$n" -lt 50 ]; do sleep 0.2; n=$((n+1)); done
+sleep 1
+if kill -0 "$W" 2>/dev/null; then ok '8 the next watch keeps running past it'; else bad '8 the next watch keeps running past it' 'it exited'; fi
+OUT=$(STUB_STATE=dead "$G" <<<"$(hook reeve-sid "$T")" 2>&1)
+ck_eq '8 that watch running: passes' "$OUT" ''
+kill "$W" 2>/dev/null; wait "$W" 2>/dev/null
+# Where the sentry cannot record it said, every watch repeats it and exits at
+# once, which counts as started. A latch already recorded still holds.
+rm -f "$REEVE_HOME/state/.sentry.watch-reeve-sid"
+chmod a-w "$REEVE_HOME/state"
+if [ -w "$REEVE_HOME/state" ]; then
+  ok '8 latch unwritable: skipped, cannot make a directory read only here'
+else
+  rm -rf "$REEVE_HOME"/state/sessions/*/watch-guard.*
+  OUT=$(STUB_STATE=dead "$G" <<<"$(hook reeve-sid "$T")" 2>&1)
+  ck_has '8 said and recorded, state read only: still sent back' "$OUT" "$BLOCK"
+  chmod u+w "$REEVE_HOME/state"; rm -f "$REEVE_HOME/state/.gone-s8"; chmod a-w "$REEVE_HOME/state"
+  OUT=$(sentry8); RC=$?
+  ck_has '8 latch unwritable: the watch repeats it at once' "$RC $OUT" '0 stale: s8 '
+  rm -rf "$REEVE_HOME"/state/sessions/*/watch-guard.*
+  OUT=$(STUB_STATE=dead "$G" <<<"$(hook reeve-sid "$T")" 2>&1)
+  ck_eq '8 latch unwritable: counts as started, passes' "$OUT" ''
+fi
+chmod u+w "$REEVE_HOME/state"
 
 # --- 9. a watch started this turn ------------------------------------------------------------
 # tx <file> <step>...: a transcript from steps, after an opening prompt.
@@ -295,6 +331,8 @@ ck_has '8 naming only the live one' "$OUT" 'running: l8.'
 #   tool:<name>:<field>:<text>  another tool's call, carrying text
 #   qc:<id>                     the notification of <id>'s exit, queued into the turn
 #   qo:<id>                     the same notification, only enqueued
+#   qd                          a queue dequeue, which names nothing
+#   um:<id>                     the same notification, a meta user entry in the turn
 #   note:<id>                   the same notification, delivered as a turn of its own
 tx() {
   python3 -c '
@@ -329,6 +367,10 @@ for s in steps:
             "origin": {"kind": "task-notification"}}})
     elif kind == "qo":
         rows.append({"type": "queue-operation", "operation": "enqueue", "content": notice(rest)})
+    elif kind == "um":
+        rows.append({"type": "user", "isMeta": True, "message": {"role": "user", "content": notice(rest)}})
+    elif kind == "qd":
+        rows.append({"type": "queue-operation", "operation": "dequeue"})
     elif kind == "note":
         rows.append({"type": "user", "uuid": "n%d" % len(rows), "origin": {"kind": "task-notification"},
                      "message": {"role": "user", "content": notice(rest)}})
@@ -360,7 +402,11 @@ done
 # Seen to end inside the turn: the marker alone decides.
 guard9 back 'ran in the foreground (probe B)' prompt "fg:t1:$W9"
 guard9 back 'its exit queued into the turn (probe C)' prompt "bg:t1:$W9" qc:t1
-guard9 back 'its exit only enqueued' prompt "bg:t1:$W9" qo:t1
+guard9 back 'its exit enqueued, then queued into the turn' prompt "bg:t1:$W9" qo:t1 qd qc:t1
+guard9 back 'its exit a user entry inside the turn' prompt "bg:t1:$W9" um:t1
+# Only enqueued or dequeued: not delivered yet, it arrives as the next turn.
+guard9 pass 'its exit only enqueued' prompt "bg:t1:$W9" qo:t1
+guard9 pass 'its exit enqueued and dequeued, not delivered' prompt "bg:t1:$W9" qo:t1 qd
 guard9 pass 'another call notified' prompt "bg:t1:$W9" qc:t7
 guard9 back 'its exit a turn of its own, not restarted (probe A)' prompt "bg:t1:$W9" note:t1
 guard9 pass 'its exit a turn of its own, restarted there' prompt "bg:t1:$W9" note:t1 "bg:t2:$W9"
@@ -389,6 +435,15 @@ guard9 pass 'indented heredoc, then the watch after it' prompt "bg:t1:cat > /x/b
 	END
 $W9"
 guard9 pass 'a here-string is not a heredoc' prompt "bg:t1:cat <<<x; $W9"
+# A start that finds no terminator was no heredoc: its lines are kept.
+guard9 pass 'a quoted <<EOF, then the watch' prompt "bg:t1:echo \"a <<EOF\"
+$W9"
+guard9 pass 'a shift, then the watch' prompt "bg:t1:x=\$((1<<y))
+$W9"
+guard9 pass 'a delimiter longer than read, then the watch' prompt "bg:t1:cat <<EOF-1
+hi
+EOF-1
+$W9"
 
 # --- 10. an undeliverable spool ----------------------------------------------------------------
 fresh 10

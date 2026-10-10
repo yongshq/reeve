@@ -55,13 +55,17 @@ wake, not only `waiting`: a reeve that ends a turn with an errand of its own unf
 or `failed`) and no live watch marker for its session is sent back once, to start `reeve-sentry` in
 the background. Before its marker is up, a fresh watch counts as started only if it is the turn's
 last `reeve-sentry` run (a Bash command, not a mention elsewhere), went to the background, and no
-notification of its exit has reached the turn since. A watch that ran in the foreground, or whose
-exit the turn already saw, has stopped, so the marker alone decides: a compliant reeve whose fresh
-watch exits at once on a line it already reported is sent back once for that turn, never in a
+notification of its exit has been delivered into the turn since. One only enqueued or dequeued has
+not: it arrives as the next turn and wakes the reeve anyway. A watch that ran in the foreground, or
+whose exit the turn already saw, has stopped, so the marker alone decides: a compliant reeve whose
+fresh watch exits at once on a line it already reported is sent back once for that turn, never in a
 loop. A spool it could not deliver from also counts as started. An errand whose session is gone
-(the sentry's `stale:`) does not count as in flight, since no watch could stay running on it. The
-marker is read before any errand record, and the records are narrowed by one search for this
-session, so a reeve with a watch running pays almost nothing per turn.
+(the sentry's `stale:`) does not count as in flight, but the rest still do: the gone session is
+said once (below), so the watch started after it keeps running over them. Where the sentry cannot
+record it said (its latch unwritten and `state/` read only), every watch repeats it and exits at
+once, and that counts as started. The marker is read before any errand record, and the records are
+narrowed by one search for this session, so a reeve with a watch running pays almost nothing per
+turn.
 
 ## `stale`: once per gone session
 
