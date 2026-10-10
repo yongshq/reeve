@@ -684,18 +684,25 @@ check_one() {
   # The turn is over, so a wedge in it is too: the wedged latch, below.
   case $attn in settled|waiting) rm -f "$(stale_file "$i" wedged)" ;; esac
   if [ "$attn" = waiting ]; then
-    since=''; woke=no
-    [ -f "$af" ] && read -r since woke < "$af"
+    since=''; woke=no; told=''
+    [ -f "$af" ] && read -r since woke told < "$af"
     nowsec=$(attn_now)
+    # A latch that woke while the status file held a different number of lines
+    # is a dialog already answered: the hand reported since, which it cannot do
+    # stopped at one. So this is a new stall, and its dwell starts now. A latch
+    # with no count, written before it carried one, is kept as it is.
+    case ${woke:-no}:${told:-} in yes:'') : ;; yes:"$now") : ;; yes:*) since='' ;; esac
     case ${since:-} in ''|*[!0-9]*) since=$nowsec; woke=no; printf '%s %s\n' "$since" no > "$af" ;; esac
     # Two guards, and they are different guards. The dwell is against a reading
     # taken in the instant between two tool calls. The latch is against saying
     # the same thing every poll for as long as the dialog stands: one stall is
-    # one wake. Both live in this one file, and any value other than `waiting`
-    # deletes it, so a hand that gets answered and stalls again is reported
-    # again.
+    # one wake. Both live in this one file. Any value other than `waiting`
+    # deletes it, and so does a line the hand reported since the wake, so a hand
+    # that gets answered and stalls again is reported again if either was seen
+    # between. A second dialog that followed the first with no line between and
+    # no poll that saw the hand working reads as the first, and stays silent.
     if [ "${woke:-no}" != yes ] && [ $(( nowsec - since )) -ge "$attn_dwell" ]; then
-      printf '%s yes\n' "$since" > "$af"
+      printf '%s yes %s\n' "$since" "$now" > "$af"
       last=$(status_field "$i" last)
       # Never reaped, for the reason `blocked:` is never reaped: it can still be
       # steered, and the session is the only place the question exists.
@@ -707,8 +714,9 @@ check_one() {
       # hand finished, reported `done:`, the caretaker left that line in the
       # spool, and the reeve went on calling it stuck. The code delivered it to
       # the next watch every time; there was no next watch. Re-arming at once
-      # is safe: the latch above keeps this same dialog from waking it again.
-      printf 'signal: %s is waiting for an answer in its session and cannot report it, last said %s. This watch has ended: run bin/reeve-sentry again now, or the answer given in its session and the done that follows reach nobody\n' \
+      # is safe: the latch above keeps a dialog that stands from waking it
+      # again, until the hand reports a line or a poll sees it working.
+      printf 'signal: %s is waiting for an answer in its session and cannot report it, last said %s. This watch has ended: run reeve-sentry again now, or the answer given in its session and the done that follows reach nobody\n' \
         "$i" "${last:-nothing}"
       return 0
     fi

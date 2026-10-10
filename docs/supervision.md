@@ -2,7 +2,8 @@
 
 `AGENTS.md` section 6 holds the rules a reeve acts on. This file holds only what that section does
 not say: what a caretaker's line promises, why a `waiting` wake must be followed by a new watch at
-once, and the exact thresholds and limits behind `idle` and `wedged`. Read it when a wake, a listing or a silence does not match what you expected.
+once, and the exact thresholds and limits behind `idle` and `wedged`. Read it when a wake, a
+listing or a silence does not match what you expected.
 
 ## What a caretaker's line promises
 
@@ -34,11 +35,13 @@ within one of its polls, after leaving the terminal line in your spool if it is 
 
 Every wake ends the watch, `waiting` included. A `waiting` errand is usually cleared by the liege
 answering the dialog in the hand's own session, which gives you no turn: no reply arrives, so
-nothing prompts you to watch again. Start `bin/reeve-sentry` again in the same turn as the wake,
+nothing prompts you to watch again. Start `reeve-sentry` again in the same turn as the wake,
 before you report it, whatever the liege is asked.
 
-- Safe while the dialog still stands: that one stall wakes once, so the new watch stays quiet until
-  something changes.
+- Safe while the dialog still stands: that one stall wakes once. The new watch stays quiet over it
+  until the hand reports a line, or a poll sees its session working; after either, its next
+  dialog wakes again. A second dialog that follows the first with neither between reads as the
+  first, and stays silent.
 - Once the dialog is answered, the listing shows the hand `working` again and no wake comes for it:
   progress, not news.
 - The hand's later `done:`, `failed:`, `blocked:` or `needs-decision` reaches that watch as an

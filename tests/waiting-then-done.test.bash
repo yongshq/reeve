@@ -17,6 +17,8 @@
 #      itself wakes nobody, and every way the hand can then report reaches the
 #      next watch as an ordinary wake, with and without a watch running at the
 #      time
+#   3. a second dialog after the first was answered wakes again once the hand
+#      reported a line between, even when no poll ever saw it working
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 
 PASS=0; FAIL=0
@@ -76,7 +78,7 @@ ck_eq  "1 the dialog wakes the reeve"                    "$RC" 0
 ck_has "1 as waiting"                                    "$OUT" "hand is waiting for an answer in its session"
 ck_has "1 quoting what it last said"                     "$OUT" "reading the upload path"
 ck_has "1 and saying this watch has ended"               "$OUT" "This watch has ended"
-ck_has "1 and what to run so the done is not lost"       "$OUT" "run bin/reeve-sentry again now"
+ck_has "1 and what to run so the done is not lost"       "$OUT" "run reeve-sentry again now"
 ck_eq  "1 still one line"                                "$(printf '%s\n' "$OUT" | grep -c .)" 1
 
 # --- 2. step by step, a watch started again at each stage --------------------
@@ -167,6 +169,39 @@ for st in done failed; do
   sentry --once
   ck_eq  "5 $st: once, not again"                          "$RC" 3
 done
+
+# --- 6. answered, reported, stalled again before any poll saw it working -----
+# The latch from the first wake is still on disk, `yes`, because nothing deleted
+# it: every poll that looked saw `waiting`. The line the hand reported between is
+# what tells the two dialogs apart.
+fresh h6
+sentry --once
+ck_eq  "6 the first dialog wakes the reeve"              "$RC" 0
+report 'working: step two'
+sentry --once
+ck_eq  "6 the second dialog wakes the next watch"        "$RC" 0
+ck_has "6 as waiting"                                    "$OUT" "hand is waiting for an answer in its session"
+ck_has "6 quoting the line reported between"             "$OUT" "step two"
+sentry --once
+ck_eq  "6 and that second stall wakes once, not again"   "$RC" 4
+
+# 6b. the same with a dwell: the reported line starts a fresh one rather than
+#     waking on the old dialog's clock.
+fresh h6b
+sentry --once
+report 'working: step two'
+OUT=$(REEVE_ATTN_DWELL=3600 "$ROOT/bin/reeve-sentry" --once 2>&1); RC=$?
+ck_eq  "6b inside a fresh dwell the second dialog is quiet" "$RC" 4
+read -r _ w6b _ < "$REEVE_HOME/state/.attn-hand"
+ck_eq  "6b its latch is re-armed"                        "$w6b" no
+
+# 6c. a latch written before it carried a count reads as it always did: that
+#     dialog has woken, and it stays quiet.
+fresh h6c
+printf '%s yes\n' "$(date +%s)" > "$REEVE_HOME/state/.attn-hand"
+report 'working: step two'
+sentry --once
+ck_eq  "6c an old two-field latch still keeps it quiet"  "$RC" 4
 
 echo
 echo "passed=$PASS failed=$FAIL"
