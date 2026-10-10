@@ -2,14 +2,17 @@
 # bin/reeve-deny, against a stub backend so no terminal is involved, then the
 # herdr op it rests on, against a fake herdr. Covered:
 #   1. a dialog that goes: the key is sent once, it says so, and says steer next
-#   2. a dialog that persists, or a session that cannot be read after, is said
-#      as such, and exits 2
+#   2. a dialog that persists, a session that cannot be read after, or a hand
+#      working after (raced with an answer in the session) is said as such, and
+#      exits 2
 #   3. a session not at a dialog, or one it cannot tell is not, gets no key
 #   4. an unknown, cleaned up or sessionless errand, or a gone session, is
 #      refused and gets no key
-#   5. a backend that cannot deny, or a send that fails, records nothing
+#   5. a backend that cannot deny, a send that fails, or a dialog gone by the
+#      backend's last look before the key, records nothing
 #   6. the denial is one line in the errand's record, never the status file
-#   7. herdr: Escape to the target's own pane, and nothing to a pane that is not
+#   7. herdr: Escape to the target's own pane, and nothing to a pane that is not,
+#      or to one that no longer reads waiting just before the key
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 
 PASS=0; FAIL=0
@@ -37,7 +40,8 @@ mkdir -p "$REEVE_ROOT/backends" "$REEVE_HOME/state" "$REEVE_HOME/errands/hung"
 # holding: so a test says what the dialog does. Each reading after the key is
 # logged in STUB_ACTS.
 export STUB_ATTN="$SCRATCH/attn" STUB_AFTER="$SCRATCH/after" STUB_SEQ="$SCRATCH/seq" \
-       STUB_ACTS="$SCRATCH/acts" STUB_LIVE="$SCRATCH/live" STUB_SENDFAIL="$SCRATCH/sendfail"
+       STUB_ACTS="$SCRATCH/acts" STUB_LIVE="$SCRATCH/live" STUB_SENDFAIL="$SCRATCH/sendfail" \
+       STUB_GONE="$SCRATCH/gone"
 cat > "$REEVE_ROOT/backends/stub.sh" <<'STUB'
 reeve_backend_stub_available()        { return 0; }
 reeve_backend_stub_describe()         { echo stub; }
@@ -51,6 +55,7 @@ reeve_backend_stub_attention_state()  {
 reeve_backend_stub_send_text_submit() { printf 'send %s\n' "$*" >> "$STUB_ACTS"; }
 reeve_backend_stub_dismiss_dialog()   {
   [ -f "$STUB_SENDFAIL" ] && return 1
+  [ -f "$STUB_GONE" ] && return 3
   printf 'deny %s\n' "$*" >> "$STUB_ACTS"
   [ -f "$STUB_AFTER" ] && cp "$STUB_AFTER" "$STUB_SEQ"
   return 0
@@ -67,7 +72,7 @@ fresh() { # fresh <attention now> [<each attention after the key>...]
   printf '%s\n' "$1" > "$STUB_ATTN"
   shift
   if [ $# -gt 0 ]; then printf '%s\n' "$@" > "$STUB_AFTER"; else rm -f "$STUB_AFTER"; fi
-  rm -f "$STUB_SEQ" "$STUB_LIVE" "$STUB_SENDFAIL"; : > "$STUB_ACTS"
+  rm -f "$STUB_SEQ" "$STUB_LIVE" "$STUB_SENDFAIL" "$STUB_GONE"; : > "$STUB_ACTS"
 }
 deny() { OUT=$("$ROOT/bin/reeve-deny" "$@" 2>&1); RC=$?; }
 sent()   { grep -v '^read$' "$STUB_ACTS"; }
@@ -84,10 +89,7 @@ ck_has "1 it says the dialog is gone"                      "$OUT" "it is gone, t
 ck_has "1 and says to steer next"                          "$OUT" "steer it next: bin/reeve-steer hung <text>"
 ck_eq  "1 one fact per line, two lines"                    "$(printf '%s\n' "$OUT" | grep -c .)" 2
 ck_not "1 nothing is typed, only the key"                  "$(sent)" "send "
-fresh waiting working
-deny hung
-ck_eq  "1 a hand back at work after it is a success too"   "$RC" 0
-ck_has "1 and says so"                                     "$OUT" "the hand is working"
+
 
 # --- 2. a dialog that stays --------------------------------------------------
 fresh waiting waiting
@@ -98,6 +100,19 @@ ck_eq  "2 the key was sent once, not once per reading"     "$(sent | grep -c .)"
 ck_has "2 it says a dialog still stands"                   "$OUT" "a dialog still stands"
 ck_has "2 and what to do"                                  "$OUT" "bring it to the liege"
 ck_not "2 and never says to steer"                         "$OUT" "steer it next"
+# A hand working after the key: a real deny ends the turn at the composer, so
+# the dialog was likely answered in the session first, and the key may have
+# interrupted the turn that answer started.
+fresh waiting working
+deny hung
+ck_eq  "2 a hand working after the key exits 2"            "$RC" 2
+ck_eq  "2 read once, a working hand is no repaint"         "$(reads)" 1
+ck_has "2 it says the hand is working"                     "$OUT" "but the hand is working"
+ck_has "2 that the dialog may have been answered first"    "$OUT" "may have been answered in its session before the key landed"
+ck_has "2 that the key may have interrupted the turn"      "$OUT" "Escape may have interrupted that turn"
+ck_has "2 and to look before steering"                     "$OUT" "look at the session before steering it"
+ck_not "2 and never says it is gone"                       "$OUT" "it is gone"
+ck_not "2 nor to steer next"                               "$OUT" "steer it next"
 for a in unknown ''; do
   fresh waiting "$a"
   deny hung
@@ -160,6 +175,16 @@ ck_eq  "5 a failed send fails"                             "$RC" 1
 ck_has "5 and says so"                                     "$OUT" "could not deny the dialog"
 ck_eq  "5 and records nothing"                             "$(denied)" ""
 fresh waiting settled
+touch "$STUB_GONE"
+deny hung
+ck_eq  "5 a dialog gone by the backend's last look fails"  "$RC" 1
+ck_has "5 and says it no longer reads waiting"             "$OUT" "no longer reads waiting"
+ck_has "5 that it may have been answered there"            "$OUT" "may have been answered in its session"
+ck_has "5 that nothing was sent"                           "$OUT" "Nothing was sent"
+ck_not "5 and is not taken for a failed send"              "$OUT" "could not deny"
+ck_eq  "5 and records nothing"                             "$(denied)" ""
+ck_eq  "5 nor reads the session after"                     "$(reads)" 0
+fresh waiting settled
 sed -i.bak 's/^backend=.*/backend=bare/' "$META"; rm -f "$META.bak"
 deny hung
 ck_eq  "5 a backend that cannot deny is refused"           "$RC" 1
@@ -177,6 +202,8 @@ ck_has "6 with its outcome"                                "$(denied)" " cleared
 ck_has "6 and its time"                                    "$(denied)" "denied=20"
 fresh waiting waiting; deny hung
 ck_has "6 a dialog that stayed is recorded as such"        "$(denied)" " still-standing"
+fresh waiting working; deny hung
+ck_has "6 a hand that raced is recorded as such"           "$(denied)" " raced"
 fresh waiting waiting; printf 'denied=old\n' >> "$META"; deny hung
 ck_eq  "6 a second denial replaces the line, not adds one" "$(denied | grep -c .)" 1
 fresh waiting settled
@@ -193,7 +220,8 @@ ck_has "6 and says it is not on disk"                      "$OUT" "this denial i
 
 # --- 7. herdr ---------------------------------------------------------------------
 # A fake herdr: STUB_CWD is the directory every pane reports, STUB_KEYFAIL makes
-# send-keys fail, and argv is logged.
+# send-keys fail, STUB_EXPLAIN is the `agent explain` document (a dialog by
+# default), and argv is logged.
 if ! command -v jq >/dev/null 2>&1; then
   printf 'skip  the herdr op needs jq, which this backend requires anyway\n'
 else
@@ -206,6 +234,7 @@ case "$1 $2" in
   'pane get')       printf '{"result":{"pane":{"pane_id":"%s","cwd":"%s"}}}\n' "$3" "${STUB_CWD:-}" ;;
   'tab get')        printf '{"result":{"tab":{"tab_id":"%s","label":"someone else"}}}\n' "$3" ;;
   'pane send-keys') [ -n "${STUB_KEYFAIL:-}" ] && exit 1; printf '{"result":{"type":"ok"}}\n' ;;
+  'agent explain')  printf '%s\n' "${STUB_EXPLAIN-{\"state\":\"blocked\"}}" ;;
   *) exit 1 ;;
 esac
 HERDR
@@ -219,14 +248,25 @@ HERDR
   ck_has "7 to the target's own pane, on its session"      "$(cat "$STUB_LOG")" "pane send-keys w7:p9 esc --session stub"
   ck_not "7 and nothing that could answer yes"             "$(cat "$STUB_LOG")" "enter"
   ck_not "7 nor any text"                                  "$(cat "$STUB_LOG")" "pane run"
+  for doc in '{"state":"working"}' '{"state":"idle","evaluated_rules":[{"id":"live_prompt_box","matched":true}]}' '' 'nonsense'; do
+    STUB_EXPLAIN=$doc hd 'w7|w7:p9|w7:t9'; rc=$?
+    ck_eq  "7 a pane no longer at a dialog, explain '${doc}', is rc 3" "$rc" 3
+    ck_not "7 and gets no key"                             "$(cat "$STUB_LOG")" "send-keys"
+  done
+  STUB_EXPLAIN='{"state":"idle","evaluated_rules":[{"id":"live_prompt_box","matched":false}]}' hd 'w7|w7:p9|w7:t9'; rc=$?
+  ck_eq  "7 a covered composer still reads as a dialog"    "$rc" 0
+  ck_has "7 so it gets the key"                            "$(cat "$STUB_LOG")" "pane send-keys w7:p9 esc"
   STUB_KEYFAIL=1 hd 'w7|w7:p9|w7:t9'; rc=$?
   ck_eq  "7 a key herdr did not take is a failure"         "$rc" 1
   STUB_CWD=$copy hd "w7|w7:p9|w7:t9#c${sum}l1"; rc=$?
   ck_eq  "7 a pane that is still its own gets the key"     "$rc" 0
   ck_has "7 so"                                            "$(cat "$STUB_LOG")" "pane send-keys w7:p9 esc"
+  ck_eq  "7 the screen is read again, after the identity, just before the key" \
+         "$(cut -d' ' -f1,2 "$STUB_LOG" | tr '\n' ,)" "pane get,agent explain,pane send-keys,"
   STUB_CWD=/elsewhere hd "w7|w7:p9|w7:t9#c${sum}l1"; rc=$?
   ck_eq  "7 a pane that is someone else's now is refused"  "$rc" 1
   ck_not "7 and gets no key"                               "$(cat "$STUB_LOG")" "send-keys"
+  ck_not "7 nor is its screen read"                        "$(cat "$STUB_LOG")" "agent explain"
 fi
 
 echo

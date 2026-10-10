@@ -19,7 +19,7 @@
 # Refuses an errand it cannot steer: one that is not known, finished, cleaned
 # up, or whose session is gone. Refuses too a session standing at a dialog: the
 # text would land in the dialog and answer it, which is never the reeve's to do.
-# Deny it or bring it to the liege, in the session itself. And a session it
+# Deny it with bin/reeve-deny, or bring it to the liege. And a session it
 # cannot tell from one, for the same reason: an unverified harness answers
 # `unknown`, whatever is on the screen.
 #

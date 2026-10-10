@@ -127,6 +127,7 @@ steer hung 'yes'
 ck_eq  "4 a session at a dialog is refused"                "$RC" 1
 ck_has "4 and says why"                                    "$OUT" "waiting at a dialog"
 ck_has "4 and what to do instead"                          "$OUT" "bring it to the liege"
+ck_has "4 and names the command that denies it"            "$OUT" "bin/reeve-deny hung"
 ck_eq  "4 nothing was typed into it"                       "$(sent)" ""
 ck_eq  "4 nor the latch cleared"                           "$(latched)" kept
 

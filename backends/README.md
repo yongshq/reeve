@@ -41,7 +41,7 @@ the call, and every caller treats that refusal as a no and carries on.
 | `pane_gone` | `<pane-id> <socket>` | nothing | 0 only when the server on `<socket>` answers that the pane is not there. Anything it cannot check is 1. Used to free a group whose reeve's pane has closed |
 | `pane_vacant` | `<pane-id> <socket>` | nothing | 0 only when that server answers that the pane is gone or runs no harness. Anything it cannot check is 1. Used so a reeve that crashed stops holding its name |
 | `group_gone` | `<target>` | nothing | 0 only when the target opened inside a group and the server answers that group is gone. Used by the sentry to say a hand died with its reeve's workspace |
-| `dismiss_dialog` | `<target>` | nothing | 0 if the backend's way of saying no to a dialog was sent: herdr presses Escape. Never anything that could answer Allow. Says nothing about whether the dialog went; the caller reads `attention_state` again. Used by `bin/reeve-deny` |
+| `dismiss_dialog` | `<target>` | nothing | 0 if the backend's way of saying no to a dialog was sent: herdr presses Escape. Never anything that could answer Allow. 3, nothing sent, if the session no longer reads `waiting` just before the key. Says nothing about whether the dialog went; the caller reads `attention_state` again. Used by `bin/reeve-deny` |
 
 A group is a reeve's own place, labelled with its name, and its hands open inside it: herdr tabs in
 its workspace. The group id, like a target, is opaque to callers; only the backend that printed it

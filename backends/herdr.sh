@@ -391,8 +391,21 @@ reeve_backend_herdr_dismiss_dialog() {
   # paints. Never Enter, never a typed answer: either could be Allow. The
   # caller has already seen the session waiting and reads it again after, so
   # this says only that the key was sent.
+  #
+  # The caller's read is several herdr calls old by now, and a dialog answered
+  # in the session meanwhile leaves a running turn that Escape would interrupt.
+  # So the screen is read once more, after the identity check, and the key goes
+  # only if it still reads waiting: rc 3, nothing sent, if not. That narrows the
+  # window to one call. It cannot close it: herdr has no conditional send.
+  local pane a
+  pane=$(_h_pane "$1")
   _h_verified "$1" || { _h_refuse "$1"; return 1; }
-  _h pane send-keys "$(_h_pane "$1")" esc >/dev/null
+  a=$(_h_attn_from_explain "$(_h agent explain "$pane" --json)")
+  if [ "$a" != waiting ]; then
+    echo "herdr: $(_h_base "$1") reads $a, not waiting, just before the key, so nothing was sent" >&2
+    return 3
+  fi
+  _h pane send-keys "$pane" esc >/dev/null
 }
 
 reeve_backend_herdr_target_exists() {

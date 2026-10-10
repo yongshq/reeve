@@ -265,11 +265,11 @@ Escalate when, and only when:
   dependency, an unset env file, a wrong base branch are yours to fix by re-dispatching.
 - An errand finished. Report it.
 - The sentry said an errand is `waiting`. In order: **deny** the dialog with `bin/reeve-deny` (the
-  hand loses one route, not its errand); once it is gone, **steer** it with `bin/reeve-steer` (which refuses while one
-  stands), since most errands have another way through; **escalate** only if it truly cannot
-  proceed without the power, as a question with a recommendation. Never answer Allow (hard rule
-  7). If only the liege can clear it, in the session itself, say where it is running and what it
-  last reported, with the watch already started again (section 6).
+  hand loses one route, not its errand); once it is gone, **steer** it with `bin/reeve-steer` (which
+  refuses while one stands), since most errands have another way through; **escalate** only if it
+  truly cannot proceed without the power, as a question with a recommendation. Never answer Allow
+  (hard rule 7). If only the liege can clear it, in the session itself, say where it is running and
+  what it last reported, with the watch already started again (section 6).
 - The sentry said an errand is `idle`. Look at the session first. If its turn died, steer it
   back to its brief with `bin/reeve-steer`, then tell the liege what the silence cost. Never reap
   it: the session is still holding the work, and steering is what recovers it.

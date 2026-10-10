@@ -13,15 +13,23 @@
 # that is working, settled, or cannot be told from one at a dialog. Refuses too
 # an errand that is not known, cleaned up, or whose session is gone.
 #
+# The backend looks once more just before the key, and sends nothing if the
+# dialog went meanwhile, most likely answered in the session. That narrows the
+# race with the liege's own answer; it cannot close it.
+#
 # After sending, reads the session again and says whether the dialog is gone.
-# Gone, steer the hand next with bin/reeve-steer, which refuses while one
-# stands. Still standing, it may be the next dialog, or the key did not take.
+# Gone, the hand settled, steer it next with bin/reeve-steer, which refuses
+# while one stands. Working instead, it raced: the dialog was likely answered
+# in the session before the key landed, and the key may have interrupted that
+# turn, so look at it first. Still standing, it may be the next dialog, or the
+# key did not take.
 #
-# Writes one line to the errand's record, `denied=<time> <outcome>`, so the
-# denial is on disk, and never the status file, which is the hand's.
+# Writes one line to the errand's record, `denied=<time> <outcome>`, outcome
+# one of cleared, raced, still-standing, unknown, so the denial is on disk, and
+# never the status file, which is the hand's.
 #
-# Exit: 0 the dialog is gone, 1 refused or nothing sent, 2 sent but a dialog
-# still stands or the session cannot be read.
+# Exit: 0 the dialog is gone, 1 refused or nothing sent, 2 sent but the hand
+# raced, a dialog still stands, or the session cannot be read.
 
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/reeve-lib.sh"
 BIN=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -46,8 +54,14 @@ case $a in
   *) die "cannot tell whether the hand at $target is at a dialog: backend $backend answered ${a:-nothing}. Nothing was sent. Look at the session yourself." ;;
 esac
 
-"$BIN/reeve-backend" call dismiss_dialog "$target" --backend "$backend" \
-  || die "could not deny the dialog at $target. Nothing was recorded. Look at the session yourself, or bring it to the liege."
+# Exit 3 is the backend's own last look, just before the key: the dialog went
+# meanwhile, most likely answered in the session, so no key was sent.
+"$BIN/reeve-backend" call dismiss_dialog "$target" --backend "$backend"; rc=$?
+case $rc in
+  0) : ;;
+  3) die "the hand at $target no longer reads waiting: the dialog may have been answered in its session. Nothing was sent. Look at the session before steering it." ;;
+  *) die "could not deny the dialog at $target. Nothing was recorded. Look at the session yourself, or bring it to the liege." ;;
+esac
 
 # A screen takes a moment to repaint after the key, so a dialog still on it is
 # read again before it counts.
@@ -58,10 +72,14 @@ while :; do
   n=$((n + 1)); sleep 1
 done
 
+# A real deny rejects the tool and ends the turn at the composer: settled. A
+# hand working after the key was most likely answered in its session before the
+# key landed, and the key may have interrupted the turn that answer started.
 case $a in
-  settled|working) out=cleared ;;
-  waiting)         out=still-standing ;;
-  *)               out=unknown ;;
+  settled) out=cleared ;;
+  working) out=raced ;;
+  waiting) out=still-standing ;;
+  *)       out=unknown ;;
 esac
 meta_set "$id" denied "$(date +%Y-%m-%dT%H:%M:%S) $out" 2>/dev/null \
   || warn "cannot write $(meta_file "$id"), so this denial is not on disk"
@@ -70,6 +88,10 @@ case $out in
   cleared)
     info "denied the dialog at $target: it is gone, the hand is $a"
     info "steer it next: bin/reeve-steer $id <text>" ;;
+  raced)
+    info "sent no to the dialog at $target, but the hand is working: the dialog may have been answered in its session before the key landed, and Escape may have interrupted that turn"
+    info "look at the session before steering it"
+    exit 2 ;;
   still-standing)
     info "denied the dialog at $target, but a dialog still stands: the next one, or the key did not take"
     info "deny again: bin/reeve-deny $id, or bring it to the liege"
