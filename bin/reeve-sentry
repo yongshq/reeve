@@ -523,7 +523,7 @@ wake_owed() { # wake_owed <id>
 
 # Absorb or escalate. One errand, one verdict.
 check_one() {
-  local i=$1 f seen now again st open div bk tgt live own kind
+  local i=$1 f seen now again st open div bk tgt live own kind cur mine
   local attn af since woke nowsec last stale how mark latch wedge prc w why
 
   # Counted BEFORE the verdict is read, and again after. The cursor is what says
@@ -639,8 +639,23 @@ check_one() {
   seen=$(cat "$(cursor_file "$i")" 2>/dev/null || echo 0)
   seen=$(printf '%s' "$seen" | tr -d '[:space:]'); seen=${seen:-0}
 
+  # Only the owner's watch moves the cursor, by live_errands' own test. An
+  # `--all` watch over another reeve's errand is for understanding, never
+  # acting: moving the owner's cursor spent the owner's one wake for a done,
+  # failed, blocked or decision line, and the reeve meant to act on it was never
+  # told. Such a watch keeps a cursor of its own instead, read and written by it
+  # alone, so it says each line once to itself and moves on. It still reads the
+  # owner's: a line the owner was already told is not news to anyone.
+  cur=$(cursor_file "$i")
+  own=$(meta_get "$i" session '')
+  if [ "$every" = yes ] && [ -n "$own" ] && [ "$own" != "$MY_SESSION" ]; then
+    cur=$(cursor_file "$i" "$MY_SESSION")
+    mine=$(cat "$cur" 2>/dev/null | tr -d '[:space:]')
+    case $mine in ''|*[!0-9]*) ;; *) [ "$mine" -gt "$seen" ] && seen=$mine ;; esac
+  fi
+
   if [ "$now" -gt "$seen" ]; then
-    printf '%s\n' "$now" > "$(cursor_file "$i")"
+    printf '%s\n' "$now" > "$cur"
     # The reconciled note, never the raw line: no state word, no stamp, the
     # same form the caretaker leaves. Read only when there is news to tell.
     last=$(status_field "$i" last)

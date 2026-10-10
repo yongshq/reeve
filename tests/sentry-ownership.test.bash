@@ -471,5 +471,69 @@ has "11 an unlanded branch with no copy on disk is still kept" \
 nas "11 and never claims the copy was removed"  "$OUT" "copy removed"
 nas "11 nor calls it refused"                   "$OUT" "refused"
 
+echo "--- 12. an --all watch never spends the owner's wake ---"
+# It moved the owner's cursor, so another reeve's --all watch said bbb's done
+# and the owner's own watch, the one meant to act, was never told.
+export REEVE_HOME="$SCRATCH/home12"
+mkdir -p "$REEVE_HOME/state"
+errand bbb reeve-b "working: reading" "done: report.md written"
+cur() { cat "$REEVE_HOME/state/.cursor-$1" 2>/dev/null || echo none; }
+all_as() { REEVE_SESSION=$1 "$ROOT/bin/reeve-sentry" --all --once --poll 1 2>&1; }
+
+OUT=$(all_as reeve-a); RC=$?
+eq  "12 reeve-a's --all watch wakes"            "$RC" 0
+has "12 for bbb's done"                         "$OUT" "bbb is done"
+eq  "12 the owner's cursor untouched"           "$(cur bbb)" none
+eq  "12 in a cursor of its own"                 "$(cur bbb@reeve-a)" 2
+eq  "12 and nothing reaped"                     "$(reaped bbb)" no
+OUT=$(all_as reeve-a); RC=$?
+eq  "12 reeve-a's next --all is quiet on it"    "$RC" 4
+nas "12 and does not repeat it"                 "$OUT" "bbb is done"
+OUT=$(watch_as reeve-b); RC=$?
+eq  "12 reeve-b's own watch still gets the done" "$RC" 0
+has "12 as the done line"                       "$OUT" "bbb is done"
+eq  "12 and reaps it, as the owner"             "$(reaped bbb)" yes
+
+# 12b. a blocked and a decision line are the owner's one wake just the same.
+errand ccc reeve-b "working: x" "blocked: no creds"
+OUT=$(all_as reeve-a)
+has "12b --all says the block"                  "$OUT" "ccc is blocked"
+OUT=$(watch_as reeve-b); RC=$?
+eq  "12b the owner still wakes for it"          "$RC" 0
+has "12b as the block"                          "$OUT" "ccc is blocked"
+printf 'needs-decision [key=k]: which?\n' >> "$REEVE_HOME/errands/ccc/status"
+OUT=$(all_as reeve-a)
+has "12b --all says the question"               "$OUT" "ccc needs a decision"
+OUT=$(watch_as reeve-b); RC=$?
+eq  "12b the owner still wakes for it"          "$RC" 0
+has "12b as the question"                       "$OUT" "ccc needs a decision"
+OUT=$(all_as reeve-a); RC=$?
+eq  "12b then --all is quiet"                   "$RC" 4
+
+# 12c. its own errand, and one nobody owns, still move the one cursor.
+errand ddd reeve-a "working: x" "blocked: y"
+errand eee ''      "working: x" "blocked: z"
+all_as reeve-a >/dev/null; all_as reeve-a >/dev/null
+eq  "12c its own errand moves the owner's cursor" "$(cur ddd)" 2
+eq  "12c an unowned one does too"                 "$(cur eee)" 2
+eq  "12c and keeps no second cursor"              "$(cur ddd@reeve-a)$(cur eee@reeve-a)" nonenone
+
+# 12d. a watch that cannot name its session keeps one too, never the owner's.
+errand fff reeve-b "working: x" "blocked: w"
+OUT=$(REEVE_SESSION='' CLAUDE_CODE_SESSION_ID='' "$ROOT/bin/reeve-sentry" --all --once --poll 1 2>&1)
+has "12d an unnamed --all watch says it"        "$OUT" "fff is blocked"
+eq  "12d the owner's cursor untouched"          "$(cur fff)" none
+eq  "12d in the shared unnamed cursor"          "$(cur fff@)" 2
+
+# 12e. a line the owner was already told is not news to an --all watch.
+export REEVE_HOME="$SCRATCH/home12e"
+mkdir -p "$REEVE_HOME/state"
+errand ggg reeve-b "working: x" "blocked: v"
+OUT=$(watch_as reeve-b)
+has "12e the owner is told first"               "$OUT" "ggg is blocked"
+OUT=$(all_as reeve-a); RC=$?
+eq  "12e then reeve-a's --all is quiet on it"   "$RC" 4
+eq  "12e and keeps no cursor for it"            "$(cur ggg@reeve-a)" none
+
 printf '\npassed=%s failed=%s\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

@@ -421,7 +421,13 @@ WAKE_MOVE_EOF
 # lines. bin/reeve-sentry is its only writer. Here rather than there because
 # wake_reported above records the other half of the same question, a report that
 # came through the spool instead, and the two answers belong next to each other.
-cursor_file() { printf '%s/state/.cursor-%s\n' "$REEVE_HOME_D" "$1"; }
+# With a second argument, the cursor one `--all` watch keeps over an errand not
+# its own, `<id>@<its session>`, empty for a watch that cannot name its session,
+# so it never stands for the owner's: the same split as stale_file's gone latch.
+cursor_file() { # cursor_file <id> [<watching session>]
+  if [ $# -ge 2 ]; then printf '%s/state/.cursor-%s@%s\n' "$REEVE_HOME_D" "$1" "$2"
+  else printf '%s/state/.cursor-%s\n' "$REEVE_HOME_D" "$1"; fi
+}
 
 # That other half, as a file of its own beside the cursor: how much of the log
 # was handed over as a caretaker's line and taken, as a count of lines.

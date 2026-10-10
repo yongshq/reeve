@@ -49,6 +49,8 @@ before you report it, whatever the liege is asked.
   ordinary wake. With no watch running, the caretaker frees the finished hand and leaves the line in
   your notifications, which arrive only when you next watch or list: if you never do, you go on
   reporting a finished hand as stuck.
+- Only the owner's watch spends that wake. An `--all` watch over another reeve's errand says each
+  such line once for itself, on a cursor of its own, and the owner's next watch still wakes for it.
 
 `bin/reeve-watch-guard`, a Stop hook beside `bin/reeve-format-guard`, holds this in code after any
 wake, not only `waiting`: a reeve that ends a turn with an errand of its own unfinished (not `done`
