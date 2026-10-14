@@ -92,7 +92,9 @@ for t in git herdr jq gh python3; do
   if command -v "$t" >/dev/null 2>&1; then
     case $t in
       git)   v=$(git --version | awk '{print $3}') ;;
-      herdr) v=$(herdr --version 2>/dev/null | awk '{print $NF}') ;;
+      # Not run from a hall pane, for the reason reeve-backend list gives.
+      herdr) if [ "${HALL_ENV:-}" = 1 ]; then v='not run from a hall pane'
+             else v=$(herdr --version 2>/dev/null | awk '{print $NF}'); fi ;;
       jq)    v=$(jq --version 2>/dev/null) ;;
       *)     v=$("$t" --version 2>/dev/null | head -1 | awk '{print $NF}') ;;
     esac

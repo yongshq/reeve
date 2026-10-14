@@ -16,6 +16,9 @@ names its server by socket (`$REEVE_HALL_SOCKET`, `$HALL_SOCKET_PATH`, then the 
 lists) and never by `--session`, and never runs `herdr` or reads `HERDR_*`. `REEVE_BACKEND=hall`
 selects it; hall sets that in its own panes. An errand keeps the backend its record names, so a
 herdr errand stays on herdr whatever the caller's environment, and a record with none is herdr's.
+From a hall pane (`HALL_ENV=1`), `reeve-backend list` and `reeve-doctor` do not run herdr at all,
+since herdr's own checks there would read herdr's config folder; each says so in one line, and a
+herdr pane or a plain terminal checks it.
 The tests drive the contract through stub backends of their own.
 
 ## Required functions

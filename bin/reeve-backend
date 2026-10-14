@@ -3,7 +3,8 @@
 #
 # Usage:
 #   reeve-backend resolve [--backend NAME]     print the backend that would be used
-#   reeve-backend list                         every backend, with availability
+#   reeve-backend list                         every backend, with availability. herdr is
+#                                              not probed from a hall pane (HALL_ENV=1)
 #   reeve-backend call <fn> <args...>          run one contract function
 #   reeve-backend describe [--backend NAME]
 
@@ -68,6 +69,14 @@ case $cmd in
   describe) b=$(backend_resolve "$sel"); backend_call "$b" describe ;;
   list)
     for b in $(backend_known); do
+      # A hall pane carries herdr's variables too, set to hall's own server, and
+      # herdr's checks with none of its own read herdr's config folder, which
+      # outside a throwaway setup is the live one. So herdr is not asked from
+      # here at all; an errand whose record names herdr is still reached.
+      if [ "$b" = herdr ] && [ "${HALL_ENV:-}" = 1 ]; then
+        printf '%-8s not probed from a hall pane. run reeve-backend list in a herdr pane or a plain terminal to check it\n' "$b"
+        continue
+      fi
       if out=$(backend_call "$b" available 2>&1); then
         printf '%-8s available   %s\n' "$b" "$(backend_call "$b" describe 2>/dev/null)"
       else
