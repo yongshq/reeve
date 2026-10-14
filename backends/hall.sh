@@ -177,7 +177,7 @@ _h_other_checkout() {
 }
 
 reeve_backend_hall_available() {
-  local b sock
+  local b sock help
   b=$(_hb) || { echo "hall binary not found: set REEVE_HALL_BIN or config/hall-bin" >&2; return 1; }
   command -v "$b" >/dev/null 2>&1 || { echo "hall binary not found at $b: set REEVE_HALL_BIN or config/hall-bin" >&2; return 1; }
   command -v jq >/dev/null 2>&1 || { echo "jq not on PATH, required to parse hall output" >&2; return 1; }
@@ -187,8 +187,19 @@ reeve_backend_hall_available() {
   # Every pane a hand gets is made with --no-agent-resume, and a hall from
   # before that flag refuses each call carrying it. Asked of the binary's own
   # usage, so doctor says not ok and dispatch refuses before it makes a copy.
-  "$b" tab help 2>&1 | grep -qF -- '--no-agent-resume' \
-    || { echo "hall at $b predates --no-agent-resume; update hall" >&2; return 1; }
+  # Read whole, then matched: hall writes its usage in several writes, and a
+  # `grep -q` that quits after the match makes the next one fail, which under
+  # pipefail read as a hall that predates the flag.
+  #
+  # The running server cannot be asked: hall's ping reports a version,
+  # protocol and capabilities that the flag left unchanged. So a binary
+  # updated under a server still running an older build passes here, and its
+  # create is refused after the copy exists; reeve-dispatch removes that copy.
+  help=$("$b" tab help 2>&1) || :
+  case $help in
+    *--no-agent-resume*) ;;
+    *) echo "hall at $b predates --no-agent-resume; update hall" >&2; return 1 ;;
+  esac
   return 0
 }
 

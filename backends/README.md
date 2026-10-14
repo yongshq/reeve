@@ -26,16 +26,26 @@ On hall every pane a hand gets (`tab create`, `worktree open`, `workspace create
 tab or workspace it leaves empty, instead of resuming the hand's harness bare, without its
 environment or flags. So after a restart the hand is gone: its target no longer resolves,
 `agent_state` reads `missing`, the watch says `stale:`, and `bin/reeve-dispatch <id>` sends a fresh
-hand out again from its instructions into the copy it left (the `errand` skill says on what proof).
+hand out again from its instructions into the copy it left (the `errand` skill says on what proof;
+only an errand sent out on hall relaunches into its copy, a herdr one refuses as it always did).
 Work committed on its branch, and any uncommitted work in its copy, is kept; its unfinished
 conversation is not. The reeve's own pane is never made with the flag, so it resumes as before.
 `available` reads hall's own usage for the flag and refuses a hall that predates it, so a dispatch
-stops before it makes a copy. After each create the new pane's `agent_resume` is read back, and one
+stops before it makes a copy. It cannot ask the running server: hall's ping reports a version,
+protocol and capabilities the flag left unchanged, so a binary updated under a server still running
+an older build passes, its create is refused after the copy exists, and dispatch removes the copy
+and empty branch it just made. After each create the new pane's `agent_resume` is read back, and one
 that is not `false` (a server running a build from before the flag ignores it) is closed and
 refused. `worktree open` is never asked of a checkout hall already shows open, since it would hand
 back that workspace's own pane, unmarked, and rename it; such a hand gets a workspace of its own.
 Accepted and left as it is: `worktree open` may also open the holding's primary checkout as a parent
 workspace, unmarked. It is a shell with nothing to resume, and `kill` never closes it.
+Known limit: hall can answer `already_open: false` with a workspace that was already there (its
+two lookups for an open checkout disagreeing); no case of it is known, and `_h_open_here` asks
+first, but such a workspace, unmarked, is then closed as the create's own.
+Known limit: a workspace that opens on the checkout between `_h_open_here` and `worktree open` is
+renamed to the hand's label inside that call, and discarding it does not undo the rename. A narrow
+window, and only the label changes.
 The tests drive the contract through stub backends of their own.
 
 ## Required functions

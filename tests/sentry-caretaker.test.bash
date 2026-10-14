@@ -459,7 +459,7 @@ eq  "3 and nothing is locking that home"                  \
 # The opt-out is one dispatch's word, not the errand's for good. A relaunch of the
 # same errand without it, which is how a hand whose session died is sent out
 # again, used to inherit keep= from the first and be kept forever though nobody
-# asked. A steward, because it has no copy for the relaunch to collide with.
+# asked. A steward, because it relaunches on any backend with no copy to prove.
 export REEVE_HOME="$SCRATCH/home4c"
 mkdir -p "$REEVE_HOME"
 LOG="$REEVE_HOME/state/sentry.log"

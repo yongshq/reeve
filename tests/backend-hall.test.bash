@@ -62,6 +62,8 @@ chmod +x "$FAKE/herdr"
 # the flag and ignores it. STUB_OPEN a checkout hall already shows open, in
 # workspace wLIEGE, which worktree list reports and worktree open returns as
 # already_open. STUB_REFUSE the create calls refused with a reason.
+# STUB_SLOW_HELP a usage written in several writes with pauses between, as
+# hall's own is, so a reader that quits at the match breaks the next write.
 cat > "$FAKE/hall" <<'HALL'
 #!/usr/bin/env bash
 printf '%s |sock=%s|ses=%s|cli=%s\n' "$*" "${HALL_SOCKET_PATH-}" "${HALL_SESSION-}" "${HALL_CLIENT_SOCKET_PATH-}" >> "$STUB_LOG"
@@ -70,6 +72,9 @@ if [ "$1 ${2:-}" = 'tab help' ]; then
   echo "hall tab commands:" >&2
   if [ -n "${STUB_OLD:-}" ]; then echo "  hall tab create [--workspace <workspace_id>] [--cwd PATH] [--label TEXT] [--no-focus]" >&2
   else echo "  hall tab create [--workspace <workspace_id>] [--cwd PATH] [--label TEXT] [--no-focus] [--no-agent-resume]" >&2; fi
+  if [ -n "${STUB_SLOW_HELP:-}" ]; then
+    sleep 0.5; echo "  hall tab get <tab_id>" >&2; sleep 0.2; echo "  hall tab close <tab_id>" >&2
+  fi
   exit 0
 fi
 case " $* " in *' --no-agent-resume '*)
@@ -173,6 +178,11 @@ out=$(STUB_OLD=1 h available 2>&1); rc=$?
 eq  "3 a hall from before --no-agent-resume is not available" "$rc" 1
 has "3 saying which binary, and what to do"                 "$out" "hall at $FAKE/hall predates --no-agent-resume; update hall"
 has "3 so reeve-backend list says it is not usable"         "$(STUB_OLD=1 "$ROOT/bin/reeve-backend" list 2>&1 | grep '^hall')" "predates --no-agent-resume"
+out=$(STUB_SLOW_HELP=1 h available 2>&1); rc=$?
+eq  "3 a usage written slowly, the flag before the end, is read whole" "$rc" 0
+eq  "3 and nothing is said against it"                      "$out" ''
+out=$(STUB_SLOW_HELP=1 STUB_OLD=1 h available 2>&1); rc=$?
+eq  "3 a slow usage without the flag still refuses"         "$rc" 1
 : > "$TRAP"
 
 echo "--- 4. ensure_group, as herdr.sh's ---"

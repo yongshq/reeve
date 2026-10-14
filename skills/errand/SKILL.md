@@ -128,26 +128,37 @@ With the watch running, do not poll and do not narrate progress.
 silently change the job. If the brief itself was wrong, that is a new errand with a new id, and say
 so to the liege rather than quietly editing history.
 
-An errand with a copy (every office but the steward) relaunches into the copy it already has, the
-case a hall restart leaves: no new worktree or branch, its commits and any uncommitted work kept,
-a fresh hand (not a resumed conversation) told to read `git status` and `git log` before it builds,
-a new session recorded, and a `working:` line in its status file saying it was relaunched. Only on
-proof, all of it:
+An errand sent out on hall with a copy (every office but the steward) relaunches into the copy it
+already has, the case a hall restart leaves: no new worktree or branch, its commits and any
+uncommitted work kept, a fresh hand (not a resumed conversation) told to read `git status` and
+`git log` before it builds, a new session recorded, and a `working:` line in its status file saying
+it was relaunched. Only on proof, all of it:
 
 - the record names the copy and its branch, and the copy is a worktree of that holding on that
   branch (detached, for an office with none);
-- the old session reads `missing` or `dead`, never `alive`, `unreadable` or anything else;
+- the old session reads `missing` or `dead`, never `alive`, `unreadable` or anything else, and a
+  `dead` one, a shell left in the copy, is closed first, or the relaunch refuses;
+- the errand is this session's (else `reeve-adopt <id>` first), dispatched on hall again, from the
+  hall session its hand was made on;
 - the errand was not torn down, and did not report `done` or `failed` with nothing open.
 
 Anything less is the old refusal, `worktree path already exists`, with the reason named. Bring that
 to the liege; never move, clean or force the copy to make it pass. `--dry-run` prints the relaunch
-plan first.
+plan first. An errand sent out on herdr keeps that refusal as it always had it: it does not
+relaunch into its copy.
+
+On hall, one dispatch of an errand runs at a time: a second, while the first holds the errand's
+lock, is refused, never queued. The new session is recorded before its launch, and a launch that
+reports failure closes the session it opened, so dispatching again sends out one hand, never two.
+A first dispatch that cannot open a session removes the copy and empty branch it just made, so the
+id can go out again once hall is fixed.
 
 ## What not to do
 
 - Do not dispatch on an unverified harness without the liege saying so. Report the refusal instead.
 - Do not do the work yourself because it looks small. That is how a manager becomes a slow coder,
   and your context is the household's scarcest resource.
-- Do not dispatch two hands onto the same branch. Git refuses it, and that refusal is the guard
-  rail, not an obstacle.
+- Do not dispatch two hands onto the same branch. Git refuses a second copy of it, and a relaunch,
+  which makes no copy, is guarded by its proof and its lock instead. Each refusal is the guard rail,
+  not an obstacle.
 - Do not fill `{SPEC}` with the whole conversation. A hand reads one brief, not a transcript.

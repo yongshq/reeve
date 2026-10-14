@@ -12,7 +12,11 @@
 # new branch, the commits and the uncommitted work kept, a fresh hand told to
 # look before it builds, a new target recorded, the branch's birth untouched,
 # and one status line saying so. Anything less is today's refusal, with the
-# reason named.
+# reason named. Only for an errand sent out on hall, by the reeve that owns it,
+# from the hall session its hand was made on; a herdr errand refuses as it
+# always did, word for word. One dispatch of an errand at a time, a failed
+# launch closes the session it opened, a dead session is closed before a new
+# one opens, and a first dispatch that cannot open a session undoes its copy.
 #
 # Scratch homes only. Backend and harness are stubs, so no session is opened.
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
@@ -40,26 +44,47 @@ git -C "$REPO" symbolic-ref HEAD refs/heads/main
 gitc() { git -C "$1" -c user.email=reeve@example.invalid -c user.name=reeve -c commit.gpgsign=false "${@:2}"; }
 gitc "$REPO" commit -q --allow-empty -m init
 
-# The stub backend: each endpoint a new `stub:<n>`, its state read from
-# $STATES/<n> (alive when unset), every launch line kept in $LAUNCHES.
+# The stub backends: each endpoint a new `stub:<n>`, its state read from
+# $STATES/<n> (alive when unset), every launch line kept in $LAUNCHES, every
+# create and kill in $EVENTS. The same adapter is installed as `hall`, the one
+# backend whose errands relaunch into their copy, and as `herdr`, whose errands
+# keep the refusal they always had. STUB_SLOW makes a create take a second,
+# STUB_CREATE_FAIL refuses one (STUB_CREATE_DIRTY leaving an untracked file in
+# the copy first, STUB_CREATE_COMMIT a commit), STUB_LAUNCH_RC is what a launch
+# returns after recording its line, STUB_KILL_FAIL refuses a kill, and
+# STUB_PLACE is the session `place` names, none when unset.
 STUB="$SCRATCH/root"
 mkdir -p "$STUB/backends" "$STUB/harnesses"
 cp -R "$ROOT/offices" "$STUB/offices"
-export STATES="$SCRATCH/states" LAUNCHES="$SCRATCH/launches"
-mkdir -p "$STATES"; : > "$LAUNCHES"
-cat > "$STUB/backends/stub.sh" <<'ADAPTER'
-reeve_backend_stub_available()       { return 0; }
-reeve_backend_stub_describe()        { printf 'stub backend\n'; }
-reeve_backend_stub_create_endpoint() {
-  local n; n=$(ls "$STATES" | wc -l | tr -d ' '); n=$((n + 1))
-  printf 'alive\n' > "$STATES/$n"; printf 'stub:%s\n' "$n"
+export STATES="$SCRATCH/states" LAUNCHES="$SCRATCH/launches" EVENTS="$SCRATCH/events"
+mkdir -p "$STATES"; : > "$LAUNCHES"; : > "$EVENTS"
+for bk in hall herdr; do
+  sed "s/@B@/$bk/g" > "$STUB/backends/$bk.sh" <<'ADAPTER'
+reeve_backend_@B@_available()       { return 0; }
+reeve_backend_@B@_describe()        { printf 'stub backend\n'; }
+reeve_backend_@B@_create_endpoint() {
+  local n
+  [ -n "${STUB_SLOW:-}" ] && sleep 1
+  if [ -n "${STUB_CREATE_FAIL:-}" ]; then
+    [ -n "${STUB_CREATE_DIRTY:-}" ] && printf 'x\n' > "$1/left.txt"
+    [ -n "${STUB_CREATE_COMMIT:-}" ] && git -C "$1" -c user.email=r@e.invalid -c user.name=r \
+      -c commit.gpgsign=false commit -q --allow-empty -m 'made while opening'
+    echo "stub: no room" >&2; return 1
+  fi
+  n=$(ls "$STATES" | wc -l | tr -d ' '); n=$((n + 1))
+  printf 'alive\n' > "$STATES/$n"; printf 'create stub:%s\n' "$n" >> "$EVENTS"; printf 'stub:%s\n' "$n"
 }
-reeve_backend_stub_launch()          { printf '%s\t%s\n' "$1" "$2" >> "$LAUNCHES"; }
-reeve_backend_stub_agent_state()     { cat "$STATES/${1#stub:}" 2>/dev/null || printf 'alive\n'; }
-reeve_backend_stub_attention_state() { printf 'settled\n'; }
-reeve_backend_stub_wait_change()     { return 2; }
-reeve_backend_stub_kill()            { return 0; }
+reeve_backend_@B@_launch()          { printf '%s\t%s\n' "$1" "$2" >> "$LAUNCHES"; return "${STUB_LAUNCH_RC:-0}"; }
+reeve_backend_@B@_agent_state()     { cat "$STATES/${1#stub:}" 2>/dev/null || printf 'alive\n'; }
+reeve_backend_@B@_attention_state() { printf 'settled\n'; }
+reeve_backend_@B@_wait_change()     { return 2; }
+reeve_backend_@B@_kill() {
+  [ -z "${STUB_KILL_FAIL:-}" ] || return 1
+  printf 'kill %s\n' "$1" >> "$EVENTS"; printf 'missing\n' > "$STATES/${1#stub:}"
+}
+reeve_backend_@B@_place()           { [ -n "${STUB_PLACE:-}" ] || return 1; printf '%s\n' "$STUB_PLACE"; }
 ADAPTER
+done
 cat > "$STUB/harnesses/stub.toml" <<'HARNESS'
 bin = "true"
 verified = true
@@ -67,6 +92,8 @@ launch = "{bin} {settings} {prompt}"
 settings_flag = "--settings {settings}"
 prompt_mode = "argv"
 HARNESS
+# The reeve that briefs every errand here, and so owns it.
+export REEVE_SESSION=lead
 
 brief_for() { # brief_for <id> <office>
   REEVE_ROOT="$ROOT" "$ROOT/bin/reeve-brief" "$1" "$REPO" --office "$2" >/dev/null || return 1
@@ -75,8 +102,8 @@ brief_for() { # brief_for <id> <office>
 }
 dispatch() { # dispatch <id> [args...] -> OUT, ERR, RC
   local id=$1; shift
-  ERR="$SCRATCH/err.$id"
-  OUT=$(REEVE_ROOT="$STUB" "$ROOT/bin/reeve-dispatch" "$id" --backend stub --harness stub "$@" 2>"$ERR"); RC=$?
+  ERR=$(mktemp "$SCRATCH/err.XXXXXX")   # its own file, so two at once never share one
+  OUT=$(REEVE_ROOT="$STUB" "$ROOT/bin/reeve-dispatch" "$id" --backend "${BK:-hall}" --harness stub "$@" 2>"$ERR"); RC=$?
   ERR=$(cat "$ERR")
 }
 meta() { sed -n "s/^$2=//p" "$REEVE_HOME/state/$1.meta" | head -n 1; }
@@ -200,6 +227,154 @@ lose sc missing
 dispatch sc
 eq  "5 a scout copy on a branch refuses"                    "$RC" 1
 has "5 saying the copy should be detached"                  "$ERR" "it is on branch 'scouting', while this errand's copy is a detached checkout"
+
+echo "--- 6. a herdr errand keeps today's refusal, word for word ---"
+# The liege: leave the herdr setup untouched. Only an errand sent out on hall
+# relaunches into its copy; one sent out on herdr refuses as it always did.
+brief_for hd artificer || bad "6 reeve-brief refused"
+BK=herdr dispatch hd
+eq  "6 the first dispatch on herdr succeeds"                "$RC" 0
+HWT=$(meta hd worktree); WTN=$(worktrees); L0=$(wc -l < "$LAUNCHES"); E0=$(wc -l < "$EVENTS")
+for st in missing dead; do
+  lose hd "$st"; HT=$(meta hd target)
+  BK=herdr dispatch hd
+  eq  "6 its session $st, it refuses"                       "$RC" 1
+  eq  "6 its whole stderr is today's, byte for byte"        "$ERR" "reeve: errand 'hd' had a previous endpoint ($HT, now $st), relaunching
+reeve: worktree path already exists: $HWT. pick another errand id or clean that up first"
+done
+eq  "6 nothing was opened, closed or launched"              "$(wc -l < "$LAUNCHES")|$(wc -l < "$EVENTS")|$(worktrees)" "$L0|$E0|$WTN"
+eq  "6 and no lock was left"                                "$(ls -d "$REEVE_HOME"/state/.lock-dispatch-* 2>/dev/null)" ''
+
+echo "--- 7. only the reeve that owns an errand relaunches it ---"
+brief_for own artificer || bad "7 reeve-brief refused"
+dispatch own; lose own missing
+REEVE_SESSION=stranger dispatch own
+eq  "7 another session's dispatch refuses"                  "$RC" 1
+has "7 saying whose it is, and how to take it"              "$ERR" "it belongs to session lead, not this one (stranger); adopt it first: reeve-adopt own"
+REEVE_SESSION='' dispatch own
+eq  "7 a session with no id refuses"                        "$RC" 1
+has "7 the same way"                                        "$ERR" "adopt it first: reeve-adopt own"
+BK=herdr dispatch own
+eq  "7 a hall errand dispatched on herdr refuses"           "$RC" 1
+has "7 saying where it was sent"                            "$ERR" "it was sent out on hall, and this dispatch is on herdr"
+dispatch own
+eq  "7 its owner relaunches it"                             "$RC" 0
+
+echo "--- 8. a hand made on another hall session is not relaunched from here ---"
+brief_for pl scout || bad "8 reeve-brief refused"
+STUB_PLACE=one dispatch pl
+eq  "8 the record names the session the hand is in"         "$(meta pl place)" one
+lose pl missing
+STUB_PLACE=two dispatch pl
+eq  "8 a reeve on another session refuses"                  "$RC" 1
+has "8 naming both"                                         "$ERR" "its hand was made on hall session 'one', and this reeve talks to 'two'"
+dispatch pl
+eq  "8 so does one that cannot say which"                   "$RC" 1
+has "8 saying none"                                         "$ERR" "this reeve talks to 'none'"
+STUB_PLACE=one dispatch pl
+eq  "8 the same session relaunches it"                      "$RC" 0
+
+echo "--- 9. two relaunches at once put one hand in the copy ---"
+# git used to refuse the second, on the worktree path. A relaunch adds none, so
+# a lock per errand does: the second is refused, never waits.
+brief_for par artificer || bad "9 reeve-brief refused"
+dispatch par; lose par missing
+L0=$(wc -l < "$LAUNCHES"); WTN=$(worktrees)
+( STUB_SLOW=1 dispatch par; printf '%s\n%s\n' "$RC" "$ERR" > "$SCRATCH/par.a" ) &
+( STUB_SLOW=1 dispatch par; printf '%s\n%s\n' "$RC" "$ERR" > "$SCRATCH/par.b" ) &
+wait
+eq  "9 one succeeds and one refuses"                        "$( (head -n 1 "$SCRATCH/par.a"; head -n 1 "$SCRATCH/par.b") | sort | tr '\n' ' ')" "0 1 "
+has "9 the refusal says another run has it"                 "$(cat "$SCRATCH/par.a" "$SCRATCH/par.b")" "errand 'par' is being dispatched by another run right now"
+eq  "9 one launch, into the one copy"                       "$(( $(wc -l < "$LAUNCHES") - L0 ))|$(worktrees)" "1|$WTN"
+eq  "9 and the lock is gone after"                          "$(ls -d "$REEVE_HOME"/state/.lock-dispatch-par 2>/dev/null)" ''
+# A first dispatch on hall records its session before its launch, so it holds
+# the same lock: one held by a live run refuses it too, before any copy.
+brief_for fd artificer || bad "9 reeve-brief refused"
+mkdir "$REEVE_HOME/state/.lock-dispatch-fd"; printf '%s\n' "$$" > "$REEVE_HOME/state/.lock-dispatch-fd/pid"
+dispatch fd
+eq  "9 a first dispatch on hall waits for no one"           "$RC" 1
+has "9 refused while another run holds it"                  "$ERR" "errand 'fd' is being dispatched by another run right now"
+eq  "9 before any copy was made"                            "$([ -e "$(meta fd worktree)" ] && echo made || echo none)" none
+rm -rf "$REEVE_HOME/state/.lock-dispatch-fd"
+dispatch fd
+eq  "9 and goes out once it is free"                        "$RC" 0
+
+echo "--- 10. a launch that reports failure cannot be retried into a second hand ---"
+brief_for fl artificer || bad "10 reeve-brief refused"
+dispatch fl; lose fl missing; OLD=$(meta fl target)
+STUB_LAUNCH_RC=1 dispatch fl
+eq  "10 the failed relaunch fails"                          "$RC" 1
+NEW=$(meta fl target)
+eq  "10 the new session is recorded, not the lost one"      "$NEW" "stub:$(ls "$STATES" | wc -l | tr -d ' ')"
+has "10 the session it opened is closed"                    "$(cat "$EVENTS")" "kill $NEW"
+has "10 and it says a retry sends out one hand"             "$ERR" "that session was closed and is recorded, so dispatching 'fl' again sends out one fresh hand"
+dispatch fl
+eq  "10 the retry relaunches"                               "$RC" 0
+alive=0
+for t in $(grep "/errands/fl/" "$LAUNCHES" | cut -f1 | sort -u); do
+  [ "$(cat "$STATES/${t#stub:}")" = alive ] && alive=$((alive + 1))
+done
+eq  "10 one hand alive in the copy, not two"                "$alive" 1
+lose fl missing
+STUB_LAUNCH_RC=1 STUB_KILL_FAIL=1 dispatch fl
+eq  "10 a failed launch whose session will not close fails" "$RC" 1
+has "10 saying it may still be starting"                    "$ERR" "that session could not be closed. it is recorded as the errand's session"
+T=$(meta fl target)
+dispatch fl
+eq  "10 a retry reads that session, the hand came up after all" "$RC" 1
+has "10 and refuses on it"                                  "$ERR" "already running at $T"
+
+echo "--- 11. a dead session is closed before a new one opens ---"
+lose fl dead; E0=$(wc -l < "$EVENTS")
+STUB_KILL_FAIL=1 dispatch fl
+eq  "11 one that will not close refuses"                    "$RC" 1
+has "11 saying it may still be starting a hand"             "$ERR" "reads dead and could not be closed"
+eq  "11 and opens nothing"                                  "$(wc -l < "$EVENTS")" "$E0"
+dispatch fl --dry-run
+has "11 a dry run says it would close it"                   "$OUT" "call kill $T --backend hall"
+eq  "11 and closes nothing"                                 "$(wc -l < "$EVENTS")" "$E0"
+dispatch fl
+eq  "11 the relaunch succeeds"                              "$RC" 0
+eq  "11 the old session closed, then the new one opened"    "$(sed -n "$((E0 + 1)),\$p" "$EVENTS" | cut -d' ' -f1 | tr '\n' ' ')" "kill create "
+has "11 the one closed is the old one"                      "$(sed -n "$((E0 + 1))p" "$EVENTS")" "kill $T"
+has "11 its warning comes once the relaunch is allowed"     "$ERR" "relaunching"
+lose fl unknown
+dispatch fl
+nas "11 and not before a refusal"                           "$ERR" "relaunching"
+
+echo "--- 12. a copy made by a dispatch that could not open a session is undone ---"
+brief_for rb artificer || bad "12 reeve-brief refused"
+RWT=$(meta rb worktree); RBR=$(meta rb branch)
+STUB_CREATE_FAIL=1 dispatch rb
+eq  "12 the dispatch fails"                                 "$RC" 1
+eq  "12 its copy is removed"                                "$([ -e "$RWT" ] && echo kept || echo gone)" gone
+eq  "12 and its empty branch"                               "$(git -C "$REPO" rev-parse --verify --quiet "refs/heads/$RBR" || echo gone)" gone
+has "12 saying so"                                          "$ERR" "removed what this dispatch made, the copy and branch '$RBR', so 'rb' can be dispatched again"
+dispatch rb
+eq  "12 so the id is not stuck"                             "$RC" 0
+eq  "12 and the new branch's birth is recorded"             "$([ -n "$(meta rb branchMade)" ] && echo yes)" yes
+lose rb missing; TIP=$(git -C "$REPO" rev-parse "refs/heads/$RBR")
+STUB_CREATE_FAIL=1 dispatch rb
+eq  "12 a relaunch that cannot open a session fails"        "$RC" 1
+eq  "12 and never touches the copy it found"                "$([ -d "$RWT" ] && echo kept)|$(git -C "$REPO" rev-parse "refs/heads/$RBR")" "kept|$TIP"
+nas "12 nor says it removed anything"                       "$ERR" "removed"
+brief_for rd artificer || bad "12 reeve-brief refused"
+STUB_CREATE_FAIL=1 STUB_CREATE_DIRTY=1 dispatch rd
+eq  "12 a copy left dirty is kept"                          "$(cat "$(meta rd worktree)/left.txt" 2>/dev/null)" x
+eq  "12 with its branch"                                    "$(git -C "$REPO" rev-parse --verify --quiet "refs/heads/$(meta rd branch)" >/dev/null && echo kept)" kept
+has "12 saying why"                                         "$ERR" "git would not remove the copy as clean"
+brief_for ra artificer || bad "12 reeve-brief refused"
+STUB_CREATE_FAIL=1 STUB_CREATE_COMMIT=1 dispatch ra
+eq  "12 a branch ahead of its base is kept, copy and all"   "$([ -d "$(meta ra worktree)" ] && echo kept)|$(git -C "$REPO" rev-parse --verify --quiet "refs/heads/$(meta ra branch)" >/dev/null && echo kept)" "kept|kept"
+has "12 saying why"                                         "$ERR" "the branch is 1 ahead of main"
+brief_for rs scout || bad "12 reeve-brief refused"
+STUB_CREATE_FAIL=1 dispatch rs
+eq  "12 a scout's detached copy is removed the same way"    "$([ -e "$(meta rs worktree)" ] && echo kept || echo gone)" gone
+has "12 saying so"                                          "$ERR" "removed what this dispatch made, the copy, so 'rs'"
+brief_for rh artificer || bad "12 reeve-brief refused"
+STUB_CREATE_FAIL=1 BK=herdr dispatch rh
+eq  "12 on herdr the copy is left, as it always was"        "$([ -d "$(meta rh worktree)" ] && echo kept)" kept
+nas "12 and nothing is said removed"                        "$ERR" "removed"
 
 echo "passed=$PASS failed=$FAIL"
 [ "$FAIL" -eq 0 ]
