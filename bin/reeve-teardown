@@ -205,10 +205,12 @@ BIN=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 #   as "no + line".
 # - the target: the default, or a further long-lived branch the grant names on
 #   an `also: <branch>` line of config/proven-delete, such as dev, for work
-#   carried there under new commit ids. An also: branch counts only when it
-#   exists, is not the default, and no errand record of the repository names it
-#   as its branch= (proven_delete_also in bin/reeve-lib.sh); anything else is
-#   ignored. The two facts below are asked of one target at a time and the
+#   carried there under new commit ids. An also: branch counts only when it is
+#   one of long_lived_branches (main, master, dev or develop, existing, named by
+#   no errand record of the repository as its branch=) and is not the default
+#   (proven_delete_also in bin/reeve-lib.sh); anything else, a release branch or
+#   the liege's own, is ignored, so the landed-work test below knows every
+#   target the proof asks. The two facts below are asked of one target at a time and the
 #   first that passes both is the proof: never their union, so a branch with
 #   one commit on main and another only on dev does not prove.
 # - no merge commit between the target and the branch. `git cherry` never

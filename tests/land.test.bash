@@ -37,8 +37,9 @@
 #      nothing: the cache may only narrow
 #   18 a branch carried onto dev under new commit ids: kept with its reason
 #      without the grant's also: dev, dropped with it; an also: naming an
-#      errand's branch or no branch is ignored; a `+` line, a union of main and
-#      dev, and a liege branch never prove
+#      errand's branch, no branch, or a name not long-lived (release, the
+#      liege's own) is ignored; a `+` line, a union of main and dev, and a
+#      liege branch never prove
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 
 # --- safety -----------------------------------------------------------------
@@ -716,7 +717,10 @@ ck_has "18 also: a missing branch or an errand's is ignored" "$OUT" \
   "kept: pd feat/pd: landed on dev under other commit ids, a branch the proven-delete grant does not name"
 ck_eq  "18 its branch stays"                   "$(has_br feat/pd)" yes
 also dev
-ck_has "18 the doctor shows the also: list"    "$("$ROOT/bin/reeve-doctor" 2>&1)" "also: nope feat/pz dev"
+OUT=$("$ROOT/bin/reeve-doctor" 2>&1)
+ck_has "18 the doctor shows the also: list"    "$OUT" "also: dev, proved against besides each default"
+ck_has "18 and the names it ignores, with why" "$OUT" \
+  "also: ignored: nope feat/pz (not main, master, dev or develop, the long-lived names an also: line may name)"
 OUT=$("$ROOT/bin/reeve-teardown" --prove-landed eighteen-none feat/pd 2>&1); RC=$?
 ck_eq  "18 with also: dev, a copy still holds it" "$RC" 1
 ck_has "18 and says where"                     "$OUT" "feat/pd is checked out at"
@@ -762,6 +766,30 @@ OUT=$("$ROOT/bin/reeve-teardown" --delete-proven eighteen-plus liege/y 2>&1); RC
 ck_eq  "18 a liege branch is never proven"     "$RC" 1
 ck_has "18 no record names it"                 "$OUT" "no errand record names liege/y"
 ck_eq  "18 and it stays"                       "$(has_br liege/y)" yes
+# also: names only main, master, dev or develop. An errand carried onto the
+# liege's own wip under a new id, or onto release by ancestry, is kept, never
+# dropped through that line, and never told a tool that would refuse.
+dev_holding eighteen-wide
+errand pw main
+git -C "$repo" branch wip main; git -C "$repo" checkout -q wip
+git -C "$repo" cherry-pick refs/heads/feat/pw >/dev/null; git -C "$repo" checkout -q main
+errand pr main
+git -C "$repo" branch release feat/pr
+also wip release
+sweep eighteen-wide
+ck_has "18 also: the liege's wip is ignored, kept" "$OUT" "kept: pw feat/pw: not landed: not on main or dev, nor under other commit ids on main"
+ck_has "18 also: release is ignored, kept"     "$OUT" "kept: pr feat/pr: not landed: not on main or dev, nor under other commit ids on main"
+ck_eq  "18 feat/pw stays"                      "$(has_br feat/pw)" yes
+ck_eq  "18 feat/pr stays"                      "$(has_br feat/pr)" yes
+git -C "$repo" worktree remove "$(wt_of pr)"
+OUT=$("$ROOT/bin/reeve-teardown" --prove-landed eighteen-wide feat/pr 2>&1); RC=$?
+ck_eq  "18 also: release, not proven"          "$RC" 1
+ck_not "18 and no --drop-branch advice"        "$OUT" "--drop-branch"
+also dev
+git -C "$repo" worktree remove "$(wt_of pw)"
+OUT=$("$ROOT/bin/reeve-teardown" --prove-landed eighteen-wide feat/pw 2>&1); RC=$?
+ck_has "18 also: dev beside them still asks dev" "$OUT" "against dev:"
+ck_not "18 and never wip"                      "$OUT" "against wip"
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

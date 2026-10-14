@@ -2517,31 +2517,36 @@ proven_delete_also_names() {
     "$(config_file proven-delete)" 2>/dev/null
 }
 
+# proven_delete_also_long <name> -> 0 when an also: line may name it at all:
+# one of main, master, dev or develop, the long-lived names. Anything else, a
+# release branch or the liege's own, is ignored wherever it exists, so the
+# grant never deletes work whose only copy sits on a branch the liege may throw
+# away.
+proven_delete_also_long() {
+  case " main master dev develop " in *" $1 "*) return 0 ;; esac
+  return 1
+}
+
 # proven_delete_also <repo> [<holding>] -> the also: branches the proof asks in
-# that repository besides its default, one per line: each valid branch name that
-# exists as refs/heads/<name>, is not the default (asked anyway), and that no
-# errand record of the repository names as its branch=, long_lived_branches' own
-# rule. Anything else is ignored, so a marker naming an errand's branch, or a
-# branch that is not there, widens nothing. Nothing without the grant.
+# that repository besides its default, one per line: each also: name that is
+# also in long_lived_branches (one of main, master, dev or develop, existing as
+# refs/heads/<name>, named by no errand record of the repository as its
+# branch=), and is not the default, asked anyway. Anything else is ignored, so
+# a marker naming the liege's branch, an errand's, or one that is not there,
+# widens nothing. Nothing without the grant.
 proven_delete_also() {
-  local n d names='' named seen=''
+  local n d ll='' seen=''
   d=$(holding_default "${2:-}")
   while IFS= read -r n; do
-    [ -n "$n" ] && git check-ref-format "refs/heads/$n" >/dev/null 2>&1 || continue
-    names="$names $n"
+    [ -n "$n" ] && proven_delete_also_long "$n" || continue
+    case " $d $seen " in *" $n "*) continue ;; esac
+    seen="$seen $n"
+    [ -n "$ll" ] || ll=$(long_lived_branches "$1" "${2:-}")
+    lines_has "$n" "$ll" && printf '%s\n' "$n"
   done <<PDA_EOF
 $(proven_delete_also_names)
 PDA_EOF
-  [ -n "$names" ] || return 0
-  # shellcheck disable=SC2086 # names: check-ref-format vetted, no glob characters
-  named=$(records_naming_any "$1" $names)
-  for n in $names; do
-    case " $d $seen " in *" $n "*) continue ;; esac
-    seen="$seen $n"
-    git -C "$1" rev-parse --verify --quiet "refs/heads/$n^{commit}" >/dev/null 2>&1 || continue
-    lines_has "$n" "$named" && continue
-    printf '%s\n' "$n"
-  done
+  return 0
 }
 
 # --- the household browser --------------------------------------------------

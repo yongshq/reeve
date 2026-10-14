@@ -75,8 +75,9 @@ delete (3).
    hand, goes to the liege, as does a household branch whose reflog is gone. Any other branch (the
    liege's, one from a session outside the household, one only a brief names, one no record names)
    never proves and goes to the liege. Proven also means one target, the holding's default branch
-   (its `base:` in `manors.md`, else `main`) or a further long-lived branch the marker names on an
-   `also: <branch>` line and no errand names, exists as a branch and is not `<branch>`; no merge
+   (its `base:` in `manors.md`, else `main`) or a further long-lived branch (`main`, `master`,
+   `dev` or `develop`, any other name ignored) the marker names on an `also: <branch>` line and no
+   errand names, exists as a branch and is not `<branch>`; no merge
    commit lies between it and `<branch>`; `git cherry` against it exits 0 with at least one line,
    every line `-`; and `<branch>` is checked out in no copy. A copy still holding it goes by
    `bin/reeve-teardown` or not at all. Patch ids ignore whitespace, so a whitespace-only difference

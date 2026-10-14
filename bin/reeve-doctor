@@ -31,13 +31,22 @@ fi
 # Not a warning either way: the grant is the liege's to give, per machine.
 if proven_delete_granted; then
   printf '  grants      proven-delete recorded (%s)\n' "$(config_file proven-delete)"
-  # Names as written; each repository asks only those long-lived there.
-  also=$(proven_delete_also_names | tr '\n' ' ' | sed 's/ *$//')
+  # Names as written, the long-lived ones apart from the rest, which every
+  # repository ignores; each repository asks only those long-lived there.
+  also='' ignored=''
+  while IFS= read -r n; do
+    [ -n "$n" ] || continue
+    if proven_delete_also_long "$n"; then also="$also $n"; else ignored="$ignored $n"; fi
+  done <<DOC_ALSO_EOF
+$(proven_delete_also_names)
+DOC_ALSO_EOF
   if [ -n "$also" ]; then
-    printf '              also: %s, proved against besides each default\n' "$also"
+    printf '              also:%s, proved against besides each default\n' "$also"
   else
     printf '              also: none, so it proves against each default only\n'
   fi
+  [ -z "$ignored" ] \
+    || printf '              also: ignored:%s (not main, master, dev or develop, the long-lived names an also: line may name)\n' "$ignored"
 else
   printf '  grants      proven-delete not recorded (%s absent)\n' "$(config_file proven-delete)"
   printf '              so a sweep keeps branches landed under other commit ids\n'

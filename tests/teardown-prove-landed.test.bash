@@ -12,8 +12,8 @@
 # name reused after a delete by hand, and a reflog gone. 21 is a forced rename
 # or copy onto the name on reftable, which keeps the overwritten ref's reflog.
 # 22 is the grant's also: a further long-lived branch such as dev, proved
-# against one target at a time, and ignored when it names an errand's branch or
-# no branch at all.
+# against one target at a time, and ignored when it names an errand's branch,
+# no branch at all, or anything but main, master, dev or develop.
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 
 # --- safety -----------------------------------------------------------------
@@ -352,6 +352,25 @@ printf 'office=artificer\nrepo=%s\nbranch=dev\n' "$repo" > "$REEVE_HOME/state/al
 prove "$repo" br
 ck_eq  "22 also: an errand's branch is ignored"        "$RC" 1
 rm -f "$REEVE_HOME/state/alsodev-dev.meta"
+# Only the long-lived names count: br carried onto the liege's own wip and onto
+# a release branch proves against neither, whatever the also: line says.
+G branch wip dev; G branch release dev
+also wip
+prove "$repo" br
+ck_eq  "22 also: the liege's branch is ignored"        "$RC" 1
+ck_has "22 and never asked"                            "$OUT" "equivalent on main; bring it to the liege"
+OUT=$("$ROOT/bin/reeve-teardown" --delete-proven "$repo" br 2>&1); RC=$?
+ck_eq  "22 nor deleted through it"                     "$RC" 1
+ck_eq  "22 br stays"                                   "$(git -C "$repo" branch --list br)" "  br"
+also release
+prove "$repo" br
+ck_eq  "22 also: a non-standard name is ignored"       "$RC" 1
+ck_has "22 and never asked"                            "$OUT" "equivalent on main; bring it to the liege"
+OUT=$("$ROOT/bin/reeve-doctor" 2>&1)
+ck_has "22 the doctor says it is ignored, and why"     "$OUT" \
+  "also: ignored: release (not main, master, dev or develop"
+G branch -D wip release
+also release dev
 prove "$repo" br
 ck_eq  "22 also: dev proves"                           "$RC" 0
 ck_has "22 against dev"                                "$OUT" "proven: all 1 commit(s) on br have a patch equivalent on dev"
