@@ -209,8 +209,14 @@ EOS
   # the variable that says which workspace it sits in, and a reeve command run
   # from inside the hand would take its reeve's workspace as its own and
   # relabel it. So the hand is marked, and that variable is taken away;
-  # everything else herdr set is left alone.
-  [ -n "$hand" ] && envs="-u HERDR_WORKSPACE_ID REEVE_HAND=$(shq "$hand") $envs"
+  # everything else herdr set is left alone. hall's own name for it goes too,
+  # for a hand going out on hall (dispatch says so in REEVE_BACKEND) or from
+  # inside it, so a line for herdr reads exactly as it did before hall.
+  local unset_ws="-u HERDR_WORKSPACE_ID"
+  if [ "${REEVE_BACKEND:-}" = hall ] || [ -n "${HALL_ENV:-}${HALL_WORKSPACE_ID:-}" ]; then
+    unset_ws="$unset_ws -u HALL_WORKSPACE_ID"
+  fi
+  [ -n "$hand" ] && envs="$unset_ws REEVE_HAND=$(shq "$hand") $envs"
   [ -n "$envs" ] && line="env $envs$line"
 
   if [ "$mode" = stdin ]; then

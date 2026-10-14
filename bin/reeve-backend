@@ -11,7 +11,7 @@
 
 BACKEND_FNS="available describe create_endpoint launch capture send_text_submit target_exists agent_state attention_state wait_change kill"
 # Optional: a backend may leave these out, and a caller treats that as a no.
-BACKEND_OPTIONAL="relabel ensure_group label_own pane_gone pane_vacant group_gone dismiss_dialog"
+BACKEND_OPTIONAL="relabel ensure_group label_own pane_gone pane_vacant group_gone dismiss_dialog place"
 
 backend_known() { ls "$REEVE_ROOT_D/backends"/*.sh 2>/dev/null | while read -r f; do basename "$f" .sh; done; }
 
@@ -24,7 +24,7 @@ backend_resolve() {
   # A record or config naming a backend that has since been removed refuses
   # by name, so the reader knows it is gone rather than misspelt.
   [ "$want" = tmux ] \
-    && die "backend tmux was removed. herdr is the only backend. set backend=herdr or unset it"
+    && die "backend tmux was removed. herdr and hall are the backends. set backend=herdr or hall, or unset it"
   lines_has "$want" "$(backend_known)" \
     || die "unknown backend '$want'. known: $(backend_known | tr '\n' ' ')"
   printf '%s\n' "$want"

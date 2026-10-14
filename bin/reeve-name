@@ -44,12 +44,13 @@ s=$(reeve_session)
 #
 # Not from a hand: dispatch marks one with REEVE_HAND, and the workspace it sits
 # in is its reeve's. Not outside a backend's own session either (no
-# HERDR_ENV): there is no workspace of its own to label, and making one at every
-# session start left an empty one behind each time. Dispatch makes it then.
+# HERDR_ENV or HALL_ENV): there is no workspace of its own to label, and making
+# one at every session start left an empty one behind each time. Dispatch makes
+# it then.
 label_group() {
   local bin b err
   [ -z "${REEVE_HAND:-}" ] || return 0
-  [ "${HERDR_ENV:-}" = 1 ] || return 0
+  [ "${HERDR_ENV:-}" = 1 ] || [ "${HALL_ENV:-}" = 1 ] || return 0
   bin=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
   if ! b=$("$bin/reeve-backend" resolve 2>/dev/null); then
     warn "no backend resolved, so no workspace was labelled $1"

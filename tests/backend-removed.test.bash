@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The tmux backend was removed and herdr is the only one shipped. A flag, the
+# The tmux backend was removed; herdr and hall are the ones shipped. A flag, the
 # environment, a config file or an old errand record that still names tmux is
 # refused by name, never crashes, and the errand still lists.
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
@@ -15,12 +15,14 @@ SCRATCH=$(mktemp -d) && SCRATCH=$(cd -P "$SCRATCH" && pwd) \
 trap 'rm -rf "$SCRATCH"' EXIT
 export REEVE_HOME="$SCRATCH/home"
 export REEVE_NO_CARETAKER=1
-unset REEVE_BACKEND REEVE_ROOT HERDR_ENV
+unset REEVE_BACKEND REEVE_ROOT HERDR_ENV \
+      HALL_ENV HALL_PANE_ID HALL_SOCKET_PATH HALL_TAB_ID HALL_WORKSPACE_ID HALL_BIN_PATH \
+      HALL_SESSION HALL_CLIENT_SOCKET_PATH REEVE_HALL_BIN REEVE_HALL_SOCKET REEVE_HALL_SESSION
 mkdir -p "$REEVE_HOME/state" "$REEVE_HOME/config"
 B="$ROOT/bin/reeve-backend"
 
 eq  "1 with nothing set, herdr"                  "$("$B" resolve 2>&1)" herdr
-WHY='backend tmux was removed. herdr is the only backend'
+WHY='backend tmux was removed. herdr and hall are the backends'
 out=$("$B" resolve --backend tmux 2>&1); rc=$?
 eq  "1 a flag naming it is refused"              "$rc" 1
 has "1 by name"                                  "$out" "$WHY"
@@ -30,7 +32,7 @@ has "1 by name too"                              "$out" "$WHY"
 printf 'tmux\n' > "$REEVE_HOME/config/backend"
 out=$("$B" resolve 2>&1); rc=$?
 eq  "1 and the config file"                      "$rc" 1
-has "1 saying how to fix it"                     "$out" "set backend=herdr or unset it"
+has "1 saying how to fix it"                     "$out" "set backend=herdr or hall, or unset it"
 rm -f "$REEVE_HOME/config/backend"
 out=$("$B" call agent_state 'x|%3' --backend tmux 2>&1); rc=$?
 eq  "1 a call for an old record refuses"         "$rc" 1

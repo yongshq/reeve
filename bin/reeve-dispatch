@@ -396,7 +396,7 @@ if browser_wanted "$office"; then
   esac
 fi
 
-cmdline=$("$BIN/reeve-harness" render "$harness" "$brief" --hand "$id" \
+cmdline=$(REEVE_BACKEND=$backend "$BIN/reeve-harness" render "$harness" "$brief" --hand "$id" \
             ${errand_settings:+--settings "$errand_settings"} \
             ${browser_cfg:+--browser "$browser_cfg"} \
             ${sib_args+"${sib_args[@]}"} \
@@ -419,6 +419,13 @@ fi
   || die "endpoint opened at $target but the launch line could not be submitted. investigate before retrying: the worktree exists and a second attempt could start two hands on it"
 
 meta_set "$id" backend "$backend"
+# Which of the backend's sessions the hand is in, for bin/reeve-listing, when
+# the backend can say: hall can, herdr has no `place`, so a herdr record reads
+# exactly as before. One left from a relaunch on another backend is blanked.
+hand_place=$("$BIN/reeve-backend" call place --backend "$backend" 2>/dev/null | head -n 1) || hand_place=''
+if [ -n "$hand_place" ]; then meta_set "$id" place "$hand_place"
+elif [ -n "$(meta_get "$id" place '')" ]; then meta_set "$id" place ''
+fi
 meta_set "$id" harness "$harness"
 meta_set "$id" target "$target"
 meta_set "$id" cwd "$cwd"

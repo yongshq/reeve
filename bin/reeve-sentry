@@ -340,9 +340,11 @@ reap_one() {
   # has closed the session, and a refusal before that point leaves it standing.
   # A target left standing is kept only while there is a session at it:
   # teardown leaves target= on one already closed, which is gone, not kept.
+  # A record with no backend predates hall, so herdr, as every reader takes it,
+  # never whatever this watch's own environment would resolve.
   tgt=$(meta_get "$i" target '')
   if [ -n "$tgt" ]; then
-    case $("$BIN/reeve-backend" call agent_state "$tgt" --backend "$(meta_get "$i" backend '')" 2>/dev/null) in
+    case $("$BIN/reeve-backend" call agent_state "$tgt" --backend "$(meta_get "$i" backend herdr)" 2>/dev/null) in
       missing|dead) sess=gone ;;
       *)            sess=kept ;;
     esac

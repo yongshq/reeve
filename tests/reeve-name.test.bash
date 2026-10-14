@@ -54,11 +54,14 @@ export REEVE_HOME
 unset CLAUDE_CODE_SESSION_ID REEVE_SESSION REEVE_NAME HERDR_PANE_ID HERDR_SOCKET_PATH \
       HERDR_TAB_ID REEVE_HAND
 # A bare reeve-name also labels the reeve's workspace through the backend. Run
-# from inside a real herdr, that would rename the caller's own, so herdr is a
-# stub here that refuses everything, and the label is simply not made.
-unset HERDR_WORKSPACE_ID HERDR_ENV REEVE_BACKEND
+# from inside a real herdr or hall, that would rename the caller's own, so each
+# is a stub here that refuses everything, and the label is simply not made.
+unset HERDR_WORKSPACE_ID HERDR_ENV REEVE_BACKEND \
+      HALL_ENV HALL_PANE_ID HALL_SOCKET_PATH HALL_TAB_ID HALL_WORKSPACE_ID HALL_BIN_PATH \
+      HALL_SESSION HALL_CLIENT_SOCKET_PATH REEVE_HALL_BIN REEVE_HALL_SOCKET REEVE_HALL_SESSION
 mkdir -p "$SCRATCH/fakebin"
 printf '#!/bin/sh\nexit 1\n' > "$SCRATCH/fakebin/herdr"; chmod +x "$SCRATCH/fakebin/herdr"
+printf '#!/bin/sh\nexit 1\n' > "$SCRATCH/fakebin/hall"; chmod +x "$SCRATCH/fakebin/hall"
 PATH="$SCRATCH/fakebin:$PATH"; export PATH
 
 N="$ROOT/bin/reeve-name"

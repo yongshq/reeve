@@ -5,6 +5,9 @@
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 export REEVE_HOME=$(mktemp -d)
 H="$ROOT/bin/reeve-harness"
+# The hand prefix depends on which backend the hand goes out on, and on whether
+# this process sits inside hall, so neither is taken from the caller.
+unset REEVE_BACKEND HALL_ENV HALL_WORKSPACE_ID
 PASS=0; FAIL=0
 ck() { # ck <name> <expect-substring> <actual>
   if printf '%s' "$3" | grep -qF -- "$2"; then PASS=$((PASS+1)); printf 'ok    %s\n' "$1"
@@ -57,6 +60,17 @@ ck "json env survives quoting" 'OPENCODE_CONFIG_CONTENT=' "$oc"
 tokens=$(python3 -c "import shlex,sys; print(len(shlex.split(sys.argv[1])))" "$oc" 2>/dev/null || echo 0)
 if [ "$tokens" -ge 4 ]; then PASS=$((PASS+1)); printf 'ok    opencode line is shell-parseable (%s tokens)\n' "$tokens"
 else FAIL=$((FAIL+1)); printf 'FAIL  opencode line does not shell-parse\n'; fi
+
+# A hand opens inside its reeve's workspace, so the variable naming that
+# workspace is taken away. herdr's always, hall's for a hand going out on hall
+# or from inside hall, so a line for herdr reads as it did before hall.
+hand=$("$H" render claude "$B" --settings "$S" --hand fix-x)
+ck "hand: herdr's workspace unset"        "env -u HERDR_WORKSPACE_ID REEVE_HAND='fix-x' "  "$hand"
+nk "hand: hall's not, outside hall"       "HALL_WORKSPACE_ID"                              "$hand"
+hand=$(REEVE_BACKEND=hall "$H" render claude "$B" --settings "$S" --hand fix-x)
+ck "hand on hall: hall's unset too"       "env -u HERDR_WORKSPACE_ID -u HALL_WORKSPACE_ID REEVE_HAND='fix-x' " "$hand"
+hand=$(HALL_ENV=1 HALL_WORKSPACE_ID=w3 "$H" render claude "$B" --settings "$S" --hand fix-x)
+ck "hand from inside hall: hall's too"    "env -u HERDR_WORKSPACE_ID -u HALL_WORKSPACE_ID REEVE_HAND='fix-x' " "$hand"
 
 # refusals
 out=$("$H" render claude relative/path.md --settings "$S" 2>&1 || true)

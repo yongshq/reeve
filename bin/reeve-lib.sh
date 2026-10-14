@@ -676,7 +676,15 @@ valid_reeve_name() {
 # dropped: the key is one field. No epoch: herdr restores its panes with their
 # ids across a restart, so the same id there is the same pane, and the name
 # following it is right.
+#
+# Inside hall (HALL_ENV=1) hall's own pair. hall sets the herdr pair to the same
+# values in its panes, so a key read either way names one pane.
 reeve_pane() {
+  if [ "${HALL_ENV:-}" = 1 ]; then
+    [ -n "${HALL_PANE_ID:-}" ] || return 0
+    printf '%s%s' "$HALL_PANE_ID" "${HALL_SOCKET_PATH:+@$HALL_SOCKET_PATH}" | tr -d '[:space:]'
+    return 0
+  fi
   [ -n "${HERDR_PANE_ID:-}" ] || return 0
   printf '%s%s' "$HERDR_PANE_ID" "${HERDR_SOCKET_PATH:+@$HERDR_SOCKET_PATH}" | tr -d '[:space:]'
 }
@@ -690,24 +698,37 @@ pane_eq() {
   [ "${1%%@*}" = "${2%%@*}" ]
 }
 
-# pane_gone <pane key>   0 only when the server the key names answers that the
-# pane is not there. herdr's ids read `w4:p1`. A bare key has no server to ask,
-# and a server that cannot be asked proves nothing: both are no.
+# pane_gone <pane key> [<backend>]   0 only when the server the key names
+# answers that the pane is not there. herdr's ids read `w4:p1`. A bare key has
+# no server to ask, and a server that cannot be asked proves nothing: both are
+# no. The backend is the one the pane's holder recorded (session_backend),
+# herdr when none is given.
 pane_gone() {
   local p=$1
   case $p in *@*) ;; *) return 1 ;; esac
-  "$REEVE_ROOT_D/bin/reeve-backend" call pane_gone "${p%%@*}" "${p#*@}" --backend herdr \
+  "$REEVE_ROOT_D/bin/reeve-backend" call pane_gone "${p%%@*}" "${p#*@}" --backend "${2:-herdr}" \
     >/dev/null 2>&1
 }
 
-# pane_vacant <pane key>   0 only when the server the key names answers that no
-# harness runs in that pane: it is gone, or it fell back to a shell. What a
-# reeve that crashed leaves behind. Anything that cannot be asked is a no.
+# pane_vacant <pane key> [<backend>]   0 only when the server the key names
+# answers that no harness runs in that pane: it is gone, or it fell back to a
+# shell. What a reeve that crashed leaves behind. Anything that cannot be asked
+# is a no.
 pane_vacant() {
   local p=$1
   case $p in *@*) ;; *) return 1 ;; esac
-  "$REEVE_ROOT_D/bin/reeve-backend" call pane_vacant "${p%%@*}" "${p#*@}" --backend herdr \
+  "$REEVE_ROOT_D/bin/reeve-backend" call pane_vacant "${p%%@*}" "${p#*@}" --backend "${2:-herdr}" \
     >/dev/null 2>&1
+}
+
+# session_backend <sid>   the backend that session's pane lives on: the first
+# word of its `place` record, herdr without one. Every record from before hall
+# has none, and every one of those is a herdr pane.
+session_backend() {
+  local f b='' rest
+  f=$(session_dir "$1")/place
+  [ -f "$f" ] && { read -r b rest < "$f"; } 2>/dev/null
+  printf '%s\n' "${b:-herdr}"
 }
 
 # holder_live <sid>   0 when that session still holds what it holds: its
@@ -719,7 +740,7 @@ holder_live() {
   [ "$(session_state "$1")" = alive ] || return 1
   p=$(session_pane "$1" | tr -d '[:space:]')
   [ -n "$p" ] || return 0
-  ! pane_vacant "$p"
+  ! pane_vacant "$p" "$(session_backend "$1")"
 }
 
 # session_replaced <sid>   0 when that other session ran in this very pane: the
@@ -882,7 +903,7 @@ name_live_elsewhere() {
     pane_eq "$p" "$pane" && continue
     # Nor the session this one took over from: session_replaced's rule.
     session_replaced "$sid" && continue
-    [ "$p" != - ] && pane_vacant "$p" && continue
+    [ "$p" != - ] && pane_vacant "$p" "$(session_backend "$sid")" && continue
     printf '%s\n' "$sid"; return 0
   done <<NAME_HOLDERS_EOF
 $(name_holders "${3:-}")
@@ -910,9 +931,30 @@ session_names() { # session_names <sid>   every name the record held, current la
 pane_store() { # pane_store <sid>   record the pane, when there is one and it moved
   local d p; p=$(reeve_pane); [ -n "$p" ] || return 0
   d=$(session_dir "$1")
-  [ "$(session_pane "$1")" = "$p" ] && return 0
+  if [ "$(session_pane "$1")" = "$p" ]; then
+    [ "${HALL_ENV:-}" = 1 ] && [ ! -f "$d/place" ] && place_store "$d"
+    return 0
+  fi
   mkdir -p "$d" 2>/dev/null || return 0
   printf '%s\n' "$p" > "$d/pane.$$" 2>/dev/null && mv -f "$d/pane.$$" "$d/pane" || rm -f "$d/pane.$$"
+  place_store "$d"
+}
+
+# place_store <session dir>   beside the pane, `place`: `<backend> <session
+# name>`, which server the pane key is on, for pane_gone and pane_vacant and
+# for the listing. Written for a hall pane only, the one reeve_pane keys by
+# hall's pair. A herdr pane has none, so its record reads exactly as before and
+# session_backend reads herdr; one left from a hall pane is taken away when the
+# session moves to a herdr pane. A new file, so a reader of `pane` alone is
+# unchanged.
+place_store() {
+  local d=$1 n
+  if [ "${HALL_ENV:-}" != 1 ]; then
+    [ -f "$d/place" ] && rm -f "$d/place"
+    return 0
+  fi
+  n=$("$REEVE_ROOT_D/bin/reeve-backend" call place --backend hall 2>/dev/null | head -n 1)
+  printf 'hall %s\n' "$n" > "$d/place.$$" 2>/dev/null && mv -f "$d/place.$$" "$d/place" || rm -f "$d/place.$$"
 }
 
 # reeve_name_peek   this session's stored name, writing nothing. For a caller
@@ -1061,7 +1103,7 @@ group_held_elsewhere() {
     p=$(session_pane "$k" | tr -d '[:space:]')
     if [ -n "$p" ]; then
       pane_eq "$p" "$pane" && continue
-      pane_gone "$p" && continue
+      pane_gone "$p" "$(session_backend "$k")" && continue
     else
       [ "$(session_state "$k")" = alive ] || continue
     fi
@@ -1396,7 +1438,9 @@ status_reconcile() {
         state=${state%%'['*}
         ;;
     esac
-    state=$(printf '%s' "$state" | tr -d '[:space:]')
+    # In the shell, not through tr: a fork per line was most of what reading a
+    # log cost, and the listing reads every log in flight once a second.
+    state=${state//[[:space:]]/}
     case $state in
       working)        progress=$state; last=$note; at=$stamp ;;
       blocked|failed) terminal=''; progress=$state; last=$note; at=$stamp ;;
