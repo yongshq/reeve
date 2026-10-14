@@ -47,15 +47,17 @@ delete (3).
    rule** (per machine, so a fresh machine asks once). Under it you land without asking only when
    all hold: a warden reviewed the branch tip, or reviewed the repair commits against the findings,
    in fresh context; every finding is repaired, or accepted by the liege by name for this errand;
-   the test run above passed, so an untested holding never lands this way; and the land itself is
-   one of:
+   the test run above passed, so an untested holding never lands this way; and you land with
+   `bin/reeve-land <id>`, which is one of:
    - `main` checked out nowhere: `git -C <holding> fetch . <branch>:main`.
    - the holding's primary checkout on `main` with a clean tree apart from `??` and `!!` entries:
      `git -C <holding> merge --ff-only --no-overwrite-ignore <branch>`. Git itself refuses to
      overwrite an untracked or ignored file there.
 
-   Then report what landed. Anything else, or any refusal, is "branch ready"; never rebase or
-   commit to make it hold. Pushes and PRs wait for the liege.
+   It cleans up the landed errand and every finished errand of that holding already landed,
+   branches included; a land is not finished until it has run. Then report what landed. Anything
+   else, or any refusal, is "branch ready"; never rebase or commit to make it hold. Pushes and PRs
+   wait for the liege.
 3. **You never tear down unlanded work.** `bin/reeve-teardown` owns the landed-work test. A refusal
    is a stop-and-investigate result, never an obstacle to route around. Never `--force`, never `-D`,
    never `git stash` someone else's work away. One exception, under a **standing proven-delete
@@ -233,10 +235,11 @@ every hand tab in it, mid-errand, and the watch names each one so lost, a `stale
 the old one while tabs of its errands are still open there, then to the one it sits in.
 
 So a scout disappears completely, while an artificer loses only its idle session and keeps its
-copy and branch until it lands. A `blocked:` hand is never reaped, because it may still be
-steered, and neither is a divergence, because that errand is not finished whatever it claims. A
-hand dispatched with `REEVE_NO_CARETAKER=1` is kept, for debugging: neither frees it, and no line
-is left for it, so only a watch reports it.
+copy and branch until it lands; landed work's branch goes in the same step as its copy. A
+`blocked:` hand is never reaped, because it may still be steered, and neither is a divergence,
+because that errand is not finished whatever it claims. A hand dispatched with
+`REEVE_NO_CARETAKER=1` is kept, for debugging: neither frees it, and no line is left for it, so
+only a watch reports it.
 
 You rarely run this yourself. When you do: `bin/reeve-teardown <id>`, or `--dismiss-only` to free
 the session and keep everything else.
@@ -558,6 +561,8 @@ fact per line, because you are the one reading it.
 | `bin/reeve-teardown <id>` | remove a finished errand's copy, refusing on unlanded work |
 | `bin/reeve-teardown --prove-landed <holding> <branch>` | verdict: may `branch -D` run. Read only |
 | `bin/reeve-teardown --delete-proven <hold> <br>` | the grant's delete: prove, `-D`, mark records |
+| `bin/reeve-teardown --sweep <holding>` | clean every finished errand of the holding already landed, branches included. `--dry-run` writes nothing |
+| `bin/reeve-land <id>` | the standing landing rule's land, then `--sweep`. Refuses as `branch ready: <why>`, changing nothing |
 | `bin/reeve-memory` | the mechanics behind `/inscribe`, `/strike`, `/recall`, `/glean` |
 | `bin/reeve-handoff new <manor>` | scaffold a handoff, with the factual parts already filled in |
 | `bin/reeve-context` | how full your own context window is, measured not guessed |

@@ -1353,6 +1353,37 @@ branch_birth() {
     | sed -n 's/^\([0-9a-f]\{40,\}\) .*@{\([0-9]\{1,\}\)}$/\1 \2/p'
 }
 
+# branch_owned <id> -> 0 when the record's branch= is the very ref its dispatch
+# made: branchMade= is that ref's birth now, and nothing since dropped it. The
+# rule --prove-landed in bin/reeve-teardown applies, asked of one record, so a
+# later branch of the name, the liege's or anyone's, is never the record's own.
+branch_owned() {
+  local br made rp
+  br=$(meta_get "$1" branch ''); made=$(meta_get "$1" branchMade ''); rp=$(meta_get "$1" repo '')
+  [ -n "$br" ] && [ -n "$made" ] && [ -n "$rp" ] || return 1
+  [ -z "$(meta_get "$1" branchDropped '')" ] || return 1
+  [ "$(branch_birth "$rp" "$br")" = "$made" ]
+}
+
+# holding_default <holding> -> its base: in manors.md, else main. The branch
+# work lands on, resolved as bin/reeve-brief and bin/reeve-teardown resolve it.
+holding_default() {
+  local d=main
+  [ -n "${1:-}" ] && d=$(holding_field "$1" base main)
+  printf '%s\n' "$d"
+}
+
+# branch_landed <repo> <branch> <default> -> 0 when refs/heads/<branch> is
+# reachable from refs/heads/<default>, so `git branch -d` against it loses
+# nothing. Never the default itself; anything git cannot answer is not landed.
+branch_landed() {
+  local b d
+  [ -n "$2" ] && [ "$2" != "$3" ] || return 1
+  b=$(git -C "$1" rev-parse --verify --quiet "refs/heads/$2^{commit}" 2>/dev/null) || return 1
+  d=$(git -C "$1" rev-parse --verify --quiet "refs/heads/$3^{commit}" 2>/dev/null) || return 1
+  git -C "$1" merge-base --is-ancestor "$b" "$d" 2>/dev/null
+}
+
 # errand_session <id> <bin dir>
 #
 # The hand's session as the errand records it, for a command about to type into

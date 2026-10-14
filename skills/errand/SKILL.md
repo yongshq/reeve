@@ -122,6 +122,14 @@ its session closed while you are still saying the work is in flight. If the disp
 
 With the watch running, do not poll and do not narrate progress.
 
+## Landing
+
+Under a standing landing rule (contract section 2), land with `bin/reeve-land <id>`, never by hand:
+it fast-forwards in one of the two allowed forms, then cleans up that errand and every finished
+errand of the holding already landed, copies and branches both, one line each. `branch ready:` is a
+refusal that changed nothing. Work the liege landed some other way is cleaned up the same way, by
+`bin/reeve-teardown --sweep <holding>`. Never leave a landed chain for the liege to clean up.
+
 ## Relaunching a dead errand
 
 `bin/reeve-dispatch <id>` again. It reuses the existing brief deliberately, so a relaunch cannot

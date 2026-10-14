@@ -1,0 +1,103 @@
+#!/usr/bin/env bash
+# Land a finished errand's branch on its holding's default branch, then clean
+# up everything that land leaves behind, in the same step.
+#
+# Usage:
+#   bin/reeve-land <id>
+#
+# The land the standing landing rule allows (AGENTS.md, hard rule 2), and only
+# that: a fast-forward of the holding's default branch (its base: in manors.md,
+# else main) to the errand's branch, in one of two forms.
+#
+#   default checked out nowhere      git -C <holding> fetch . <branch>:<default>
+#   default checked out in the       git -C <holding> merge --ff-only
+#   primary checkout, its tree          --no-overwrite-ignore <branch>
+#   clean apart from ?? and !!
+#
+# Asked first, and anything short of it refuses: the record exists, the errand
+# reported done with nothing open, its branch is the very ref its dispatch made
+# (bin/reeve-teardown's ownership rule), and the default fast-forwards to it. A
+# refusal prints one line, `branch ready: <why>`, exits 1 and changes nothing.
+# It never rebases, merges or commits to make a land hold. What it does not
+# ask is the reeve's judgement: whether a warden reviewed the tip and every
+# finding was repaired or accepted. That stays the reeve's to settle first.
+#
+# A branch already on the default lands as nothing to do and goes on to the
+# cleanup, so a land interrupted after its fast-forward finishes on a rerun.
+#
+# Then bin/reeve-teardown --sweep for the holding: this errand and every other
+# finished errand of the holding whose branch is now on the default, copies and
+# branches both, one line per errand cleaned, branch dropped, or errand kept
+# with its reason. A land is not finished until that has run, which is why it
+# is not a separate step for anyone to remember.
+#
+# Exit: 0 landed (or already landed) and swept, 1 refused.
+
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/reeve-lib.sh"
+BIN=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+
+case ${1:-} in -h|--help) print_help "$0"; exit 0 ;; esac
+[ $# -eq 1 ] || die "usage: bin/reeve-land <id>"
+id=$1; require_id "$id"
+
+ready() { printf 'branch ready: %s\n' "$*"; exit 1; }
+
+[ -f "$(meta_file "$id")" ] || ready "no errand record for '$id'"
+st=$(status_field "$id" state)
+open=$(status_field "$id" open); open=${open:-0}
+[ "$open" -gt 0 ] && ready "$id has $open question(s) never answered"
+[ "$st" = done ] || ready "$id has not reported done (last reported: ${st:-nothing yet})"
+
+repo=$(meta_get "$id" repo '')
+br=$(meta_get "$id" branch '')
+holding=$(meta_get "$id" holding '')
+[ -n "$br" ] || ready "$id records no branch, so there is nothing to land"
+[ -n "$repo" ] && repo=$(git -C "$repo" rev-parse --show-toplevel 2>/dev/null) \
+  || ready "the repository $id records cannot be read"
+branch_owned "$id" \
+  || ready "$br is not provably the ref $id's dispatch made (its birth is unrecorded or" \
+           "differs, or the record says it was dropped), so landing it is the liege's call"
+default_ref=$(holding_default "$holding")
+[ "$br" != "$default_ref" ] || ready "$br is the default branch of $repo itself"
+br_sha=$(git -C "$repo" rev-parse --verify --quiet "refs/heads/$br^{commit}" 2>/dev/null) \
+  || ready "no branch refs/heads/$br in $repo"
+def_sha=$(git -C "$repo" rev-parse --verify --quiet "refs/heads/$default_ref^{commit}" 2>/dev/null) \
+  || ready "no branch refs/heads/$default_ref in $repo to land on (the holding's base: in" \
+           "manors.md, else main)"
+
+if git -C "$repo" merge-base --is-ancestor "$br_sha" "$def_sha" 2>/dev/null; then
+  printf 'already landed: %s is on %s in %s\n' "$br" "$default_ref" "$repo"
+else
+  git -C "$repo" merge-base --is-ancestor "$def_sha" "$br_sha" 2>/dev/null \
+    || ready "$br does not fast-forward $default_ref in $repo; rebasing it is the liege's call"
+  at=$(git -C "$repo" worktree list --porcelain 2>/dev/null \
+       | LD_WANT="refs/heads/$default_ref" awk '
+           $1 == "worktree" { p = substr($0, 10); next }
+           $1 == "branch" && $2 == ENVIRON["LD_WANT"] { print p; exit }')
+  if [ -z "$at" ]; then
+    out=$(git -C "$repo" fetch -q . "refs/heads/$br:refs/heads/$default_ref" 2>&1) \
+      || ready "git refused the fetch onto $default_ref: $(printf '%s\n' "$out" | tail -1)"
+  elif [ "$(cd "$at" 2>/dev/null && pwd -P)" = "$(cd "$repo" && pwd -P)" ]; then
+    # Tracked changes refuse here; untracked and ignored files are git's own to
+    # protect, and --no-overwrite-ignore makes it refuse over either.
+    tree=$(git -C "$repo" status --porcelain 2>/dev/null) \
+      || ready "git cannot read the state of the primary checkout at $repo"
+    dirty=$(printf '%s\n' "$tree" | sed '/^$/d; /^?? /d; /^!! /d')
+    [ -z "$dirty" ] || ready "the primary checkout at $repo has changes to tracked files:" \
+                             "$(printf '%s\n' "$dirty" | head -3 | tr '\n' ';')"
+    out=$(git -C "$repo" merge -q --ff-only --no-overwrite-ignore "$br" 2>&1) \
+      || ready "git refused the fast-forward in $repo: $(printf '%s\n' "$out" | sed '/^$/d' | head -1)"
+  else
+    ready "$default_ref is checked out at $at, not in the primary checkout $repo"
+  fi
+  now=$(git -C "$repo" rev-parse --verify --quiet "refs/heads/$default_ref" 2>/dev/null)
+  [ "$now" = "$br_sha" ] \
+    || warn "$default_ref is at ${now:-nothing} after the land, not $br_sha; look before trusting it"
+  printf 'landed: %s onto %s in %s (%s..%s)\n' "$br" "$default_ref" "$repo" \
+    "$(git -C "$repo" rev-parse --short "$def_sha")" "$(git -C "$repo" rev-parse --short "$br_sha")"
+fi
+
+# By name when the holding is registered, so the sweep reads the same base:.
+sweep_at=$repo
+[ -n "$holding" ] && holding_line "$holding" >/dev/null && sweep_at=$holding
+"$BIN/reeve-teardown" --sweep "$sweep_at"
