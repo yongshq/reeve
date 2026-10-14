@@ -11,15 +11,17 @@
 # --sweep cleans up every finished errand of one holding whose branch has
 # landed on the holding's default branch, a long-lived branch such as dev, or
 # the --onto branch a land just went to: the copy and the branch, by this script's own teardown with
-# --drop-branch, or with --drop-proven for a branch landed on the default under
-# other commit ids. Only a branch an errand record owns (its dispatch's birth,
-# nothing since dropped), never the default, main or dev, never an errand in
+# --drop-branch, or with --drop-proven for a branch landed under other commit
+# ids on the default, or on a long-lived branch the grant names as also:. Only a
+# branch an errand record owns (its dispatch's birth, nothing since dropped),
+# never the default, main or dev, never an unlanded one, never an errand in
 # flight, blocked or with a question open, never one whose finish its own reeve
 # has not yet been told of, never a copy with uncommitted work: each of those is
-# kept and said, one line each. A branch landed under other commit ids is only
-# ever dropped under the proven-delete grant, which this machine records as the
-# file config/proven-delete in the home; without it that branch is kept and
-# said too. A record whose branch is gone is skipped without a word. --dry-run
+# kept and said, one line each, as is every other record it does not clean. A
+# branch landed under other commit ids is only ever dropped under the
+# proven-delete grant, which this machine records as the file
+# config/proven-delete in the home; without it that branch is kept and said
+# too. A record whose branch is gone is skipped without a word. --dry-run
 # says what it would do and writes nothing. Run by bin/reeve-land after every
 # land; safe to rerun.
 #
@@ -201,11 +203,19 @@ BIN=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 #   by name, a missing default made `git cherry` exit 128 with no output, and a
 #   tag named main on the branch tip made it print nothing at exit 0: both read
 #   as "no + line".
-# - no merge commit between the default and the branch. `git cherry` never
+# - the target: the default, or a further long-lived branch the grant names on
+#   an `also: <branch>` line of config/proven-delete, such as dev, for work
+#   carried there under new commit ids. An also: branch counts only when it
+#   exists, is not the default, and no errand record of the repository names it
+#   as its branch= (proven_delete_also in bin/reeve-lib.sh); anything else is
+#   ignored. The two facts below are asked of one target at a time and the
+#   first that passes both is the proof: never their union, so a branch with
+#   one commit on main and another only on dev does not prove.
+# - no merge commit between the target and the branch. `git cherry` never
 #   looks at merges, so what only a merge adds (a conflict resolved one way on
 #   the branch, another way when it landed) passes as all `-`. Always a stop.
 # - `git cherry` exits 0, prints at least one line, and every line is `-`.
-#   Empty means the branch holds nothing the default lacks: nothing to prove,
+#   Empty means the branch holds nothing the target lacks: nothing to prove,
 #   and `reeve-teardown <id> --drop-branch` is the tool for it.
 # - the branch is checked out in no copy. A copy holding it goes by this
 #   script's own teardown or not at all, and its refusal goes to the liege.
@@ -272,21 +282,39 @@ $(git -C "$repo" worktree list --porcelain 2>/dev/null \
       $1 == "worktree" { p = substr($0, 10); next }
       $1 == "branch" && $2 == ENVIRON["PL_WANT"] { print p }')
 PL_AT_EOF
-  merges=$(git -C "$repo" rev-list --merges "$default_sha..$br_sha" 2>/dev/null) \
-    || { no "git could not list the merge commits on $br"; return; }
-  [ -z "$merges" ] || { no "$br holds $(printf '%s\n' "$merges" | wc -l | tr -d ' ') merge" \
-                           "commit(s) $default_ref lacks, which git cherry cannot see; bring it" \
-                           "to the liege"; return; }
-  cherry=$(git -C "$repo" cherry "$default_sha" "$br_sha" 2>/dev/null) \
-    || { no "git cherry failed on $br against $default_ref"; return; }
-  [ -n "$cherry" ] || { no "nothing to prove: $br holds no commit $default_ref lacks, so" \
-                           "reeve-teardown ${PL_RECORDS[0]} --drop-branch is the tool, not this" \
-                           "grant"; return; }
-  total=$(printf '%s\n' "$cherry" | wc -l | tr -d ' ')
-  plus=$(printf '%s\n' "$cherry" | grep -cv '^- ')
-  [ "$plus" -eq 0 ] || { no "$plus of $total commit(s) on $br have no patch equivalent on" \
-                            "$default_ref; bring it to the liege"; return; }
-  PL_VERDICT="proven: all $total commit(s) on $br have a patch equivalent on $default_ref, no"
+  # Against the default, then each long-lived branch the grant names as also:,
+  # one target at a time: proven when every line is `-` against one of them,
+  # never against their union, so the first target that proves alone wins.
+  # Without an also: line the default is the only target, as it always was.
+  local t t_sha why='' miss
+  for t in "$default_ref" $(proven_delete_also "$repo" "$name"); do
+    if [ "$t" = "$default_ref" ]; then t_sha=$default_sha
+    else
+      t_sha=$(git -C "$repo" rev-parse --verify --quiet "refs/heads/$t^{commit}" 2>/dev/null) \
+        || continue
+    fi
+    miss=''
+    if ! merges=$(git -C "$repo" rev-list --merges "$t_sha..$br_sha" 2>/dev/null); then
+      miss="git could not list the merge commits on $br"
+    elif [ -n "$merges" ]; then
+      miss="$br holds $(printf '%s\n' "$merges" | wc -l | tr -d ' ') merge commit(s) $t lacks,"
+      miss="$miss which git cherry cannot see; bring it to the liege"
+    elif ! cherry=$(git -C "$repo" cherry "$t_sha" "$br_sha" 2>/dev/null); then
+      miss="git cherry failed on $br against $t"
+    elif [ -z "$cherry" ]; then
+      miss="nothing to prove: $br holds no commit $t lacks, so reeve-teardown ${PL_RECORDS[0]}"
+      miss="$miss --drop-branch is the tool, not this grant"
+    else
+      total=$(printf '%s\n' "$cherry" | wc -l | tr -d ' ')
+      plus=$(printf '%s\n' "$cherry" | grep -cv '^- ')
+      [ "$plus" -eq 0 ] || miss="$plus of $total commit(s) on $br have no patch equivalent on $t;"
+      [ "$plus" -eq 0 ] || miss="$miss bring it to the liege"
+    fi
+    [ -n "$miss" ] || break
+    if [ -z "$why" ]; then why=$miss; else why="$why; against $t: $miss"; fi
+  done
+  [ -z "$miss" ] || { no "$why"; return; }
+  PL_VERDICT="proven: all $total commit(s) on $br have a patch equivalent on $t, no"
   PL_VERDICT="$PL_VERDICT merges, checked out nowhere: git -C $repo branch -D $br loses nothing"
   # Said of the errand's own copy, which --drop-proven removes before it deletes.
   [ -z "${PL_ALLOW_AT:-}" ] \
@@ -336,11 +364,18 @@ delete_proven() { # delete_proven <holding> <branch>
 sweep() { # sweep <holding> <dry yes|no> [<onto>]
   local holding=$1 dry=$2 onto=${3:-} repo repo_p name='' h p i br wt st open landed out rc
   local why own me dflag default_ref ids=() owned='' n_clean=0 n_drop=0 n_kept=0
-  local index ll l_br n heads
+  local index ll l_br n heads targets dropped
   kept() { # kept <id> <branch> <why...>
     local a=$1 b=$2; shift 2
     printf 'kept: %s %s: %s\n' "$a" "$b" "$*"; n_kept=$((n_kept + 1))
   }
+  patch_equal() { # patch_equal <onto> <branch> -> 0 when git cherry is all `-`, at least one
+    local o
+    [ "$1" != "$2" ] || return 1
+    o=$(git -C "$repo" cherry "refs/heads/$1" "refs/heads/$2" 2>/dev/null) || return 1
+    [ -n "$o" ] && [ "$(printf '%s\n' "$o" | grep -cv '^- ')" = 0 ]
+  }
+  or_list() { local a=$1; shift; printf '%s' "$a"; [ $# -eq 0 ] || printf ' or %s' "$@"; }
   repo=$(resolve_holding_path "$holding") \
     || die "'$holding' is not a registered holding or a git repository"
   repo_p=$(cd "$repo" && pwd -P)
@@ -375,27 +410,61 @@ sweep() { # sweep <holding> <dry yes|no> [<onto>]
   done <<SW_EOF
 $index
 SW_EOF
+  # The proof's targets, asked once: the default, then each also: branch of the
+  # grant (proven_delete_also), the refs a branch landed under other commit ids
+  # is measured against, one at a time.
+  targets="$default_ref $(proven_delete_also "$repo" "$name" | tr '\n' ' ')"
+  # Every record put to the loop below is either cleaned or kept with its
+  # reason, one line each, never skipped without a word: a silent skip left a
+  # branch carried onto dev for the liege to find by hand.
   for i in ${ids[@]+"${ids[@]}"}; do
     br=$(meta_get "$i" branch '')
-    [ -n "$br" ] && [ -z "$(meta_get "$i" branchDropped '')" ] || continue
+    [ -n "$br" ] || continue
     git -C "$repo" rev-parse --verify --quiet "refs/heads/$br^{commit}" >/dev/null 2>&1 || continue
-    case " main master dev develop $default_ref $onto " in *" $br "*) continue ;; esac
+    dropped=$(meta_get "$i" branchDropped '')
+    if [ -n "$dropped" ]; then
+      kept "$i" "$br" "its own branch was dropped on $dropped; the $br here now is a later one"
+      continue
+    fi
+    case " main master dev develop $default_ref $onto " in
+      *" $br "*) kept "$i" "$br" "a long-lived branch, never an errand's to drop"; continue ;;
+    esac
     # Landed by ancestry, on the default, a long-lived branch such as dev or the
-    # branch a land just went to, or under other commit ids on the default, the
-    # one ref the proof asks.
-    # Unlanded is the ordinary wait for the liege, not something kept, so it is
-    # not said here.
+    # branch a land just went to, or under other commit ids on one of the
+    # proof's targets.
     landed=''
     for n in $ll $onto; do branch_landed "$repo" "$br" "$n" && { landed=ancestor; break; }; done
     if [ -z "$landed" ]; then
-      out=$(git -C "$repo" cherry "refs/heads/$default_ref" "refs/heads/$br" 2>/dev/null) || out=''
-      [ -n "$out" ] && [ "$(printf '%s\n' "$out" | grep -cv '^- ')" = 0 ] || continue
-      landed=patch
+      for n in $targets; do
+        patch_equal "$n" "$br" && { landed=patch; break; }
+      done
     fi
-    # Another record of this holding owning the name speaks for it.
+    if [ -z "$landed" ]; then
+      # Unlanded, the ordinary wait for the liege, said like any other keep. A
+      # long-lived branch the proof does not ask, where the work did land under
+      # other commit ids, is named, so the gap is visible rather than silent.
+      why="not landed: not on $(or_list $ll $onto), nor under other commit ids on"
+      why="$why $(or_list $targets)"
+      for n in $ll; do
+        case " $targets " in *" $n "*) continue ;; esac
+        patch_equal "$n" "$br" || continue
+        if proven_delete_granted; then
+          why="landed on $n under other commit ids, a branch the proven-delete grant does not"
+          why="$why name (an 'also: $n' line in $(config_file proven-delete) extends it there)"
+        else
+          why="landed on $n under other commit ids; the proven-delete grant is not recorded on"
+          why="$why this machine"
+        fi
+        break
+      done
+      kept "$i" "$br" "$why"; continue
+    fi
     if ! branch_owned "$i"; then
-      lines_has "$br" "$owned" \
-        || kept "$i" "$br" "not provably the ref its dispatch made, so it is the liege's"
+      if lines_has "$br" "$owned"; then
+        kept "$i" "$br" "not its own ref: another errand record of this holding owns $br now"
+      else
+        kept "$i" "$br" "not provably the ref its dispatch made, so it is the liege's"
+      fi
       continue
     fi
     st=$(status_field "$i" state)

@@ -31,6 +31,13 @@ fi
 # Not a warning either way: the grant is the liege's to give, per machine.
 if proven_delete_granted; then
   printf '  grants      proven-delete recorded (%s)\n' "$(config_file proven-delete)"
+  # Names as written; each repository asks only those long-lived there.
+  also=$(proven_delete_also_names | tr '\n' ' ' | sed 's/ *$//')
+  if [ -n "$also" ]; then
+    printf '              also: %s, proved against besides each default\n' "$also"
+  else
+    printf '              also: none, so it proves against each default only\n'
+  fi
 else
   printf '  grants      proven-delete not recorded (%s absent)\n' "$(config_file proven-delete)"
   printf '              so a sweep keeps branches landed under other commit ids\n'

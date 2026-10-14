@@ -35,6 +35,10 @@
 #      entry for it sits on the proved tip
 #   17 a stray REEVE_LONG_LIVED naming a liege or an errand branch widens
 #      nothing: the cache may only narrow
+#   18 a branch carried onto dev under new commit ids: kept with its reason
+#      without the grant's also: dev, dropped with it; an also: naming an
+#      errand's branch or no branch is ignored; a `+` line, a union of main and
+#      dev, and a liege branch never prove
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 
 # --- safety -----------------------------------------------------------------
@@ -312,7 +316,8 @@ ck_eq  "7 sweeps"                              "$RC" 0
 ck_has "7 a reused name is kept as the liege's" \
   "$OUT" "kept: r feat/r: not provably the ref its dispatch made"
 ck_eq  "7 and the reused branch stays"         "$(has_br feat/r)" yes
-ck_not "7 a record naming main is not acted on" "$OUT" "m main"
+ck_has "7 a record naming main is kept, with why" \
+  "$OUT" "kept: m main: a long-lived branch, never an errand's to drop"
 ck_eq  "7 main stays"                          "$(has_br main)" yes
 # No grant recorded, as on a fresh machine: the proven route is never taken.
 ck_has "7 a ported branch is kept without the grant" \
@@ -507,7 +512,8 @@ ck_has "12 the sweep cleans the dev chain's original" "$OUT" "cleaned: a2"
 ck_has "12 and its mend"                       "$OUT" "cleaned: b2"
 ck_eq  "12 feat/a2 is gone"                    "$(has_br feat/a2)" no
 ck_eq  "12 feat/b2 is gone"                    "$(has_br feat/b2)" no
-ck_not "12 a branch only on a liege branch is not taken" "$OUT" "c2"
+ck_not "12 a branch only on a liege branch is not taken" "$OUT" "cleaned: c2"
+ck_has "12 and is kept, with why"              "$OUT" "kept: c2 feat/c2: not landed: not on main or dev,"
 ck_eq  "12 feat/c2 stays"                      "$(has_br feat/c2)" yes
 ck_eq  "12 its copy stays"                     "$(present "$(wt_of c2)")" present
 ck_not "12 nor one only on an errand's branch" "$OUT" "cleaned: d2"
@@ -668,6 +674,94 @@ rm "$REEVE_HOME/state/devs.meta"
 OUT=$(REEVE_LONG_LIVED="$repo_p	main	main dev" "$ROOT/bin/reeve-teardown" w 2>&1); RC=$?
 ck_eq  "17 a true cache still takes landed work" "$RC" 0
 ck_eq  "17 feat/w is gone"                     "$(has_br feat/w)" no
+
+echo "--- 18. the grant's also: a branch carried onto dev under new commit ids ---"
+# The live case: an errand's branch carried onto dev as a new commit, main
+# behind, so it is on neither by ancestry and patch-equal only on dev.
+# port <branch> [<n>]: carry the last <n> commits of <branch> onto dev, picked
+# in the primary checkout, which goes back to main after.
+port() {
+  git -C "$repo" checkout -q dev
+  git -C "$repo" cherry-pick "refs/heads/$1~${2:-1}..refs/heads/$1" >/dev/null
+  git -C "$repo" checkout -q main
+}
+proven_granted() { [ -f "$REEVE_HOME/config/proven-delete" ]; }
+also() { proven_granted || grant; printf 'also: %s\n' "$@" >> "$REEVE_HOME/config/proven-delete"; }
+dev_holding() {
+  fresh_home "$1"; holding "$1"
+  git -C "$repo" branch dev main
+  git -C "$repo" checkout -q dev
+  echo d > "$repo/d"; git -C "$repo" add d; git -C "$repo" commit -qm "dev only"
+  git -C "$repo" checkout -q main
+}
+dev_holding eighteen-none
+errand pd main; port feat/pd
+sweep eighteen-none
+ck_has "18 without the grant, kept with why"   "$OUT" \
+  "kept: pd feat/pd: landed on dev under other commit ids; the proven-delete grant is not recorded"
+ck_eq  "18 its branch stays"                   "$(has_br feat/pd)" yes
+grant
+sweep eighteen-none
+ck_has "18 granted, no also: kept, naming the line that extends it" "$OUT" \
+  "kept: pd feat/pd: landed on dev under other commit ids, a branch the proven-delete grant does not name (an 'also: dev' line"
+ck_has "18 and the count says so"              "$OUT" "0 cleaned, 0 dropped, 1 kept"
+ck_eq  "18 its branch stays"                   "$(has_br feat/pd)" yes
+ck_eq  "18 its copy stays"                     "$(present "$(wt_of pd)")" present
+also nope feat/pz
+errand pz main                                 # an errand branch holding pd's port
+git -C "$(wt_of pz)" reset -q --hard dev
+git -C "$(wt_of pz)" commit -q --allow-empty -m pz
+sweep eighteen-none
+ck_has "18 also: a missing branch or an errand's is ignored" "$OUT" \
+  "kept: pd feat/pd: landed on dev under other commit ids, a branch the proven-delete grant does not name"
+ck_eq  "18 its branch stays"                   "$(has_br feat/pd)" yes
+also dev
+ck_has "18 the doctor shows the also: list"    "$("$ROOT/bin/reeve-doctor" 2>&1)" "also: nope feat/pz dev"
+OUT=$("$ROOT/bin/reeve-teardown" --prove-landed eighteen-none feat/pd 2>&1); RC=$?
+ck_eq  "18 with also: dev, a copy still holds it" "$RC" 1
+ck_has "18 and says where"                     "$OUT" "feat/pd is checked out at"
+before=$(snapshot); sweep eighteen-none --dry-run
+ck_has "18 a dry run says it would drop it"    "$OUT" "would drop: feat/pd (landed under other commit ids)"
+ck_eq  "18 and wrote nothing"                  "$(snapshot)" "$before"
+sweep eighteen-none
+ck_has "18 with also: dev, the sweep cleans it" "$OUT" "cleaned: pd"
+ck_has "18 and drops its branch"               "$OUT" "dropped: feat/pd (landed under other commit ids)"
+ck_eq  "18 feat/pd is gone"                    "$(has_br feat/pd)" no
+ck_eq  "18 its copy is gone"                   "$(present "$(wt_of pd)")" removed
+ck_has "18 the record says it was dropped"     "$(meta_of pd branchDropped)" 2026
+ck_has "18 the unlanded errand is kept, with why" "$OUT" "kept: pz feat/pz: not landed:"
+ck_eq  "18 dev stays"                          "$(has_br dev)" yes
+# A + line: one commit carried, the other not.
+dev_holding eighteen-plus; also dev
+errand pp main
+echo more > "$(wt_of pp)/more"; git -C "$(wt_of pp)" add more; git -C "$(wt_of pp)" commit -qm more
+port feat/pp
+sweep eighteen-plus
+ck_has "18 a + line is kept, with why"         "$OUT" "kept: pp feat/pp: not landed: not on main or dev,"
+ck_eq  "18 its branch stays"                   "$(has_br feat/pp)" yes
+git -C "$repo" worktree remove "$(wt_of pp)"
+OUT=$("$ROOT/bin/reeve-teardown" --prove-landed eighteen-plus feat/pp 2>&1); RC=$?
+ck_eq  "18 the proof refuses a + line"         "$RC" 1
+ck_has "18 against each target"                "$OUT" "2 of 2 commit(s) on feat/pp have no patch equivalent on main; bring it to the liege; against dev: 1 of 2"
+# A union: one commit on main, the other only on dev, each under a new id.
+errand pu main
+echo more > "$(wt_of pu)/more-u"; git -C "$(wt_of pu)" add more-u; git -C "$(wt_of pu)" commit -qm more-u
+echo t > "$repo/t"; git -C "$repo" add t; git -C "$repo" commit -qm trunk
+git -C "$repo" cherry-pick "refs/heads/feat/pu~1" >/dev/null
+port feat/pu
+git -C "$repo" worktree remove "$(wt_of pu)"
+OUT=$("$ROOT/bin/reeve-teardown" --delete-proven eighteen-plus feat/pu 2>&1); RC=$?
+ck_eq  "18 a union of main and dev never proves" "$RC" 1
+ck_eq  "18 and feat/pu stays"                  "$(has_br feat/pu)" yes
+# A liege branch, patch-equal on dev: no record names it, never proven.
+git -C "$repo" checkout -q -b liege/y main
+echo y > "$repo/y"; git -C "$repo" add y; git -C "$repo" commit -qm y
+git -C "$repo" checkout -q main
+port liege/y
+OUT=$("$ROOT/bin/reeve-teardown" --delete-proven eighteen-plus liege/y 2>&1); RC=$?
+ck_eq  "18 a liege branch is never proven"     "$RC" 1
+ck_has "18 no record names it"                 "$OUT" "no errand record names liege/y"
+ck_eq  "18 and it stays"                       "$(has_br liege/y)" yes
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

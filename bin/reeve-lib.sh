@@ -2507,6 +2507,43 @@ config_get() {
 # a fresh one included, never deletes a branch on a patch-equivalence proof.
 proven_delete_granted() { [ -f "$(config_file proven-delete)" ]; }
 
+# proven_delete_also_names -> every `also: <branch>` line of the grant, as
+# written, one name per line: the further long-lived branches the liege extended
+# the grant to, such as dev, for work carried there under new commit ids. Only
+# the names; proven_delete_also decides which of them count for a repository.
+proven_delete_also_names() {
+  proven_delete_granted || return 0
+  sed -n 's/^[[:space:]]*also:[[:space:]]*\([^[:space:]]\{1,\}\)[[:space:]]*$/\1/p' \
+    "$(config_file proven-delete)" 2>/dev/null
+}
+
+# proven_delete_also <repo> [<holding>] -> the also: branches the proof asks in
+# that repository besides its default, one per line: each valid branch name that
+# exists as refs/heads/<name>, is not the default (asked anyway), and that no
+# errand record of the repository names as its branch=, long_lived_branches' own
+# rule. Anything else is ignored, so a marker naming an errand's branch, or a
+# branch that is not there, widens nothing. Nothing without the grant.
+proven_delete_also() {
+  local n d names='' named seen=''
+  d=$(holding_default "${2:-}")
+  while IFS= read -r n; do
+    [ -n "$n" ] && git check-ref-format "refs/heads/$n" >/dev/null 2>&1 || continue
+    names="$names $n"
+  done <<PDA_EOF
+$(proven_delete_also_names)
+PDA_EOF
+  [ -n "$names" ] || return 0
+  # shellcheck disable=SC2086 # names: check-ref-format vetted, no glob characters
+  named=$(records_naming_any "$1" $names)
+  for n in $names; do
+    case " $d $seen " in *" $n "*) continue ;; esac
+    seen="$seen $n"
+    git -C "$1" rev-parse --verify --quiet "refs/heads/$n^{commit}" >/dev/null 2>&1 || continue
+    lines_has "$n" "$named" && continue
+    printf '%s\n' "$n"
+  done
+}
+
 # --- the household browser --------------------------------------------------
 # A hand that changes or reviews something visible checks the result itself, in
 # a browser the household owns: one MCP server, chrome-devtools-mcp at a pinned

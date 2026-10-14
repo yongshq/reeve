@@ -11,6 +11,9 @@
 # the grant's own delete, refused without config/proven-delete. 18 to 20 are a
 # name reused after a delete by hand, and a reflog gone. 21 is a forced rename
 # or copy onto the name on reftable, which keeps the overwritten ref's reflog.
+# 22 is the grant's also: a further long-lived branch such as dev, proved
+# against one target at a time, and ignored when it names an errand's branch or
+# no branch at all.
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 
 # --- safety -----------------------------------------------------------------
@@ -329,6 +332,33 @@ if git init -q --ref-format=reftable "$SCRATCH/rtprobe" >/dev/null 2>&1; then
 else
   printf 'skip  21 this git has no reftable (git init --ref-format=reftable refused)\n'
 fi
+
+# 22 also: dev. br carried onto dev under a new id, main behind: proven only
+# once the grant names dev, and never through an also: an errand record names.
+also() { printf 'granted\n' > "$REEVE_HOME/config/proven-delete"
+         [ $# -eq 0 ] || printf 'also: %s\n' "$@" >> "$REEVE_HOME/config/proven-delete"; }
+scene alsodev
+G checkout -b dev; echo d > "$repo/d"; G add d; G commit -m dev; G cherry-pick br; G checkout main
+also
+prove "$repo" br
+ck_eq  "22 without also: dev, not proven"              "$RC" 1
+ck_has "22 measured against main alone"                "$OUT" "not proven: 1 of 1 commit(s) on br have no patch equivalent on main; bring it to the liege"
+also nope
+prove "$repo" br
+ck_eq  "22 also: a branch that is not there is ignored" "$RC" 1
+ck_has "22 and never asked"                            "$OUT" "equivalent on main; bring it to the liege"
+also dev
+printf 'office=artificer\nrepo=%s\nbranch=dev\n' "$repo" > "$REEVE_HOME/state/alsodev-dev.meta"
+prove "$repo" br
+ck_eq  "22 also: an errand's branch is ignored"        "$RC" 1
+rm -f "$REEVE_HOME/state/alsodev-dev.meta"
+prove "$repo" br
+ck_eq  "22 also: dev proves"                           "$RC" 0
+ck_has "22 against dev"                                "$OUT" "proven: all 1 commit(s) on br have a patch equivalent on dev"
+OUT=$("$ROOT/bin/reeve-teardown" --delete-proven "$repo" br 2>&1); RC=$?
+ck_eq  "22 and deletes"                                "$RC" 0
+ck_eq  "22 the branch is gone"                         "$(git -C "$repo" branch --list br)" ""
+also
 
 # 12 usage errors are not verdicts.
 OUT=$("$ROOT/bin/reeve-teardown" --prove-landed only-one 2>&1); RC=$?
