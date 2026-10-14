@@ -33,8 +33,9 @@ within one of its polls, after leaving the terminal line in your spool if it is 
 
 A watch or caretaker tearing down a finished errand whose own branch is already an ancestor of the
 holding's default, or of a long-lived branch such as `dev` that no errand names, drops that branch
-with `--drop-branch` in the same step, said as `landed branch <branch> dropped`; an unlanded branch
-is kept as before, `kept with N commit(s)`.
+in the same step, said as `landed branch <branch> dropped`; an unlanded branch is kept as before,
+`kept with N commit(s)`. The drop is `bin/reeve-teardown`'s own, made for every caller, so a plain
+`reeve-teardown <id>` by hand does the same.
 
 ## After a `waiting` wake: watch again at once
 

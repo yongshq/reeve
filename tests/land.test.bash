@@ -6,8 +6,9 @@
 # because the reeve ran `reeve-teardown <id>`, which keeps the branch, and
 # never swept the rest; the liege cleaned up by hand, again and again. These
 # pin the structural fix: the land itself sweeps the holding, the sweep touches
-# only finished errands' own branches that have landed, and a watch that tears
-# down a finished errand drops its branch once that branch is already landed.
+# only finished errands' own branches that have landed, and any teardown of a
+# finished errand, a watch's or a plain one by hand, drops its branch once that
+# branch is already landed.
 #
 #   1  the land with the default in the primary checkout, which is clean apart
 #      from an untracked file
@@ -28,6 +29,10 @@
 #   13 the doctor shows the grant
 #   14 a tip missing a base commit, a loop and a missing record refuse; an inner
 #      member lands alone by its own chain
+#   15 a plain teardown, no flag, drops a landed branch of its own and names it;
+#      one landed only on another errand's branch, or not its own, is kept
+#   16 --drop-proven over a copy whose folder is gone refuses unless git's
+#      entry for it sits on the proved tip
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 
 # --- safety -----------------------------------------------------------------
@@ -553,8 +558,81 @@ errand m2 feat/m1
 rm "$REEVE_HOME/state/m1.meta"
 before=$(snapshot); land m2
 ck_eq  "14 a missing record refuses"           "$RC" 1
-ck_has "14 naming the base it lost"            "$OUT" "m2 is based on feat/m1, which no errand record names"
+ck_has "14 naming the base it lost"            "$OUT" "m2 is based on feat/m1, which is no long-lived branch and no errand's"
 ck_eq  "14 and changed nothing"                "$(snapshot)" "$before"
+
+echo "--- 15. a plain teardown drops a landed branch of its own ---"
+# The review's repro: a chain fast-forwarded onto dev by hand, then each errand
+# torn down with no flag at all, the way the contract says to.
+fresh_home fifteen; holding fifteen
+git -C "$repo" branch dev main
+errand ldf main
+errand mend-ldf feat/ldf
+git -C "$repo" fetch -q . feat/mend-ldf:dev
+for e in ldf mend-ldf; do
+  OUT=$("$ROOT/bin/reeve-teardown" "$e" 2>&1); RC=$?
+  ck_eq  "15 $e tears down"                    "$RC" 0
+  ck_has "15 and names the branch it dropped"  "$OUT" "dropped branch feat/$e"
+  ck_eq  "15 feat/$e is gone"                  "$(has_br "feat/$e")" no
+  ck_eq  "15 its copy is gone"                 "$(present "$(wt_of "$e")")" removed
+  ck_has "15 the record says it was dropped"   "$(meta_of "$e" branchDropped)" 2026
+done
+ck_eq  "15 no upstream is left behind"         "$(git -C "$repo" config --get-regexp '^branch\.feat/' || echo none)" none
+# Landed only on its base, another errand's branch: its chain has not landed,
+# so the branch waits with it. --dry-run says the delete, and does none.
+errand o main
+errand mo feat/o
+git -C "$(wt_of o)" merge -q --ff-only feat/mo
+OUT=$("$ROOT/bin/reeve-teardown" mo 2>&1); RC=$?
+ck_eq  "15 a mend landed only on its original tears down" "$RC" 0
+ck_not "15 and drops nothing"                  "$OUT" "dropped branch"
+ck_eq  "15 feat/mo stays"                      "$(has_br feat/mo)" yes
+git -C "$repo" merge -q --ff-only feat/o
+OUT=$("$ROOT/bin/reeve-teardown" o --dry-run 2>&1); RC=$?
+ck_has "15 a dry run says the delete"          "$OUT" "would run: git -C $repo branch -d feat/o"
+ck_eq  "15 and makes none"                     "$(has_br feat/o)" yes
+# A branch that is not provably the record's own is never dropped this way.
+errand nb main
+git -C "$repo" merge -q --ff-only feat/nb
+sed 's|^branchMade=.*|branchMade=0000000000000000000000000000000000000000 0|' \
+  "$REEVE_HOME/state/nb.meta" > "$REEVE_HOME/state/nb.t" && mv "$REEVE_HOME/state/nb.t" "$REEVE_HOME/state/nb.meta"
+OUT=$("$ROOT/bin/reeve-teardown" nb 2>&1); RC=$?
+ck_eq  "15 one not provably its own tears down" "$RC" 0
+ck_eq  "15 and keeps the branch"               "$(has_br feat/nb)" yes
+
+echo "--- 16. --drop-proven over a copy whose folder is gone ---"
+# The review's repro: landed on main under a new id, the copy detached onto a
+# new commit C, then its folder deleted out of band. git's entry still names C,
+# the last root holding it, so neither the sweep nor --drop-proven takes it.
+fresh_home sixteen; holding sixteen; grant
+errand pc main
+pc_sha=$(tip feat/pc)
+echo t > "$repo/t"; git -C "$repo" add t; git -C "$repo" commit -qm trunk
+git -C "$repo" cherry-pick "$pc_sha" >/dev/null
+git -C "$(wt_of pc)" checkout -q --detach
+git -C "$(wt_of pc)" commit -q --allow-empty -m "only in the copy"
+c_sha=$(git -C "$(wt_of pc)" rev-parse HEAD)
+rm -rf "$(wt_of pc)"
+sweep sixteen
+ck_has "16 the sweep keeps it, with why"       "$OUT" "kept: pc feat/pc:"
+ck_has "16 naming the commit git's entry holds" "$OUT" "still names $c_sha"
+ck_eq  "16 the branch stays"                   "$(has_br feat/pc)" yes
+OUT=$("$ROOT/bin/reeve-teardown" pc --drop-proven 2>&1); RC=$?
+ck_eq  "16 --drop-proven refuses"              "$RC" 1
+ck_eq  "16 the record is not torn down"        "$(meta_of pc tornDown)" ""
+ck_eq  "16 and C is still reachable, by git's entry" \
+  "$(git -C "$repo" fsck --unreachable --no-reflogs 2>/dev/null | grep -c "$c_sha")" 0
+# A gone copy whose entry sits on the proved tip loses nothing, and goes.
+fresh_home sixteen-tip; holding sixteen-tip; grant
+errand pt main
+pt_sha=$(tip feat/pt)
+echo t > "$repo/t"; git -C "$repo" add t; git -C "$repo" commit -qm trunk
+git -C "$repo" cherry-pick "$pt_sha" >/dev/null
+git -C "$(wt_of pt)" checkout -q --detach
+rm -rf "$(wt_of pt)"
+sweep sixteen-tip
+ck_has "16 one on the proved tip is dropped"   "$OUT" "dropped: feat/pt (landed under other commit ids)"
+ck_eq  "16 its branch is gone"                 "$(has_br feat/pt)" no
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

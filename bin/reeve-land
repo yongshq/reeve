@@ -72,16 +72,16 @@ default_ref=$(holding_default "$holding")
 br_sha=$(git -C "$repo" rev-parse --verify --quiet "refs/heads/$br^{commit}" 2>/dev/null) \
   || ready "no branch refs/heads/$br in $repo"
 
-# The records of this repository, other than <id>, naming <branch> as branch=.
+# The records of this repository, other than <id>, naming <branch> as branch=,
+# from the one index of them read below.
 records_naming() { # records_naming <branch> <id>
-  local f r rp
-  for f in "$REEVE_HOME_D"/state/*.meta; do
-    [ -f "$f" ] || continue
-    r=$(basename "$f" .meta)
-    [ "$r" != "$2" ] && [ "$(meta_get "$r" branch '')" = "$1" ] || continue
-    rp=$(meta_get "$r" repo '')
-    [ -n "$rp" ] && [ "$(cd "$rp" 2>/dev/null && pwd -P)" = "$repo_p" ] && printf '%s\n' "$r"
-  done
+  local r b
+  while IFS=$'\t' read -r r b; do
+    [ -n "$r" ] && [ "$r" != "$2" ] && [ "$b" = "$1" ] && printf '%s\n' "$r"
+  done <<RN_EOF
+$index
+RN_EOF
+  return 0
 }
 
 # Where this errand's work lands: its base=, walked down through every errand
@@ -89,13 +89,13 @@ records_naming() { # records_naming <branch> <id>
 # that is no errand's. That one is the target, and only a long-lived branch is
 # one (long_lived_branches: the default, or main, master, dev or develop where no
 # record names it), the same set the sweep measures landed against. A base that
-# is neither has lost its record, and a record already walked is a loop: both
-# refuse, naming it.
+# is neither (a liege's release branch, or an errand branch whose record is
+# gone) and a record already walked, a loop, both refuse, naming it.
 #
 # A mend chain is reviewed at its tip and lands there once, carrying every
 # errand branch under it, so the tip must contain each of them that still
 # stands. One it does not contain was never reviewed with it, and refuses.
-repo_p=$(cd "$repo" && pwd -P)
+index=$(records_of_repo "$repo")
 long=$(long_lived_branches "$repo" "$holding")
 onto='' cur=$id walked=" $id " path=$br chain=''
 while [ -z "$onto" ]; do
@@ -104,8 +104,8 @@ while [ -z "$onto" ]; do
   [ "$b" != "$br" ] || ready "the errand bases under $id loop ($path -> $b), so where it lands is the" \
                              "liege's call"
   rs=$(records_naming "$b" "$cur")
-  [ -n "$rs" ] || ready "$cur is based on $b, which no errand record names and is no long-lived" \
-                        "branch in $repo, so its record is missing and where it lands is the liege's call"
+  [ -n "$rs" ] || ready "$cur is based on $b, which is no long-lived branch and no errand's in" \
+                        "$repo, so where it lands is the liege's call"
   # A name more than one record has held: the one that owns the ref now speaks
   # for it, or a lone record does. Anything else is not this script's to pick.
   next=''

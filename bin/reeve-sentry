@@ -332,18 +332,14 @@ reap_one() {
   if kept "$i"; then say ' [session kept, %s]\n' "$(meta_get "$i" keep '')"; return; fi
   [ "$reap" = yes ] || { say '\n'; return; }
   wt=$(meta_get "$i" worktree '')
-  # A branch of the record's own already on the holding's default, or on a
-  # long-lived branch such as dev, goes with its copy, so landed work is never
-  # left kept with commits on it. Unlanded, it is kept as before, the ordinary
-  # wait for a land.
-  local drop=''
-  if [ -z "${2:-}" ] && branch_owned "$i" && branch_landed_long "$(meta_get "$i" repo '')" \
-       "$(meta_get "$i" branch '')" "$(meta_get "$i" holding '')"; then
-    drop=--drop-branch
-  fi
+  # A branch of the record's own already landed goes with its copy: teardown
+  # itself decides that, for every caller, so the watch asks nothing of its own.
+  # Read before and after, so the line says only a drop this call made.
+  local dropped_was
+  dropped_was=$(meta_get "$i" branchDropped '')
   # Its stdout is dropped, its stderr kept: a refusal's reason is the one thing
   # from it the wake line repeats.
-  err=$("$BIN/reeve-teardown" "$i" ${2:+"$2"} $drop 2>&1 >/dev/null); rc=$?
+  err=$("$BIN/reeve-teardown" "$i" ${2:+"$2"} 2>&1 >/dev/null); rc=$?
   [ "$rc" = 4 ] && REAP_UNDECIDED=yes
   # Freed is read off the record, never assumed: teardown blanks target= once it
   # has closed the session, and a refusal before that point leaves it standing.
@@ -380,7 +376,7 @@ reap_one() {
     else
       say ' [session %s, copy kept%s]\n' "$sess" "$left"
     fi
-  elif [ "$rc" = 0 ] && [ -n "$drop" ] && [ -n "$(meta_get "$i" branchDropped '')" ]; then
+  elif [ "$rc" = 0 ] && [ -z "$dropped_was" ] && [ -n "$(meta_get "$i" branchDropped '')" ]; then
     say ' [session freed, copy removed, landed branch %s dropped]\n' "$(meta_get "$i" branch '')"
   elif [ "$rc" = 0 ]; then
     say ' [session freed, copy removed]\n'

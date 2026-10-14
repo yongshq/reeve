@@ -8,9 +8,9 @@
 # errand's dispatch made for that holding, by its reflog birth, and nothing since
 # dropped, so every scene records br's birth as made; case 13 takes the record
 # away, 14 and 15 the made and the not dropped. 16 and 17 are --delete-proven,
-# the grant's own delete. 18 to 20 are a name reused after a delete by hand, and
-# a reflog gone. 21 is a forced rename or copy onto the name on reftable, which
-# keeps the overwritten ref's reflog.
+# the grant's own delete, refused without config/proven-delete. 18 to 20 are a
+# name reused after a delete by hand, and a reflog gone. 21 is a forced rename
+# or copy onto the name on reftable, which keeps the overwritten ref's reflog.
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 
 # --- safety -----------------------------------------------------------------
@@ -208,8 +208,22 @@ prove "$repo" br
 ck_eq  "15 a liege branch reusing the name does not prove" "$RC" 1
 ck_has "15 says no record shows it made"               "$OUT" "no errand record names br"
 
-# 16 --delete-proven: the grant's delete. It deletes and marks every record that
-# vouched, so a liege branch later reusing the name does not prove on them.
+# 16 --delete-proven: the grant's delete. Without the grant recorded on this
+# machine it refuses before the proof, and no -D runs, whatever proves.
+scene delnogrant; G cherry-pick br
+nogrant_tip=$(git -C "$repo" rev-parse br)
+OUT=$("$ROOT/bin/reeve-teardown" --delete-proven "$repo" br 2>&1); RC=$?
+ck_eq  "16 without the grant --delete-proven refuses"  "$RC" 1
+ck_has "16 and says the grant is not recorded"         "$OUT" "the proven-delete grant is not recorded"
+ck_eq  "16 the branch is untouched"                    "$(git -C "$repo" rev-parse br)" "$nogrant_tip"
+case $(cat "$REEVE_HOME/state/delnogrant.meta") in
+  *branchDropped=*) bad "16 the record is not marked" ;;
+  *) ok "16 the record is not marked" ;;
+esac
+# With it recorded, as every --delete-proven case below has it. It deletes and
+# marks every record that vouched, so a liege branch later reusing the name does
+# not prove on them.
+mkdir -p "$REEVE_HOME/config" && echo granted > "$REEVE_HOME/config/proven-delete"
 scene delprove; G cherry-pick br
 record delprove-twin "$repo" br
 OUT=$("$ROOT/bin/reeve-teardown" --delete-proven "$repo" br 2>&1); RC=$?

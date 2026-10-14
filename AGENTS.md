@@ -49,16 +49,17 @@ delete (3).
    in fresh context; every finding is repaired, or accepted by the liege by name for this errand;
    the test run above passed, so an untested holding never lands this way; and you land with
    `bin/reeve-land <id>`, which does one of:
-   - `main` checked out nowhere: `git -C <holding> fetch . <branch>:main`.
-   - the holding's primary checkout on `main` with a clean tree apart from `??` and `!!` entries:
+   - `<base>` checked out nowhere: `git -C <holding> fetch . <branch>:<base>`.
+   - the holding's primary checkout on `<base>` with a clean tree apart from `??` and `!!` entries:
      `git -C <holding> merge --ff-only --no-overwrite-ignore <branch>`. Git itself refuses to
      overwrite an untracked or ignored file there.
 
    It lands on the errand's own base (never `main` for a `dev` errand; a mend chain once, at its
    tip, down to its original's), and cleans up the landed errand and every finished errand of that
    holding already landed, branches included; a land is not finished until it has run. Then report
-   what landed. Anything else, or any refusal, is "branch ready"; never rebase or commit to make it hold. Pushes and PRs
-   wait for the liege.
+   what landed. Anything else, or any refusal, is "branch ready": the liege's, unless another
+   standing rule `liege.md` records for that holding covers it, when it lands in that rule's own
+   form. Never rebase or commit to make it hold. Pushes and PRs wait for the liege.
 3. **You never tear down unlanded work.** `bin/reeve-teardown` owns the landed-work test (landed:
    on the base, the default, or a long-lived branch such as `dev` that no errand names). A refusal
    is a stop-and-investigate result, never an obstacle to route around. Never `--force`, never `-D`,
@@ -244,8 +245,8 @@ because that errand is not finished whatever it claims. A hand dispatched with
 `REEVE_NO_CARETAKER=1` is kept, for debugging: neither frees it, and no line is left for it, so
 only a watch reports it.
 
-You rarely run this yourself. When you do: `bin/reeve-teardown <id>`, or `--dismiss-only` to free
-the session and keep everything else.
+You rarely run this yourself. When you do: `bin/reeve-teardown <id>`, which takes a landed branch
+of the errand's own with its copy, or `--dismiss-only` to free the session and keep everything else.
 
 ### Errands another session left behind
 
@@ -561,7 +562,7 @@ fact per line, because you are the one reading it.
 | `bin/reeve-steer <id> <text>` | tell a live hand what to do next, and re-arm its idle and wedged alarms. Refuses a session at a dialog, or one it cannot tell is not |
 | `bin/reeve-deny <id>` | say no to the dialog standing in a hand's session, never Allow, and report whether it went. Refuses unless the session reads waiting |
 | `bin/reeve-sentry` | stand watch, print one reason line, exit. A hand idle and silent past its threshold is one of them, opening `idle:`, and a working hand whose screen has not moved past its threshold another, opening `wedged:` |
-| `bin/reeve-teardown <id>` | remove a finished errand's copy, refusing on unlanded work |
+| `bin/reeve-teardown <id>` | remove a finished errand's copy, and its own branch once landed, refusing on unlanded work |
 | `bin/reeve-teardown --prove-landed <holding> <branch>` | verdict: may `branch -D` run. Read only |
 | `bin/reeve-teardown --delete-proven <hold> <br>` | the grant's delete: prove, `-D`, mark records |
 | `bin/reeve-teardown --sweep <holding>` | clean every finished errand of the holding already landed, branches included; one landed under other commit ids only when `config/proven-delete` records the grant. `--dry-run` writes nothing |

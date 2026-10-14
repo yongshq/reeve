@@ -118,10 +118,13 @@ With the watch running, do not poll and do not narrate progress.
 Under a standing landing rule (contract section 2), land with `bin/reeve-land <id>`, never by hand:
 it fast-forwards the errand's own base (the default, or a long-lived branch such as `dev`) in one of
 the two allowed forms, then cleans up that errand and every finished errand of the holding already
-landed, copies and branches both, one line each. `branch ready:` is a refusal that changed nothing.
-A mend chain lands once, at its reviewed tip: the land follows each `base=` down to the original's
-base, and refuses a tip missing any branch under it. Work the liege landed some other way is
-cleaned up the same way, by `bin/reeve-teardown --sweep <holding>`. Never leave a landed chain for the liege to clean up.
+landed, copies and branches both, one line each. `branch ready:` is a refusal that changed nothing,
+and a land it refuses is "branch ready": the liege's, unless another standing rule `liege.md`
+records for that holding covers it, when it lands in that rule's own form. A mend chain lands once,
+at its reviewed tip: the land follows each `base=` down to the original's base, and refuses a tip
+missing any branch under it. Work the liege landed some other way is cleaned up the same way, by
+`bin/reeve-teardown --sweep <holding>`, and a plain `bin/reeve-teardown <id>` takes a landed branch
+of the errand's own with its copy. Never leave a landed chain for the liege to clean up.
 
 ## Relaunching a dead errand
 

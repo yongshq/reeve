@@ -1441,37 +1441,79 @@ holding_default() {
   printf '%s\n' "$d"
 }
 
+# records_of_repo <repo> -> "<id><TAB><branch>" for every errand record whose
+# repo= is that repository, read the way meta_get reads them (the first repo=
+# and branch= of each file). One awk over every record and one `cd` per
+# distinct repo= value, where a meta_get and a `cd` per record per question cost
+# seconds on a home of several hundred records.
+records_of_repo() {
+  local repo_p raw raws=''
+  repo_p=$(cd "$1" 2>/dev/null && pwd -P) || return 0
+  set -- "$REEVE_HOME_D"/state/*.meta
+  [ -f "$1" ] || return 0
+  while IFS= read -r raw; do
+    [ -n "$raw" ] && [ "$(cd "$raw" 2>/dev/null && pwd -P)" = "$repo_p" ] \
+      && raws="$raws$raw
+"
+  done <<ROR_EOF
+$(awk '/^repo=/ && !(FILENAME in seen) { seen[FILENAME] = 1; print substr($0, 6) }' "$@" \
+  | sort -u)
+ROR_EOF
+  [ -n "$raws" ] || return 0
+  ROR_REPOS=$raws awk '
+    BEGIN { n = split(ENVIRON["ROR_REPOS"], a, "\n")
+            for (k = 1; k <= n; k++) if (a[k] != "") want[a[k]] = 1 }
+    function flush() { if (f != "" && hr && (r in want)) print f "\t" b }
+    FNR == 1 { flush(); f = FILENAME; sub(/.*\//, "", f); sub(/\.meta$/, "", f)
+               r = ""; b = ""; hr = 0; hb = 0 }
+    /^repo=/ && !hr { r = substr($0, 6); hr = 1 }
+    /^branch=/ && !hb { b = substr($0, 8); hb = 1 }
+    END { flush() }' "$@"
+}
+
 # long_lived_branches <repo> [<holding>] -> the branches work lands on, one per
 # line: the holding's default, then each of main, master, dev and develop that
 # exists as refs/heads/<name> and that no errand record of the repository names
 # as its branch=, so an errand's branch is never one. The liege lands on these,
 # and work on any of them has landed, as bin/reeve-teardown's landed-work test
 # and its sweep read it.
+#
+# A sweep computes the set once and hands it to every teardown it runs as
+# REEVE_LONG_LIVED, "<repo>\t<default>\t<names...>", read back only for that
+# same repository and default. Anything else is computed afresh.
 long_lived_branches() {
-  local repo=$1 d n f r rp repo_p named seen=''
+  local repo=$1 d n repo_p named seen='' c_repo c_def c_names
   repo_p=$(cd "$repo" 2>/dev/null && pwd -P) || return 0
   d=$(holding_default "${2:-}")
+  if [ -n "${REEVE_LONG_LIVED:-}" ]; then
+    IFS=$'\t' read -r c_repo c_def c_names <<< "$REEVE_LONG_LIVED"
+    if [ "$c_repo" = "$repo_p" ] && [ "$c_def" = "$d" ]; then
+      for n in $c_names; do printf '%s\n' "$n"; done
+      return 0
+    fi
+  fi
+  named=$(records_of_repo "$repo" | cut -f2)
   for n in "$d" main master dev develop; do
     case " $seen " in *" $n "*) continue ;; esac
     seen="$seen $n"
     git -C "$repo" rev-parse --verify --quiet "refs/heads/$n^{commit}" >/dev/null 2>&1 || continue
-    named=no
-    if [ "$n" != "$d" ]; then
-      for f in "$REEVE_HOME_D"/state/*.meta; do
-        [ -f "$f" ] || continue
-        r=$(basename "$f" .meta)
-        [ "$(meta_get "$r" branch '')" = "$n" ] || continue
-        rp=$(meta_get "$r" repo '')
-        [ -n "$rp" ] && [ "$(cd "$rp" 2>/dev/null && pwd -P)" = "$repo_p" ] && { named=yes; break; }
-      done
-    fi
-    [ "$named" = yes ] || printf '%s\n' "$n"
+    [ "$n" != "$d" ] && lines_has "$n" "$named" && continue
+    printf '%s\n' "$n"
   done
 }
 
+# long_lived_cache <repo> [<holding>] -> the REEVE_LONG_LIVED value for that
+# repository, for a caller about to run several teardowns in it.
+long_lived_cache() {
+  local repo_p
+  repo_p=$(cd "$1" 2>/dev/null && pwd -P) || return 0
+  printf '%s\t%s\t%s\n' "$repo_p" "$(holding_default "${2:-}")" \
+    "$(long_lived_branches "$1" "${2:-}" | tr '\n' ' ')"
+}
+
 # branch_landed_long <repo> <branch> [<holding>] -> 0 when refs/heads/<branch>
-# is on any of long_lived_branches, the question a sweep or a watch asks before
-# it drops a branch with its copy.
+# is on any of long_lived_branches, the question a sweep or a teardown asks
+# before it drops a branch with its copy.
 branch_landed_long() {
   local n
   while IFS= read -r n; do
