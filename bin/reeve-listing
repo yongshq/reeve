@@ -1,0 +1,332 @@
+#!/usr/bin/env bash
+# Every reeve and every errand in flight on one home, as JSON, for a
+# multiplexer that draws them and reads this once a second.
+#
+# Usage:
+#   reeve-listing                  the home in $REEVE_HOME, else ~/.reeve
+#   reeve-listing --home <path>    that home instead
+#
+# Writes nothing, delivers nothing, calls no backend: no heartbeat, no wake, no
+# latch, no screen read. Everything comes off the records on disk, so a reader
+# polling it costs the household nothing and changes nothing it could notice.
+# A script asking a different question of the errands passes --no-wake to
+# reeve-status; this one has no wake to pass.
+#
+# Prints, on stdout, exit 0, even when some record cannot be read (that errand
+# shows hand_state "unknown"):
+#
+#   {"version":1,
+#    "reeves":[{"name":"Aldric",
+#               "session":{"backend":"hall","name":"default","pane_id":"w1:p1"},
+#               "live":true}],
+#    "errands":[{"id":"fix-auth","office":"artificer","owner_reeve":"Aldric",
+#                "hand_state":"needs-decision","question":"Which base?","open":1,
+#                "waiting":false,"idle":false,"wedged":false,
+#                "session":{"backend":"hall","name":"default","pane_id":"w1:p3"}}]}
+#
+# One line, no spaces. A session's `name` is null where its backend cannot say
+# (herdr). A reader showing one backend's panes filters on `session.backend`:
+# pane ids are per server, and two servers both call a session `default`.
+#
+#   reeves     each session record with a valid name that is live, or that owns
+#              an errand in flight, so a hand still nests under a reeve that is
+#              gone. One row per name, a live one first
+#   live       its heartbeat inside config/session-stale, and no successor
+#              record says another session took over from it
+#   errands    each record that was dispatched and is not torn down, a finished
+#              one included until its cleanup
+#   hand_state the reconciled state, bin/reeve-lib.sh's status_reconcile:
+#              working, needs-decision, blocked, done, failed, unknown, absent
+#   question   the newest open question, or null; `open` how many are open
+#   waiting, idle, wedged
+#              the sentry's own verdicts, from the latches its watch writes in
+#              state/: true from the moment that watch wakes for it. All false
+#              while the owner's watch is not running, since only a running
+#              watch clears a latch
+#
+# Exit 1, with one line on stderr and nothing on stdout, only when the home
+# cannot be read. Nothing else is ever said on stderr.
+
+home=''
+while [ $# -gt 0 ]; do
+  case $1 in
+    -h|--help) awk 'NR == 1 && /^#!/ { next } /^#/ { sub(/^# ?/, ""); print; next } { exit }' "$0"; exit 0 ;;
+    --home)    [ $# -ge 2 ] || { printf 'reeve: --home needs a path\n' >&2; exit 2; }
+               home=$2; shift 2 ;;
+    --home=*)  home=${1#*=}; shift ;;
+    *)         printf "reeve: unknown argument '%s'. usage: reeve-listing [--home <path>]\n" "$1" >&2; exit 2 ;;
+  esac
+done
+[ -n "$home" ] && REEVE_HOME=$home
+
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/reeve-lib.sh"
+
+state="$REEVE_HOME_D/state"
+if [ ! -d "$REEVE_HOME_D" ] || [ ! -r "$REEVE_HOME_D" ] || [ ! -x "$REEVE_HOME_D" ] \
+   || { [ -e "$state" ] && { [ ! -d "$state" ] || [ ! -r "$state" ] || [ ! -x "$state" ]; }; }; then
+  printf 'reeve: cannot read the home at %s\n' "$REEVE_HOME_D" >&2
+  exit 1
+fi
+# The home is readable, so from here on nothing is said on stderr: a reader
+# polling every second would log every word.
+exec 2>/dev/null
+
+NL='
+'
+
+# Both globs, taken now: from here on nothing is split as a pattern, so a
+# stray `*` in a record can never expand against the disk.
+metas=("$state"/*.meta)
+sessions=("$state"/sessions/*)
+set -f
+
+# js <text>   into $J, a JSON string, quotes included, or null for nothing.
+# Pure bash and no subshell: it runs for every field of every record, every
+# second.
+js() {
+  local s=$1 o c h
+  [ -n "$s" ] || { J=null; return 0; }
+  s=${s//\\/\\\\}
+  s=${s//\"/\\\"}
+  s=${s//$'\n'/\\n}
+  s=${s//$'\r'/\\r}
+  s=${s//$'\t'/\\t}
+  case $s in
+    *[$'\001'-$'\037']*)
+      for o in 01 02 03 04 05 06 07 10 13 14 16 17 20 21 22 23 24 25 26 27 30 31 32 33 34 35 36 37; do
+        printf -v c "\\$o"
+        printf -v h '\\u%04x' "$((8#$o))"
+        s=${s//$c/$h}
+      done ;;
+  esac
+  J="\"$s\""
+}
+
+# first_line <file>   into $LINE, whitespace removed, or empty and rc 1. A
+# builtin read, never head: one fork per record is most of what a listing over
+# hundreds of session records would cost.
+first_line() {
+  LINE=''
+  [ -f "$1" ] || return 1
+  IFS= read -r LINE < "$1" || [ -n "$LINE" ] || return 1
+  LINE=${LINE//[[:space:]]/}
+  return 0
+}
+
+# name_of <sid>   into $NAME, the session's stored name under session_name's
+# rule, or empty and rc 1
+name_of() {
+  NAME=''
+  [ -n "$1" ] || return 1
+  first_line "$state/sessions/$1/name" || return 1
+  valid_reeve_name "$LINE" || return 1
+  NAME=$LINE
+}
+
+# pane_id_of <target>   into $PANE, the pane a target addresses, by the
+# backends' target grammar: `<ws>|<pane>[|<tab>]`, then an optional
+# `#c<n>l<m>` identity
+pane_id_of() {
+  local b=$1 r
+  PANE=''
+  [ -n "$b" ] || return 0
+  [[ $b =~ ^(.*)#c[0-9]*l[0-9]*$ ]] && b=${BASH_REMATCH[1]}
+  case $b in *'|'*) ;; *) return 0 ;; esac
+  r=${b#*|}; PANE=${r%%|*}
+}
+
+# watch_of <sid>   0 while that session's watch runs: watch_live_for's rule,
+# each marker read once
+watches=''
+watch_of() {
+  local w c=''
+  [ -n "$1" ] || return 1
+  case $NL$watches in *"$NL$1 yes$NL"*) return 0 ;; *"$NL$1 no$NL"*) return 1 ;; esac
+  [ -f "$state/.sentry.watch-$1" ] && IFS= read -r c < "$state/.sentry.watch-$1"
+  if marker_alive "$c"; then w=yes; else w=no; fi
+  watches="$watches$1 $w$NL"
+  [ "$w" = yes ]
+}
+
+# One clock read. REEVE_NOW and REEVE_ATTN_NOW are the test suite's, as in
+# session_state and attn_now.
+t=$(date +%s)
+now=${REEVE_NOW:-$t}
+anow=${REEVE_ATTN_NOW:-$t}
+# config_get's value, read without its tr: the whole file, whitespace removed
+stale=''
+[ -f "$REEVE_HOME_D/config/session-stale" ] && IFS= read -r -d '' stale < "$REEVE_HOME_D/config/session-stale"
+stale=${stale//[[:space:]]/}
+case $stale in ''|*[!0-9]*) stale=900 ;; esac
+
+# --- errands in flight ------------------------------------------------------
+# The sentry's live_errands rule, without its owner filter and without its
+# "already reported" one: a target or a dispatch stamp, and no tornDown. Each
+# key's first line wins, as meta_get reads it.
+#
+# One awk over every record, never a read per record: most are torn down, and
+# bash 3.2 reads a whole file a byte at a time, which over two thousand of them
+# cost more than the rest of the listing together. One line per record in
+# flight, its fields joined by \037, which no field holds. In the glob's order,
+# and a thousand records per awk, so no home ever grows past what one command
+# line may carry. Each file read by getline, which skips one it cannot open
+# where an awk given it as input may stop there, hiding every record after it.
+meta_awk='
+  BEGIN {
+    for (a = 1; a < ARGC; a++) {
+      f = ARGV[a]; torn = 0; split("", v); split("", got)
+      while ((getline line < f) > 0) {
+        i = index(line, "="); if (i < 2) continue
+        k = substr(line, 1, i - 1); if (k in got) continue
+        got[k] = 1; v[k] = substr(line, i + 1)
+        if (k == "tornDown" && v[k] != "") torn = 1
+      }
+      close(f)
+      if (!torn && (v["target"] != "" || v["dispatched"] != ""))
+        printf "%s\037%s\037%s\037%s\037%s\037%s\037%s\037\n", f, v["office"], v["reeve"], v["session"], v["backend"], v["place"], v["target"]
+    }
+    exit
+  }'
+inflight=''
+if [ -f "${metas[0]}" ]; then
+  inflight=$(i=0; while [ "$i" -lt ${#metas[@]} ]; do
+               awk "$meta_awk" "${metas[@]:$i:1000}"; i=$((i + 1000))
+             done)
+fi
+
+owners=''
+errands=''
+IFS=$NL; set -- $inflight; unset IFS
+for rec in "$@"; do
+  IFS=$'\037'; set -- $rec; unset IFS
+  id=${1##*/}; id=${id%.meta}
+  office=${2:-}; reeve=${3:-}; own=${4:-}; backend=${5:-}; place=${6:-}; target=${7:-}
+  valid_id "$id" || continue
+  # A record without the key predates hall, as every reader takes it.
+  [ -n "$backend" ] || backend=herdr
+
+  # owner_reeve: the name the brief recorded, else its owning session's now
+  if valid_reeve_name "$reeve"; then owner=$reeve
+  elif name_of "$own"; then owner=$NAME
+  else owner=''
+  fi
+  [ -n "$own" ] && owners="$owners$own$NL"
+
+  # The log's one reader, once. Its last open decision is the newest asked.
+  st=''; open=0; question=''
+  r=$(status_reconcile "$id")
+  IFS=$NL
+  for line in $r; do
+    case $line in
+      state=*)    st=${line#state=} ;;
+      open=*)     open=${line#open=} ;;
+      decision=*) question=${line#decision=}; question=${question#*	} ;;
+    esac
+  done
+  unset IFS
+  case $open in ''|*[!0-9]*) open=0 ;; esac
+  [ -n "$st" ] || st=unknown
+
+  waiting=false; idle=false; wedged=false
+  if [ "$st" = working ] && watch_of "$own"; then
+    # waiting: the attention latch past the dwell, the moment the sentry wakes
+    a=''
+    [ -f "$state/.attn-$id" ] && IFS= read -r a < "$state/.attn-$id"
+    since=${a%% *}
+    case $since in
+      ''|*[!0-9]*) ;;
+      *) [ $(( anow - since )) -ge "$attn_dwell" ] && waiting=true ;;
+    esac
+    # idle: the idle latch over this very silence, past the dwell
+    if [ -f "$state/.stale-$id" ] && l=$(stale_latch "$id" "$(stale_mark "$id")") \
+       && [ $(( anow - ${l%% *} )) -ge "$attn_dwell" ]; then
+      idle=true
+    fi
+    # wedged: the wedged latch over this silence and the screen it recorded,
+    # held for the whole window. The screen is never read here: the sentry is
+    # the one clock, and its next poll clears a latch a moved screen voids.
+    if [ -f "$state/.wedged-$id" ]; then
+      a=''
+      IFS= read -r a < "$state/.wedged-$id"
+      set -- $a
+      if [ $# -ge 5 ] && l=$(stale_latch "$id" "$(stale_mark "$id") $4" wedged) \
+         && age=$(status_silence "$id") && wedge_due "$age" "${l%% *}"; then
+        wedged=true
+      fi
+    fi
+  fi
+
+  pane_id_of "$target"
+  js "$id";       e="{\"id\":$J"
+  js "$office";   e="$e,\"office\":$J"
+  js "$owner";    e="$e,\"owner_reeve\":$J"
+  js "$st";       e="$e,\"hand_state\":$J"
+  js "$question"; e="$e,\"question\":$J,\"open\":$open"
+  e="$e,\"waiting\":$waiting,\"idle\":$idle,\"wedged\":$wedged"
+  js "$backend";  e="$e,\"session\":{\"backend\":$J"
+  js "$place";    e="$e,\"name\":$J"
+  js "$PANE";     e="$e,\"pane_id\":$J}}"
+  errands="$errands${errands:+,}$e"
+done
+
+# --- reeves -------------------------------------------------------------------
+# One row per name, as `<live> <seen> <sid> <name>` lines: a live one over one
+# that is not, then the newest heartbeat.
+
+rows=''
+for d in ${sessions[@]+"${sessions[@]}"}; do
+  [ -f "$d/name" ] || continue
+  sid=${d##*/}
+  # reeve_session's rule for an id, so a row always splits back into four
+  case $sid in ''|*[!A-Za-z0-9._-]*|.|..) continue ;; esac
+  name_of "$sid" || continue
+  seen=''
+  first_line "$d/seen" && seen=${LINE//[!0-9]/}
+  live=0
+  if [ -n "$seen" ] && [ $(( now - seen )) -le "$stale" ]; then
+    live=1
+    # A session another took over from, by its successor record, is gone
+    # whatever its heartbeat says. Read only where there is one.
+    [ -f "$d/successor" ] && [ -n "$(successor_of "$sid")" ] && live=0
+  fi
+  if [ "$live" = 0 ]; then
+    case $NL$owners in *"$NL$sid$NL"*) ;; *) continue ;; esac
+  fi
+  keep=yes; out=''
+  IFS=$NL; set -- $rows; unset IFS
+  for r in "$@"; do
+    set -- $r
+    if [ "$4" = "$NAME" ]; then
+      # the row held for this name stays only when it is the better one
+      if [ "$1" -gt "$live" ] || { [ "$1" = "$live" ] && [ "$2" -ge "${seen:-0}" ]; }; then
+        keep=no; out="$out$r$NL"
+      fi
+      continue
+    fi
+    out="$out$r$NL"
+  done
+  [ "$keep" = yes ] && out="$out$live ${seen:-0} $sid $NAME$NL"
+  rows=$out
+done
+
+reeves=''
+IFS=$NL; set -- $rows; unset IFS
+for r in "$@"; do
+  set -- $r
+  live=$1; sid=$3; name=$4
+  d="$state/sessions/$sid"
+  pbk=''; pname=''
+  [ -f "$d/place" ] && read -r pbk pname rest < "$d/place"
+  [ -n "$pbk" ] || pbk=herdr
+  pane=''
+  first_line "$d/pane" && pane=${LINE%%@*}
+  if [ "$live" = 1 ]; then lv=true; else lv=false; fi
+  js "$name";  e="{\"name\":$J"
+  js "$pbk";   e="$e,\"session\":{\"backend\":$J"
+  js "$pname"; e="$e,\"name\":$J"
+  js "$pane";  e="$e,\"pane_id\":$J},\"live\":$lv}"
+  reeves="$reeves${reeves:+,}$e"
+done
+
+printf '{"version":1,"reeves":[%s],"errands":[%s]}\n' "$reeves" "$errands"
+exit 0
