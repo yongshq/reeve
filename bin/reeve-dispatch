@@ -86,21 +86,26 @@ hall_copy=no
 # to refuse a second one, so two at once would both read the old session lost
 # and put two hands in one copy. Held from the state read below until the new
 # target is recorded and launched, and refused, never waited on, when held.
-# mkdir, the household's lock: a stale one names its pid and is never broken.
+# mkdir, the household's lock. One left by a run that was killed outright, its
+# pid dead past config/lock-stale, is broken: a dead holder is no dispatch
+# running, and the next one still reads the recorded session's state below.
 # A first dispatch on hall takes it too, since it records its session before
 # its launch and a relaunch could otherwise read that session mid start. Which
 # backend this run will use is only read here, resolved for real below.
 dispatch_lock=''
 if [ "$dry" = no ] && { [ "$rec_backend" = hall ] \
      || [ "$("$BIN/reeve-backend" resolve ${backend:+--backend "$backend"} 2>/dev/null)" = hall ]; }; then
-  dispatch_lock=$(lock_acquire "dispatch-$id" 1) \
-    || die "errand '$id' is being dispatched by another run right now. let it finish, then look at its state before dispatching again"
+  lock_stale=$(config_get lock-stale 10)
+  dispatch_lock=$(lock_acquire "dispatch-$id" 1 "$lock_stale") \
+    || die "errand '$id' is being dispatched by another run right now, or by one stopped outright under ${lock_stale}s ago, holding $REEVE_HOME_D/state/.lock-dispatch-$id, which is broken once its holder is dead past that. let it finish, then look at its state before dispatching again"
   trap 'lock_release "$dispatch_lock"' EXIT
 fi
 
 # already out? A relaunch onto an existing copy asks more of this answer than a
-# steward's does: see relaunch_refusal.
-existing=$(meta_get "$id" target '')
+# steward's does: see relaunch_refusal. A hall session still under `launching=`
+# is the newest one, left by a run stopped mid launch, so it is the one read.
+existing=$(meta_get "$id" launching '')
+[ -n "$existing" ] || existing=$(meta_get "$id" target '')
 prev_state=''
 if [ -n "$existing" ]; then
   prev_state=$("$BIN/reeve-backend" call agent_state "$existing" --backend "$rec_backend" 2>/dev/null || echo unreadable)
@@ -124,6 +129,8 @@ fi
 # that owns the errand, on the backend and hall session the hand was made on,
 # since a pane id read against another server proves nothing about this one.
 # Anything less is today's refusal. Asked only of an errand sent out on hall.
+# Status 2 when the line itself names the move: adopt, or the right backend or
+# session.
 relaunch_refusal() {
   local st open head top common own mine place now
   [ -z "$(meta_get "$id" tornDown '')" ] \
@@ -141,14 +148,14 @@ relaunch_refusal() {
   esac
   own=$(meta_get "$id" session ''); mine=$(reeve_session)
   [ -n "$mine" ] && [ "$own" = "$mine" ] \
-    || { echo "it belongs to session ${own:-none}, not this one (${mine:-no id}); adopt it first: reeve-adopt $id"; return; }
+    || { echo "it belongs to session ${own:-none}, not this one (${mine:-no id}); adopt it first: reeve-adopt $id"; return 2; }
   [ "$backend" = "$rec_backend" ] \
-    || { echo "it was sent out on $rec_backend, and this dispatch is on $backend"; return; }
+    || { echo "it was sent out on $rec_backend, and this dispatch is on $backend"; return 2; }
   place=$(meta_get "$id" place '')
   if [ -n "$place" ]; then
     now=$("$BIN/reeve-backend" call place --backend "$rec_backend" 2>/dev/null | head -n 1) || now=''
     [ "$now" = "$place" ] \
-      || { echo "its hand was made on $rec_backend session '$place', and this reeve talks to '${now:-none}', where its session cannot be read"; return; }
+      || { echo "its hand was made on $rec_backend session '$place', and this reeve talks to '${now:-none}', where its session cannot be read"; return 2; }
   fi
   [ -d "$worktree" ] || { echo "it is not a directory"; return; }
   top=$(git -C "$worktree" rev-parse --show-toplevel 2>/dev/null) && top=$(cd -P "$top" && pwd -P) \
@@ -230,8 +237,11 @@ if [ "$writes" = home ]; then
   cwd=$REEVE_HOME_D          # the steward works in the home, it has no worktree
 elif [ "$hall_copy" = yes ]; then
   # A copy already there: the hand that was in it is gone, or this is refused.
-  why=$(relaunch_refusal)
-  [ -z "$why" ] || die "worktree path already exists: $worktree, and it cannot take a fresh hand: $why. pick another errand id or clean that up first"
+  # A reason that carries its own move (status 2: adopt it, or dispatch from
+  # the right backend or session) is not followed by the generic one, which
+  # would contradict it.
+  why=$(relaunch_refusal); [ $? -eq 2 ] && why_next='' || why_next='. pick another errand id or clean that up first'
+  [ -z "$why" ] || die "worktree path already exists: $worktree, and it cannot take a fresh hand: $why$why_next"
   warn "errand '$id' had a previous endpoint ($existing, now $prev_state), relaunching"
   relaunch=yes
   cwd=$worktree
@@ -356,6 +366,12 @@ fi
 # but setup. Never --force and never -D: a copy git will not remove as clean, or
 # a branch ahead of its base, is left as it is and said. A copy or branch that
 # was there before this run is never touched. herdr is left as it was.
+#
+# The branch goes first, from inside the copy with HEAD detached at its tip, so
+# `branch -d` measures it against itself: from the holding it is measured
+# against whatever the primary checkout has out, and refuses an empty branch
+# whose base that checkout lacks. The copy is checked clean beforehand, so a
+# copy git would not remove keeps its branch too.
 rollback_copy() {
   local ahead
   [ "$backend" = hall ] && [ "$made_copy" = yes ] || return 0
@@ -365,17 +381,21 @@ rollback_copy() {
       warn "the copy $worktree and branch '$branch' were kept: the branch is ${ahead:-not readably} ahead of $base, so they are not this dispatch's alone to remove"
       return 0; }
   fi
-  git -C "$repo" worktree remove "$worktree" || {
+  [ -z "$(git -C "$worktree" status --porcelain 2>/dev/null || echo unreadable)" ] || {
     warn "the copy $worktree and its branch were kept: git would not remove the copy as clean. look at it before dispatching '$id' again"
     return 0; }
   if [ "$made_branch" = yes ]; then
-    if git -C "$repo" branch -d "$branch" >/dev/null; then
+    if git -C "$worktree" checkout -q --detach && git -C "$worktree" branch -d "$branch" >/dev/null; then
       meta_set "$id" branchMade ''
     else
-      warn "the copy this dispatch made was removed, but branch '$branch' was kept, with no commits of its own. a dispatch of '$id' refuses until it is gone"
+      git -C "$worktree" checkout -q "$branch" 2>/dev/null || :
+      warn "the copy $worktree and branch '$branch' were kept, with no commits of its own: git would not delete the branch. a dispatch of '$id' refuses until it is gone"
       return 0
     fi
   fi
+  git -C "$repo" worktree remove "$worktree" || {
+    warn "the copy $worktree was kept${branch:+, though its empty branch '$branch' was removed}: git would not remove the copy as clean. look at it before dispatching '$id' again"
+    return 0; }
   warn "removed what this dispatch made, the copy${branch:+ and branch '$branch'}, so '$id' can be dispatched again once the backend is fixed"
 }
 
@@ -560,18 +580,23 @@ fi
 
 # On hall a dispatch again relaunches into the copy, so the new session is
 # recorded before the launch: a retry then reads THIS session's state, alive if
-# the hand came up after all, never the lost one's. A launch that reports
-# failure may still be starting the hand, so the endpoint this run opened is
-# closed, by its identity, and a retry finds it missing and sends out one hand.
-# One that will not close stays recorded, and a retry refuses on it. herdr's
-# order is left as it was.
+# the hand came up after all, never the lost one's. It is recorded under
+# `launching=`, which only dispatch reads, and moves to `target=` once the
+# launch returns: until the harness is up, hall reads the pane as a shell with
+# no agent, and a watch reading `target=` would call a starting hand lost. A
+# launch that reports failure may still be starting the hand, so the endpoint
+# this run opened is closed, by its identity, and a retry finds it missing and
+# sends out one hand. One that will not close stays recorded, and a retry
+# refuses on it. herdr's order is left as it was.
 if [ "$backend" = hall ]; then
   meta_set "$id" backend "$backend"
-  meta_set "$id" target "$target"
+  meta_set "$id" launching "$target"
   if ! "$BIN/reeve-backend" call launch "$target" "$cmdline" --backend "$backend"; then
     if "$BIN/reeve-backend" call kill "$target" --backend "$backend"; then
+      meta_set "$id" target "$target"; meta_set "$id" launching ''
       die "endpoint opened at $target but the launch line could not be submitted. that session was closed and is recorded, so dispatching '$id' again sends out one fresh hand into $cwd"
     fi
+    meta_set "$id" target "$target"; meta_set "$id" launching ''
     die "endpoint opened at $target but the launch line could not be submitted, and that session could not be closed. it is recorded as the errand's session: look at it before retrying, it may still be starting a hand in $cwd"
   fi
 else
@@ -589,6 +614,7 @@ elif [ -n "$(meta_get "$id" place '')" ]; then meta_set "$id" place ''
 fi
 meta_set "$id" harness "$harness"
 meta_set "$id" target "$target"
+[ "$backend" = hall ] && meta_set "$id" launching ''
 meta_set "$id" cwd "$cwd"
 # The value and where it came from, one key each. No second copy of the value:
 # an absent model key with model_from=harness is the harness deciding, which is

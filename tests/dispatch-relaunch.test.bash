@@ -50,9 +50,12 @@ gitc "$REPO" commit -q --allow-empty -m init
 # backend whose errands relaunch into their copy, and as `herdr`, whose errands
 # keep the refusal they always had. STUB_SLOW makes a create take a second,
 # STUB_CREATE_FAIL refuses one (STUB_CREATE_DIRTY leaving an untracked file in
-# the copy first, STUB_CREATE_COMMIT a commit), STUB_LAUNCH_RC is what a launch
-# returns after recording its line, STUB_KILL_FAIL refuses a kill, and
-# STUB_PLACE is the session `place` names, none when unset.
+# the copy first, STUB_CREATE_COMMIT a commit), STUB_CREATE_STATE is what a new
+# endpoint reads (alive when unset; hall reads a pane whose harness is not up
+# yet as dead), STUB_LAUNCH_RC is what a launch returns after recording its
+# line, STUB_LAUNCH_HOLD holds a launch until that file exists and then reads
+# the endpoint alive, STUB_KILL_FAIL refuses a kill, and STUB_PLACE is the
+# session `place` names, none when unset.
 STUB="$SCRATCH/root"
 mkdir -p "$STUB/backends" "$STUB/harnesses"
 cp -R "$ROOT/offices" "$STUB/offices"
@@ -72,9 +75,18 @@ reeve_backend_@B@_create_endpoint() {
     echo "stub: no room" >&2; return 1
   fi
   n=$(ls "$STATES" | wc -l | tr -d ' '); n=$((n + 1))
-  printf 'alive\n' > "$STATES/$n"; printf 'create stub:%s\n' "$n" >> "$EVENTS"; printf 'stub:%s\n' "$n"
+  printf '%s\n' "${STUB_CREATE_STATE:-alive}" > "$STATES/$n"
+  printf 'create stub:%s\n' "$n" >> "$EVENTS"; printf 'stub:%s\n' "$n"
 }
-reeve_backend_@B@_launch()          { printf '%s\t%s\n' "$1" "$2" >> "$LAUNCHES"; return "${STUB_LAUNCH_RC:-0}"; }
+reeve_backend_@B@_launch() {
+  local i=0
+  printf '%s\t%s\n' "$1" "$2" >> "$LAUNCHES"
+  if [ -n "${STUB_LAUNCH_HOLD:-}" ]; then
+    while [ ! -e "$STUB_LAUNCH_HOLD" ] && [ "$i" -lt 300 ]; do sleep 0.1; i=$((i + 1)); done
+    printf 'alive\n' > "$STATES/${1#stub:}"
+  fi
+  return "${STUB_LAUNCH_RC:-0}"
+}
 reeve_backend_@B@_agent_state()     { cat "$STATES/${1#stub:}" 2>/dev/null || printf 'alive\n'; }
 reeve_backend_@B@_attention_state() { printf 'settled\n'; }
 reeve_backend_@B@_wait_change()     { return 2; }
@@ -173,6 +185,7 @@ dispatch art
 eq  "3 a copy on another branch refuses"                    "$RC" 1
 has "3 naming both branches"                                "$ERR" "it is on elsewhere, not the errand's branch '$BR'"
 has "3 in today's refusal"                                  "$ERR" "worktree path already exists: $WT"
+has "3 with today's move, since the reason names none"      "$ERR" "pick another errand id or clean that up first"
 gitc "$WT" checkout -q "$BR"
 T=$(meta art target)
 sed 's/^target=.*/target=/' "$REEVE_HOME/state/art.meta" > "$SCRATCH/m" && mv "$SCRATCH/m" "$REEVE_HOME/state/art.meta"
@@ -251,12 +264,14 @@ dispatch own; lose own missing
 REEVE_SESSION=stranger dispatch own
 eq  "7 another session's dispatch refuses"                  "$RC" 1
 has "7 saying whose it is, and how to take it"              "$ERR" "it belongs to session lead, not this one (stranger); adopt it first: reeve-adopt own"
+nas "7 and no other move after it"                          "$ERR" "pick another errand id"
 REEVE_SESSION='' dispatch own
 eq  "7 a session with no id refuses"                        "$RC" 1
 has "7 the same way"                                        "$ERR" "adopt it first: reeve-adopt own"
 BK=herdr dispatch own
 eq  "7 a hall errand dispatched on herdr refuses"           "$RC" 1
 has "7 saying where it was sent"                            "$ERR" "it was sent out on hall, and this dispatch is on herdr"
+nas "7 and no other move after it"                          "$ERR" "pick another errand id"
 dispatch own
 eq  "7 its owner relaunches it"                             "$RC" 0
 
@@ -268,6 +283,7 @@ lose pl missing
 STUB_PLACE=two dispatch pl
 eq  "8 a reeve on another session refuses"                  "$RC" 1
 has "8 naming both"                                         "$ERR" "its hand was made on hall session 'one', and this reeve talks to 'two'"
+nas "8 and no other move after it"                          "$ERR" "pick another errand id"
 dispatch pl
 eq  "8 so does one that cannot say which"                   "$RC" 1
 has "8 saying none"                                         "$ERR" "this reeve talks to 'none'"
@@ -294,6 +310,7 @@ mkdir "$REEVE_HOME/state/.lock-dispatch-fd"; printf '%s\n' "$$" > "$REEVE_HOME/s
 dispatch fd
 eq  "9 a first dispatch on hall waits for no one"           "$RC" 1
 has "9 refused while another run holds it"                  "$ERR" "errand 'fd' is being dispatched by another run right now"
+has "9 naming the lock"                                     "$ERR" "holding $REEVE_HOME/state/.lock-dispatch-fd"
 eq  "9 before any copy was made"                            "$([ -e "$(meta fd worktree)" ] && echo made || echo none)" none
 rm -rf "$REEVE_HOME/state/.lock-dispatch-fd"
 dispatch fd
@@ -306,6 +323,7 @@ STUB_LAUNCH_RC=1 dispatch fl
 eq  "10 the failed relaunch fails"                          "$RC" 1
 NEW=$(meta fl target)
 eq  "10 the new session is recorded, not the lost one"      "$NEW" "stub:$(ls "$STATES" | wc -l | tr -d ' ')"
+eq  "10 as its session, no longer as launching"             "$(meta fl launching)" ''
 has "10 the session it opened is closed"                    "$(cat "$EVENTS")" "kill $NEW"
 has "10 and it says a retry sends out one hand"             "$ERR" "that session was closed and is recorded, so dispatching 'fl' again sends out one fresh hand"
 dispatch fl
@@ -320,6 +338,7 @@ STUB_LAUNCH_RC=1 STUB_KILL_FAIL=1 dispatch fl
 eq  "10 a failed launch whose session will not close fails" "$RC" 1
 has "10 saying it may still be starting"                    "$ERR" "that session could not be closed. it is recorded as the errand's session"
 T=$(meta fl target)
+eq  "10 that one too is recorded as its session"            "$(meta fl launching)|$T" "|stub:$(ls "$STATES" | wc -l | tr -d ' ')"
 dispatch fl
 eq  "10 a retry reads that session, the hand came up after all" "$RC" 1
 has "10 and refuses on it"                                  "$ERR" "already running at $T"
@@ -375,6 +394,94 @@ brief_for rh artificer || bad "12 reeve-brief refused"
 STUB_CREATE_FAIL=1 BK=herdr dispatch rh
 eq  "12 on herdr the copy is left, as it always was"        "$([ -d "$(meta rh worktree)" ] && echo kept)" kept
 nas "12 and nothing is said removed"                        "$ERR" "removed"
+
+# The empty branch is deleted where HEAD is its own tip. From the holding, `-d`
+# measured it against the primary checkout's main, which lacks a commit the
+# base has, and refused it: the id was stranded again.
+git -C "$REPO" branch -q other main; gitc "$REPO" commit -q --allow-empty -m 'not on main' >/dev/null
+git -C "$REPO" checkout -q other; gitc "$REPO" commit -q --allow-empty -m 'only on other'; git -C "$REPO" checkout -q main
+brief_for ro artificer || bad "12 reeve-brief refused"
+sed 's/^base=.*/base=other/' "$REEVE_HOME/state/ro.meta" > "$SCRATCH/m" && mv "$SCRATCH/m" "$REEVE_HOME/state/ro.meta"
+STUB_CREATE_FAIL=1 dispatch ro
+eq  "12 on a base main lacks, the copy is removed"          "$([ -e "$(meta ro worktree)" ] && echo kept || echo gone)" gone
+eq  "12 and its empty branch"                               "$(git -C "$REPO" rev-parse --verify --quiet "refs/heads/$(meta ro branch)" || echo gone)" gone
+nas "12 with no word from git about merging"                "$ERR" "not fully merged"
+eq  "12 its birth record cleared"                           "$(meta ro branchMade)" ''
+eq  "12 the primary checkout still on main"                 "$(git -C "$REPO" symbolic-ref --short HEAD)" main
+dispatch ro
+eq  "12 so that id is not stuck either"                     "$RC" 0
+eq  "12 its branch made from the base it named"             "$(git -C "$REPO" rev-parse "refs/heads/$(meta ro branch)")" "$(git -C "$REPO" rev-parse other)"
+
+echo "--- 13. a watch during a hall launch does not call the starting hand lost ---"
+# Until the harness reaches the foreground hall reads the new pane as a shell
+# with no agent, dead. Recorded as `target=` before the launch, that made a
+# watch polling then say `stale:` and end. It is `launching=` until the launch
+# returns, which only dispatch reads.
+REEVE_HOME="$SCRATCH/home13"; export REEVE_HOME; mkdir -p "$REEVE_HOME"
+watch() { REEVE_ROOT="$STUB" "$ROOT/bin/reeve-sentry" --once --no-reap 2>&1; }
+until_meta() { # until_meta <id> <key>: wait, bounded, for the key to be set
+  local n=0; while [ "$n" -lt 100 ] && [ -z "$(meta "$1" "$2" 2>/dev/null)" ]; do sleep 0.1; n=$((n + 1)); done
+}
+brief_for ml artificer || bad "13 reeve-brief refused"
+HOLD="$SCRATCH/hold.ml"
+( STUB_CREATE_STATE=dead STUB_LAUNCH_HOLD=$HOLD dispatch ml; printf '%s\n%s\n' "$RC" "$ERR" > "$SCRATCH/ml.out" ) &
+MLP=$!
+until_meta ml launching; L=$(meta ml launching)
+eq  "13 mid launch, the new session is recorded as launching" "$(cat "$STATES/${L#stub:}")|$(meta ml target)" "dead|"
+W=$(watch)
+nas "13 a watch then says nothing is stale"                 "$W" "stale:"
+touch "$HOLD"; wait "$MLP"
+eq  "13 the dispatch succeeds"                              "$(head -n 1 "$SCRATCH/ml.out")" 0
+eq  "13 and moves it to its session"                        "$(meta ml target)|$(meta ml launching)" "$L|"
+W=$(watch)
+nas "13 a watch after says nothing is stale either"         "$W" "stale:"
+has "13 and sees the hand working"                          "$W" "quiet"
+# A relaunch the same way: its new session is launching, the lost one already
+# said once by the watch that saw it go.
+lose ml missing; W=$(watch)
+has "13 (the lost hand is said once)"                       "$W" "stale: ml"
+rm -f "$HOLD"
+( STUB_CREATE_STATE=dead STUB_LAUNCH_HOLD=$HOLD dispatch ml; printf '%s\n' "$RC" > "$SCRATCH/ml.out" ) &
+MLP=$!
+n=0; while [ "$n" -lt 100 ] && [ "$(meta ml launching)" = '' ]; do sleep 0.1; n=$((n + 1)); done
+L2=$(meta ml launching)
+eq  "13 mid relaunch, its new session is launching"         "$([ -n "$L2" ] && [ "$L2" != "$L" ] && echo yes)|$(meta ml target)" "yes|$L"
+W=$(watch)
+nas "13 a watch mid relaunch says nothing is stale"         "$W" "stale:"
+touch "$HOLD"; wait "$MLP"
+eq  "13 the relaunch succeeds onto the new session"         "$(cat "$SCRATCH/ml.out")|$(meta ml target)|$(meta ml launching)" "0|$L2|"
+
+echo "--- 14. a dispatch killed outright leaves a lock that is broken, and one hand ---"
+brief_for kl artificer || bad "14 reeve-brief refused"
+HOLD="$SCRATCH/hold.kl"
+REEVE_ROOT="$STUB" STUB_LAUNCH_HOLD=$HOLD "$ROOT/bin/reeve-dispatch" kl --backend hall --harness stub >/dev/null 2>&1 &
+KP=$!
+until_meta kl launching; L=$(meta kl launching)
+pkill -9 -P "$KP" 2>/dev/null; kill -9 "$KP" 2>/dev/null; wait "$KP" 2>/dev/null
+touch "$HOLD"; sleep 0.5
+LK="$REEVE_HOME/state/.lock-dispatch-kl"
+eq  "14 its lock is left, its holder dead"                  "$([ -d "$LK" ] && ! kill -0 "$(cat "$LK/pid")" 2>/dev/null && echo left)" left
+eq  "14 and its session still launching"                    "$(meta kl launching)|$(meta kl target)" "$L|"
+dispatch kl
+eq  "14 a retry at once is refused"                         "$RC" 1
+has "14 naming the lock, so it can be acted on"             "$ERR" "holding $LK"
+has "14 and when it will be broken"                         "$(printf '%s\n' "$ERR" | tail -n 1)" "broken once its holder is dead past that"
+touch -t 202001010000 "$LK"
+printf 'alive\n' > "$STATES/${L#stub:}"
+dispatch kl
+has "14 one past lock-stale is broken"                      "$ERR" "broke stale lock dispatch-kl"
+eq  "14 and the retry reads the launching session, alive"   "$RC" 1
+has "14 refusing a second hand"                             "$ERR" "already running at $L"
+eq  "14 and leaves no lock"                                 "$([ -d "$LK" ] && echo left || echo none)" none
+printf 'missing\n' > "$STATES/${L#stub:}"
+dispatch kl
+eq  "14 when that session is lost, the retry relaunches"    "$RC" 0
+alive=0
+for t in $(grep "/errands/kl/" "$LAUNCHES" | cut -f1 | sort -u); do
+  [ "$(cat "$STATES/${t#stub:}")" = alive ] && alive=$((alive + 1))
+done
+eq  "14 one hand alive, not two"                            "$alive" 1
+eq  "14 recorded as its session"                            "$(meta kl launching)|$([ "$(meta kl target)" != "$L" ] && echo new)" "|new"
 
 echo "passed=$PASS failed=$FAIL"
 [ "$FAIL" -eq 0 ]

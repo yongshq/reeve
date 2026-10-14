@@ -139,8 +139,11 @@ plan first. An errand sent out on herdr keeps that refusal as it always had it: 
 relaunch into its copy.
 
 On hall, one dispatch of an errand runs at a time: a second, while the first holds the errand's
-lock, is refused, never queued. The new session is recorded before its launch, and a launch that
-reports failure closes the session it opened, so dispatching again sends out one hand, never two.
+lock, is refused, never queued, and the refusal names the lock. A lock whose run was killed outright
+is broken once its holder has been dead past `config/lock-stale`. The new session is recorded
+before its launch, as `launching=` until the launch returns (a watch reads only `target=`, so a hand
+still starting is never called lost), and a launch that reports failure closes the session it
+opened, so dispatching again sends out one hand, never two.
 A first dispatch that cannot open a session removes the copy and empty branch it just made, so the
 id can go out again once hall is fixed.
 
