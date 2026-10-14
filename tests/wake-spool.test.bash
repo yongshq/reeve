@@ -73,6 +73,21 @@ prompt_mode = "argv"
 HARNESS
 export REEVE_ROOT="$STUB"
 
+# reeve-doctor runs whatever herdr and hall are on PATH, so a fake of each
+# sits first and records its call, and no variable names a real server: the
+# suite never asks a live one anything.
+unset HERDR_ENV HERDR_PANE_ID HERDR_SOCKET_PATH HERDR_TAB_ID HERDR_WORKSPACE_ID HERDR_BIN_PATH \
+      HERDR_SESSION HALL_ENV HALL_PANE_ID HALL_SOCKET_PATH HALL_TAB_ID HALL_WORKSPACE_ID \
+      HALL_BIN_PATH HALL_SESSION HALL_CLIENT_SOCKET_PATH REEVE_HALL_BIN REEVE_HALL_SOCKET \
+      REEVE_HALL_SESSION
+CALLS="$SCRATCH/backend-calls"; : > "$CALLS"; export CALLS
+mkdir -p "$SCRATCH/fakebin"
+for b in herdr hall; do
+  printf '#!/bin/sh\necho "%s $*" >> "$CALLS"\nexit 1\n' "$b" > "$SCRATCH/fakebin/$b"
+  chmod +x "$SCRATCH/fakebin/$b"
+done
+export PATH="$SCRATCH/fakebin:$PATH"
+
 # How many wakes are pending for a session, and what they say. Both shapes, on
 # purpose: this suite is meant to be run against the code it replaced as well,
 # and a reading that only understands the new layout would report a mailbox full
@@ -221,6 +236,7 @@ has "3 and carries it into the document"               "$(cat "$HO" 2>/dev/null)
 DOC=$("$ROOT/bin/reeve-doctor" 2>/dev/null) || :
 eq  "3 reeve-doctor does not spend one either"         "$(count resetting)" 1
 nas "3 nor prints it inside its errand table"          "$DOC" "gone-scout is done"
+has "3 and the herdr it asked was the fake one"        "$(cat "$CALLS" 2>/dev/null)" "herdr --version"
 OUT=$("$ROOT/bin/reeve-status" 2>&1) || :
 has "3 while the reeve's own listing still delivers it" "$OUT" "gone-scout is done"
 eq  "3 and only then is it gone"                        "$(count resetting)" 0

@@ -88,6 +88,10 @@ case "$1 $2" in
 esac
 HERDR
 chmod +x "$FAKE/herdr"
+# reeve-doctor also runs any hall on PATH: a fake, recording, so no live one.
+HALL_CALLS="$SCRATCH/hall-calls"; : > "$HALL_CALLS"; export HALL_CALLS
+printf '#!/bin/sh\necho "hall $*" >> "$HALL_CALLS"\nexit 1\n' > "$FAKE/hall"
+chmod +x "$FAKE/hall"
 export PATH="$FAKE:$PATH"
 export REEVE_HERDR_SESSION=stub
 export STUB_SOCK="$SCRATCH/herdr.sock"
@@ -358,6 +362,7 @@ record other Bran alive "w9:p1$S"
 out=$(REEVE_SESSION=new HERDR_PANE_ID=w3:p1 HERDR_SOCKET_PATH=$STUB_SOCK "$ROOT/bin/reeve-doctor" 2>&1)
 has "12 the other live reeve is listed"  "$out" "Bran (other)"
 nas "12 the replaced one is not"         "$out" "Aldric (old)"
+has "12 the hall it asked was the fake"  "$(cat "$HALL_CALLS" 2>/dev/null)" "hall --version"
 
 echo "--- 13. herdr: only a trailing identity is split off a target ---"
 export REEVE_IDENT_TRIES=1
