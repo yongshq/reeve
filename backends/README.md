@@ -25,9 +25,17 @@ On hall every pane a hand gets (`tab create`, `worktree open`, `workspace create
 `create_endpoint`) is made with `--no-agent-resume`. A hall restart drops a pane so marked, and any
 tab or workspace it leaves empty, instead of resuming the hand's harness bare, without its
 environment or flags. So after a restart the hand is gone: its target no longer resolves,
-`agent_state` reads `missing`, the watch says `stale:`, and the reeve sends it out again from its
-instructions. Work committed on its branch is kept; its unfinished conversation is not. The reeve's
-own pane is never made with the flag, so it resumes as before.
+`agent_state` reads `missing`, the watch says `stale:`, and `bin/reeve-dispatch <id>` sends a fresh
+hand out again from its instructions into the copy it left (the `errand` skill says on what proof).
+Work committed on its branch, and any uncommitted work in its copy, is kept; its unfinished
+conversation is not. The reeve's own pane is never made with the flag, so it resumes as before.
+`available` reads hall's own usage for the flag and refuses a hall that predates it, so a dispatch
+stops before it makes a copy. After each create the new pane's `agent_resume` is read back, and one
+that is not `false` (a server running a build from before the flag ignores it) is closed and
+refused. `worktree open` is never asked of a checkout hall already shows open, since it would hand
+back that workspace's own pane, unmarked, and rename it; such a hand gets a workspace of its own.
+Accepted and left as it is: `worktree open` may also open the holding's primary checkout as a parent
+workspace, unmarked. It is a shell with nothing to resume, and `kill` never closes it.
 The tests drive the contract through stub backends of their own.
 
 ## Required functions

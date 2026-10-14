@@ -70,6 +70,57 @@ _h() {
   _h_at "$sock" "$@" 2>/dev/null
 }
 
+# _h_said <args...>   _h, but a refusal is said: hall's own reason, its error
+# envelope's message or else its first line, on stderr, for a call whose
+# failure the caller reports rather than absorbs.
+_h_said() {
+  local sock err rc out why
+  sock=$(_h_sock)
+  [ -n "$sock" ] || { echo "hall: no running server found" >&2; return 1; }
+  err=$(mktemp "${TMPDIR:-/tmp}/reeve-hall.XXXXXX") || { _h "$@"; return; }
+  out=$(_h_at "$sock" "$@" 2>"$err"); rc=$?
+  if [ "$rc" -ne 0 ]; then
+    why=$(jq -r '.error | if type == "object" then ((.code // "") + ": " + (.message // "")) else empty end' "$err" 2>/dev/null | head -n 1)
+    [ -n "$why" ] || why=$(grep -m1 . "$err" 2>/dev/null)
+    echo "hall: $1 $2 refused: ${why:-no reason given}" >&2
+  fi
+  rm -f "$err"
+  [ -n "$out" ] && printf '%s\n' "$out"
+  return "$rc"
+}
+
+# _h_marked <create output> <pane>   0 when hall says the pane is marked
+# --no-agent-resume: agent_resume false, which its JSON leaves out when true.
+# A server started before the flag takes it and ignores it, so this is read
+# back after every create, from the output else from the pane itself.
+_h_marked() {
+  local doc=$1 pane=$2 v
+  # Not `// true`: jq's alternative takes false for absent.
+  v=$(printf '%s' "$doc" | jq -r --arg p "$pane" \
+        '.result.root_pane | select(.pane_id == $p) | if has("agent_resume") then .agent_resume else true end' 2>/dev/null)
+  [ -n "$v" ] || v=$(_h pane get "$pane" \
+        | jq -r '.result.pane | if has("agent_resume") then .agent_resume else true end' 2>/dev/null)
+  [ "$v" = false ]
+}
+
+_h_unmarked() { # _h_unmarked <pane>   the one reason for a pane hall did not mark
+  echo "hall: the server did not mark $1 --no-agent-resume (agent_resume is not false), so a restart would resume it bare; it was closed. restart hall on a build with the flag" >&2
+}
+
+# _h_open_here <dir>   0 when hall already shows <dir> as an open worktree, or
+# cannot say. `worktree open` on such a checkout returns that workspace's own
+# root pane, unmarked, and renames the workspace to the label it is passed,
+# inside the call, so the question is asked before, never after.
+_h_open_here() {
+  local d out
+  d=$(cd -P "$1" 2>/dev/null && pwd -P) || return 0
+  out=$(_h worktree list --cwd "$1") || return 0
+  printf '%s' "$out" | jq -r '.result.worktrees[]? | select(.open_workspace_id != null) | .path' 2>/dev/null \
+    | while IFS= read -r p; do
+        [ "$(cd -P "$p" 2>/dev/null && pwd -P)" = "$d" ] && { echo yes; break; }
+      done | grep -q yes
+}
+
 # A target is "<workspace_id>|<pane_id>" for a hand in a workspace of its own,
 # or "<workspace_id>|<pane_id>|<tab_id>" for one opened as a tab inside its
 # reeve's workspace, the grammar herdr.sh uses, with its identity suffix
@@ -133,6 +184,11 @@ reeve_backend_hall_available() {
   sock=$(_h_sock)
   [ -n "$sock" ] || { echo "hall server not running: no socket set and no default session listed" >&2; return 1; }
   _h status server --json >/dev/null 2>&1 || { echo "hall server not running at $sock" >&2; return 1; }
+  # Every pane a hand gets is made with --no-agent-resume, and a hall from
+  # before that flag refuses each call carrying it. Asked of the binary's own
+  # usage, so doctor says not ok and dispatch refuses before it makes a copy.
+  "$b" tab help 2>&1 | grep -qF -- '--no-agent-resume' \
+    || { echo "hall at $b predates --no-agent-resume; update hall" >&2; return 1; }
   return 0
 }
 
@@ -231,13 +287,15 @@ reeve_backend_hall_create_endpoint() {
   # and a tab or workspace it leaves empty, rather than starting a bare
   # `claude --resume` in it with none of the hand's environment or flags. The
   # hand's target then no longer resolves, so agent_state reads it missing, the
-  # watch says stale and the reeve sends it out again from its brief. The
-  # reeve's own pane is never made here, so it resumes as before.
+  # watch says stale, and bin/reeve-dispatch can send it out again from its
+  # brief into the copy it left. The reeve's own pane is never made here, so it
+  # resumes as before. A server that took the flag and did not mark the pane
+  # is a refusal, never a hand that would resume bare.
   #
   # With a group, the hand is a tab in its reeve's workspace. Anything missing
   # and the hand gets a workspace of its own instead.
   if [ -n "$group" ]; then
-    out=$(_h tab create --workspace "$group" --cwd "$cwd" --label "$label" --no-focus --no-agent-resume) || out=''
+    out=$(_h_said tab create --workspace "$group" --cwd "$cwd" --label "$label" --no-focus --no-agent-resume) || out=''
     tab=$(printf '%s' "$out"  | jq -r '.result.tab.tab_id // .result.root_pane.tab_id // empty' 2>/dev/null)
     pane=$(printf '%s' "$out" | jq -r '.result.root_pane.pane_id // empty' 2>/dev/null)
     if [ -z "$pane" ] && [ -n "$tab" ]; then
@@ -245,6 +303,7 @@ reeve_backend_hall_create_endpoint() {
         | jq -r --arg t "$tab" '[.result.panes[]? | select(.tab_id == $t)][0].pane_id // empty' 2>/dev/null)
     fi
     if [ -n "$tab" ] && [ -n "$pane" ]; then
+      _h_marked "$out" "$pane" || { _h tab close "$tab" >/dev/null 2>&1; _h_unmarked "$pane"; return 1; }
       printf '%s|%s|%s%s\n' "$group" "$pane" "$tab" "$(_h_ident "$cwd" "$label")"; return 0
     fi
     # A tab with no pane to address is no use to anyone, so it does not linger.
@@ -253,18 +312,33 @@ reeve_backend_hall_create_endpoint() {
     pane=''
   fi
 
-  if git -C "$cwd" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    out=$(_h worktree open --path "$cwd" --label "$label" --no-focus --no-agent-resume) || out=''
+  # hall's worktree open, for its sidebar, only on a checkout it does not show
+  # open already: one it does is someone else's workspace, never the hand's.
+  # The answer is checked again in what it returns, and a workspace found open
+  # is left exactly as it is, never closed.
+  if git -C "$cwd" rev-parse --is-inside-work-tree >/dev/null 2>&1 && ! _h_open_here "$cwd"; then
+    out=$(_h_said worktree open --path "$cwd" --label "$label" --no-focus --no-agent-resume) || out=''
     ws=$(printf '%s' "$out"   | jq -r '.result.workspace.workspace_id // empty' 2>/dev/null)
     pane=$(printf '%s' "$out" | jq -r '.result.root_pane.pane_id // empty'      2>/dev/null)
+    if [ "$(printf '%s' "$out" | jq -r '.result.already_open // false' 2>/dev/null)" = true ]; then
+      echo "hall: $cwd was already open in workspace $ws, which is left alone; opening a workspace of its own" >&2
+      ws=''; pane=''
+    elif [ -n "$pane" ] && ! _h_marked "$out" "$pane"; then
+      [ -n "$ws" ] && _h workspace close "$ws" >/dev/null 2>&1
+      _h_unmarked "$pane"; return 1
+    fi
   fi
 
   if [ -z "${pane:-}" ]; then
-    out=$(_h workspace create --cwd "$cwd" --label "$label" --no-focus --no-agent-resume) || return 1
+    out=$(_h_said workspace create --cwd "$cwd" --label "$label" --no-focus --no-agent-resume) || return 1
     ws=$(printf '%s' "$out"   | jq -r '.result.workspace.workspace_id // .result.workspace_id // empty' 2>/dev/null)
     pane=$(printf '%s' "$out" | jq -r '.result.root_pane.pane_id // empty' 2>/dev/null)
     if [ -z "$pane" ] && [ -n "$ws" ]; then
       pane=$(_h pane list --workspace "$ws" | jq -r '.result.panes[0].pane_id // empty' 2>/dev/null)
+    fi
+    if [ -n "$pane" ] && ! _h_marked "$out" "$pane"; then
+      [ -n "$ws" ] && _h workspace close "$ws" >/dev/null 2>&1
+      _h_unmarked "$pane"; return 1
     fi
   fi
 

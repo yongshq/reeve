@@ -119,6 +119,21 @@ With the watch running, do not poll and do not narrate progress.
 silently change the job. If the brief itself was wrong, that is a new errand with a new id, and say
 so to the liege rather than quietly editing history.
 
+An errand with a copy (every office but the steward) relaunches into the copy it already has, the
+case a hall restart leaves: no new worktree or branch, its commits and any uncommitted work kept,
+a fresh hand (not a resumed conversation) told to read `git status` and `git log` before it builds,
+a new session recorded, and a `working:` line in its status file saying it was relaunched. Only on
+proof, all of it:
+
+- the record names the copy and its branch, and the copy is a worktree of that holding on that
+  branch (detached, for an office with none);
+- the old session reads `missing` or `dead`, never `alive`, `unreadable` or anything else;
+- the errand was not torn down, and did not report `done` or `failed` with nothing open.
+
+Anything less is the old refusal, `worktree path already exists`, with the reason named. Bring that
+to the liege; never move, clean or force the copy to make it pass. `--dry-run` prints the relaunch
+plan first.
+
 ## What not to do
 
 - Do not dispatch on an unverified harness without the liege saying so. Report the refusal instead.

@@ -9,6 +9,11 @@
 # --dry-run prints every command it would run and changes nothing. Use it when
 # you are unsure: this is the one script in the household that mutates a repo.
 #
+# Run again on an errand whose copy already exists, it relaunches: a fresh hand
+# in that copy, its commits and uncommitted work kept, only when the old
+# session reads missing or dead and the copy is the errand's own on its branch.
+# Otherwise it refuses, naming why.
+#
 # --model and --effort are optional: without them the office's own default
 # applies, from the table in offices/README.md, and without that the harness
 # decides. reeve-status reports which of the three it was.
@@ -68,16 +73,59 @@ base=$(meta_get "$id" base main)
 writes=$(meta_get "$id" writes yes)
 [ -n "$office" ] && [ -n "$repo" ] || die "errand '$id' has no usable metadata at $(meta_file "$id")"
 
-# already out?
+# already out? A relaunch onto an existing copy asks more of this answer than a
+# steward's does: see relaunch_refusal.
 existing=$(meta_get "$id" target '')
+prev_state=''
 if [ -n "$existing" ]; then
-  st=$("$BIN/reeve-backend" call agent_state "$existing" --backend "$(meta_get "$id" backend herdr)" 2>/dev/null || echo unreadable)
-  case $st in
+  prev_state=$("$BIN/reeve-backend" call agent_state "$existing" --backend "$(meta_get "$id" backend herdr)" 2>/dev/null || echo unreadable)
+  case $prev_state in
     alive) die "errand '$id' is already running at $existing. steer it or tear it down; do not dispatch twice onto one worktree" ;;
     unreadable) die "errand '$id' has an endpoint at $existing whose state cannot be read. investigate before dispatching again: a second hand on a live worktree is the one failure that loses work" ;;
   esac
-  warn "errand '$id' had a previous endpoint ($existing, now $st), relaunching"
+  warn "errand '$id' had a previous endpoint ($existing, now $prev_state), relaunching"
 fi
+
+# relaunch_refusal   why this errand's existing copy may NOT take a fresh hand,
+# one line, or nothing when it may. A hall restart drops a hand's pane and
+# leaves its copy and branch behind, so sending it out again from the same
+# brief means a new hand in that same copy. Every condition is proof that no
+# other hand is in it and that it is the copy this errand made: the record
+# names the path and branch, the copy is a worktree of this holding on that
+# branch (a detached one for an office with no branch), the hand that was in
+# it reads missing or dead, and the errand neither was torn down nor reported
+# done or failed with nothing open. Anything less is today's refusal.
+relaunch_refusal() {
+  local st open head top common
+  [ -z "$(meta_get "$id" tornDown '')" ] \
+    || { echo "the errand was torn down"; return; }
+  st=$(status_field "$id" state); open=$(status_field "$id" open)
+  case $st in
+    done|failed) [ "${open:-0}" -gt 0 ] 2>/dev/null \
+                   || { echo "it reported $st with nothing open, and a finished errand is not sent out again"; return; } ;;
+  esac
+  [ -n "$existing" ] \
+    || { echo "no earlier session is recorded for it, so nothing shows that no hand is working in it"; return; }
+  case $prev_state in
+    missing|dead) ;;
+    *) echo "its earlier session at $existing reads ${prev_state:-nothing}, not missing or dead"; return ;;
+  esac
+  [ -d "$worktree" ] || { echo "it is not a directory"; return; }
+  top=$(git -C "$worktree" rev-parse --show-toplevel 2>/dev/null) && top=$(cd -P "$top" && pwd -P) \
+    && [ "$top" = "$(cd -P "$worktree" && pwd -P)" ] \
+    || { echo "it is not the top of a git checkout"; return; }
+  common=$(cd "$worktree" && cd -P "$(git rev-parse --git-common-dir 2>/dev/null)" 2>/dev/null && pwd -P) \
+    && [ "$common" = "$(cd "$repo" && cd -P "$(git rev-parse --git-common-dir 2>/dev/null)" 2>/dev/null && pwd -P)" ] \
+    || { echo "it is not a worktree of $repo"; return; }
+  head=$(git -C "$worktree" symbolic-ref -q --short HEAD 2>/dev/null) || head=''
+  if [ -n "$branch" ]; then
+    [ "$head" = "$branch" ] \
+      || { echo "it is on ${head:-a detached HEAD}, not the errand's branch '$branch'"; return; }
+  else
+    [ -z "$head" ] \
+      || { echo "it is on branch '$head', while this errand's copy is a detached checkout"; return; }
+  fi
+}
 
 # --- resolve the two axes, and refuse rather than substitute ---------------
 backend=$("$BIN/reeve-backend" resolve ${backend:+--backend "$backend"}) || exit 1
@@ -137,11 +185,19 @@ fi
 # everywhere, and herdr's own worktree command defaults to its own directory
 # with a random branch name, which is not the household's convention.
 
+relaunch=no
 if [ "$writes" = home ]; then
   cwd=$REEVE_HOME_D          # the steward works in the home, it has no worktree
+elif [ -n "$worktree" ] && [ -e "$worktree" ]; then
+  # A copy already there: the hand that was in it is gone, or this is refused.
+  why=$(relaunch_refusal)
+  [ -z "$why" ] || die "worktree path already exists: $worktree, and it cannot take a fresh hand: $why. pick another errand id or clean that up first"
+  relaunch=yes
+  cwd=$worktree
+  info "relaunching onto the existing copy $worktree (${branch:-detached}): its session $existing reads $prev_state"
+  [ "$dry" = yes ] && printf '  would keep: the copy, its branch, its commits and any uncommitted work, untouched\n'
 else
   [ -n "$worktree" ] || die "errand '$id' has no worktree path recorded"
-  [ -e "$worktree" ] && die "worktree path already exists: $worktree. pick another errand id or clean that up first"
   git -C "$repo" rev-parse --verify --quiet "$base" >/dev/null \
     || die "base ref '$base' does not exist in $repo"
   if [ -n "$branch" ]; then
@@ -399,15 +455,19 @@ fi
 cmdline=$(REEVE_BACKEND=$backend "$BIN/reeve-harness" render "$harness" "$brief" --hand "$id" \
             ${errand_settings:+--settings "$errand_settings"} \
             ${browser_cfg:+--browser "$browser_cfg"} \
+            $([ "$relaunch" = yes ] && echo --relaunch) \
             ${sib_args+"${sib_args[@]}"} \
             ${model:+--model "$model"} ${effort:+--effort "$effort"}) \
   || die "could not render a launch line for harness '$harness'"
 
+relaunch_note='relaunched onto existing copy after its session was lost'
 if [ "$dry" = yes ]; then
   printf '  would run: reeve-backend call launch %s <cmdline> --backend %s\n' "$target" "$backend"
   [ -n "${REEVE_NO_CARETAKER:-}" ] \
     || printf '  would run: bin/reeve-sentry --caretaker, detached, appending to %s\n' \
               "$REEVE_HOME_D/state/sentry.log"
+  [ "$relaunch" = yes ] \
+    && printf '  would run: reeve-say %s working %s\n' "$(status_file "$id")" "'$relaunch_note'"
   printf '\ncmdline:\n  %s\n' "$cmdline"
   printf '\ntier: model %s, effort %s\n' "$(tier_say "$model" "$model_from")" "$(tier_say "$effort" "$effort_from")"
   [ -n "$browser_say" ] && printf '\nbrowser: %s\n' "$browser_say"
@@ -449,6 +509,9 @@ meta_set "$id" browser "$browser_say"
 if [ -n "${REEVE_NO_CARETAKER:-}" ]; then meta_set "$id" keep REEVE_NO_CARETAKER
 else meta_set "$id" keep ''; fi
 touch "$(status_file "$id")"
+# Said in the errand's own log, so the reeve and any reviewer read that this
+# hand started in a copy that was already worked in.
+[ "$relaunch" = yes ] && "$BIN/reeve-say" "$(status_file "$id")" working "$relaunch_note"
 
 # --- the caretaker ---------------------------------------------------------
 # A hand does not exit itself, so a finished one sits at a prompt holding a
@@ -527,6 +590,7 @@ info "dispatched $id"
 info "  office   $office on $harness via $backend"
 info "  tier     model $(tier_say "$model" "$model_from"), effort $(tier_say "$effort" "$effort_from")"
 info "  copy     $cwd"
+[ "$relaunch" = yes ] && info "  relaunch the copy and its work were kept, the last hand's session was $prev_state"
 [ -n "$branch" ] && info "  branch   $branch (from $base)" || info "  branch   none, detached at $base"
 info "  running  $target"
 [ -n "$browser_say" ] && info "  browser  $browser_say"

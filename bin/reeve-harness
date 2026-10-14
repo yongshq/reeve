@@ -6,7 +6,7 @@
 #   reeve-harness list
 #   reeve-harness check <name>                 exit 0 only if installed and verified
 #   reeve-harness render <name> <brief-abs-path> --settings <path> [--model M] [--effort E] [--hand ID]
-#                        [--browser <mcp-config>]
+#                        [--browser <mcp-config>] [--relaunch]
 #   reeve-harness detect                       which harness reeve is itself running under
 #   reeve-harness get <name> <key>             read one declared key, for inspection
 
@@ -53,8 +53,12 @@ h_get() {
 # which is what makes an office behave the same under codex as under claude.
 # The brief itself is never placed on the command line: see harnesses/README.md.
 
+# A relaunch, a fresh hand in a copy an earlier hand of the same errand worked
+# in, adds one sentence, so the hand looks before it builds.
 pointer_text() {
   printf '%s' "Read the file $1 and follow it exactly. It is your complete instructions for this task. You are working unattended: no human will answer you, so never wait for input. Report progress by appending status lines exactly as the file describes."
+  [ "${2:-}" = yes ] && printf '%s' " This is a relaunch: an earlier hand on this errand lost its session, and your copy may already hold its commits and uncommitted work. Inspect git status and git log first, and build on that work rather than discard it."
+  return 0
 }
 
 shq() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
@@ -92,7 +96,7 @@ harness_check() {
 
 harness_render() {
   local n=$1 brief=$2 model=${3:-} effort=${4:-} settings_path=${5:-} extra=${6:-} hand=${7:-}
-  local browser=${8:-}
+  local browser=${8:-} relaunch=${9:-no}
   [ -n "$brief" ] || die "render needs an absolute brief path"
   case $brief in /*) ;; *) die "brief path must be absolute, got '$brief'" ;; esac
 
@@ -169,7 +173,7 @@ harness_render() {
     settings=$(printf '%s' "$settings" | sed "s|{settings}|$settings_path|g")
   fi
 
-  prompt=$(shq "$(pointer_text "$brief")")
+  prompt=$(shq "$(pointer_text "$brief" "$relaunch")")
   sep=''
   case $mode in
     argv)
@@ -220,7 +224,7 @@ EOS
   [ -n "$envs" ] && line="env $envs$line"
 
   if [ "$mode" = stdin ]; then
-    line="printf '%s' $(shq "$(pointer_text "$brief")") | $line"
+    line="printf '%s' $(shq "$(pointer_text "$brief" "$relaunch")") | $line"
   fi
   printf '%s\n' "$line"
 }
@@ -240,7 +244,7 @@ EOS
 
 # --- cli --------------------------------------------------------------------
 cmd=${1:-}; shift 2>/dev/null || :
-sel='' office='' model='' effort='' settings_path='' extra_dirs='' hand='' browser=''
+sel='' office='' model='' effort='' settings_path='' extra_dirs='' hand='' browser='' relaunch=no
 args=()
 while [ $# -gt 0 ]; do
   case $1 in
@@ -253,6 +257,8 @@ while [ $# -gt 0 ]; do
     --hand)    hand=${2:-}; shift 2 ;;
     # The household browser's MCP configuration, for an office that has one.
     --browser) browser=${2:-}; shift 2 ;;
+    # A fresh hand in a copy an earlier hand of this errand left behind.
+    --relaunch) relaunch=yes; shift ;;
     # Repeatable. One more directory the hand may reach, beyond its own copy and
     # its errand directory.
     --add-dir) extra_dirs="$extra_dirs${extra_dirs:+ }${2:-}"; shift 2 ;;
@@ -271,7 +277,7 @@ case $cmd in
   render)
     n=${1:-}; [ -n "$n" ] || die "render needs a harness name"
     harness_render "$n" "${2:-}" "$model" "$effort" "$settings_path" "$extra_dirs" "$hand" \
-      "$browser" ;;
+      "$browser" "$relaunch" ;;
   list)
     printf '%-10s %-10s %-9s %s\n' HARNESS INSTALLED VERIFIED BIN
     for n in $(harness_known); do

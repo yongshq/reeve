@@ -57,11 +57,25 @@ chmod +x "$FAKE/herdr"
 # socket nothing listens on is. Its sessions: `other`, then the default one,
 # named $STUB_SES, on $STUB_SOCK. STUB_WS, STUB_PANES, STUB_TABS, STUB_FG and
 # STUB_LABEL as in tests/backend-nest.test.bash; STUB_CWD the cwd every pane
-# reads back, none when unset.
+# reads back, none when unset. STUB_OLD a hall from before --no-agent-resume,
+# whose usage lacks it and which refuses it. STUB_UNMARKED a server that takes
+# the flag and ignores it. STUB_OPEN a checkout hall already shows open, in
+# workspace wLIEGE, which worktree list reports and worktree open returns as
+# already_open. STUB_REFUSE the create calls refused with a reason.
 cat > "$FAKE/hall" <<'HALL'
 #!/usr/bin/env bash
 printf '%s |sock=%s|ses=%s|cli=%s\n' "$*" "${HALL_SOCKET_PATH-}" "${HALL_SESSION-}" "${HALL_CLIENT_SOCKET_PATH-}" >> "$STUB_LOG"
 case $1 in --version) echo "hall 0.1.0"; exit 0 ;; esac
+if [ "$1 ${2:-}" = 'tab help' ]; then
+  echo "hall tab commands:" >&2
+  if [ -n "${STUB_OLD:-}" ]; then echo "  hall tab create [--workspace <workspace_id>] [--cwd PATH] [--label TEXT] [--no-focus]" >&2
+  else echo "  hall tab create [--workspace <workspace_id>] [--cwd PATH] [--label TEXT] [--no-focus] [--no-agent-resume]" >&2; fi
+  exit 0
+fi
+case " $* " in *' --no-agent-resume '*)
+  [ -n "${STUB_OLD:-}" ] && { echo "unknown option: --no-agent-resume" >&2; exit 2; } ;;
+esac
+mark=',"agent_resume":false'; [ -n "${STUB_UNMARKED:-}" ] && mark=''
 case "$1 $2" in
   'session list')
     printf '{"sessions":[{"name":"other","default":false,"running":true,"socket_path":"/other.sock","session_dir":"/d"},{"name":"%s","default":true,"running":true,"socket_path":"%s","session_dir":"/d"}]}\n' \
@@ -77,13 +91,23 @@ case "$1 $2" in
     done
     printf '{"error":{"code":"workspace_not_found"}}\n' >&2; exit 1 ;;
   'workspace create')
-    printf '{"result":{"workspace":{"workspace_id":"wNEW"},"tab":{"tab_id":"wNEW:t1"},"root_pane":{"pane_id":"wNEW:p1"}}}\n' ;;
+    [ -n "${STUB_REFUSE:-}" ] && { printf '{"error":{"code":"workspace_create_failed","message":"no room at the inn"}}\n' >&2; exit 1; }
+    case " $* " in *' --no-agent-resume '*) m=$mark ;; *) m='' ;; esac
+    printf '{"result":{"workspace":{"workspace_id":"wNEW"},"tab":{"tab_id":"wNEW:t1"},"root_pane":{"pane_id":"wNEW:p1"%s}}}\n' "$m" ;;
+  'worktree list')
+    printf '{"result":{"worktrees":[{"path":"%s","open_workspace_id":"wLIEGE"}]}}\n' "${STUB_OPEN:-/nowhere}" ;;
   'worktree open')
-    printf '{"result":{"workspace":{"workspace_id":"wWT"},"root_pane":{"pane_id":"wWT:p1"}}}\n' ;;
+    [ -n "${STUB_REFUSE:-}" ] && { printf '{"error":{"code":"worktree_open_failed","message":"no room"}}\n' >&2; exit 1; }
+    if [ -n "${STUB_ALREADY:-}" ]; then
+      printf '{"result":{"workspace":{"workspace_id":"wLIEGE"},"root_pane":{"pane_id":"wLIEGE:p1"},"already_open":true}}\n'
+    else
+      printf '{"result":{"workspace":{"workspace_id":"wWT"},"root_pane":{"pane_id":"wWT:p1"%s},"already_open":false}}\n' "$mark"
+    fi ;;
   'tab create')
+    [ -n "${STUB_REFUSE:-}" ] && { printf '{"error":{"code":"tab_create_failed","message":"no room"}}\n' >&2; exit 1; }
     ws=''; prev=''
     for a in "$@"; do [ "$prev" = --workspace ] && ws=$a; prev=$a; done
-    printf '{"result":{"tab":{"tab_id":"%s:t9"},"root_pane":{"pane_id":"%s:p9","tab_id":"%s:t9"}}}\n' "$ws" "$ws" "$ws" ;;
+    printf '{"result":{"tab":{"tab_id":"%s:t9"},"root_pane":{"pane_id":"%s:p9","tab_id":"%s:t9"%s}}}\n' "$ws" "$ws" "$ws" "$mark" ;;
   'tab get')
     for t in ${STUB_TABS:-}; do [ "$t" = "$3" ] && { printf '{"result":{"tab":{"tab_id":"%s"}}}\n' "$3"; exit 0; }; done
     printf '{"error":{"code":"tab_not_found"}}\n' >&2; exit 1 ;;
@@ -145,6 +169,11 @@ out=$(REEVE_HALL_BIN='' PATH=/usr/bin:/bin h available 2>&1); rc=$?
 eq  "3 no binary is not available"                          "$rc" 1
 has "3 saying how to name one"                              "$out" "set REEVE_HALL_BIN or config/hall-bin"
 has "3 describe names hall, its version and its session"    "$(STUB_SES=dev h describe)" "hall 0.1.0 (session dev)"
+out=$(STUB_OLD=1 h available 2>&1); rc=$?
+eq  "3 a hall from before --no-agent-resume is not available" "$rc" 1
+has "3 saying which binary, and what to do"                 "$out" "hall at $FAKE/hall predates --no-agent-resume; update hall"
+has "3 so reeve-backend list says it is not usable"         "$(STUB_OLD=1 "$ROOT/bin/reeve-backend" list 2>&1 | grep '^hall')" "predates --no-agent-resume"
+: > "$TRAP"
 
 echo "--- 4. ensure_group, as herdr.sh's ---"
 out=$(HALL_SOCKET_PATH=$STUB_SOCK HALL_WORKSPACE_ID=w61 STUB_WS='w61 w7' h ensure_group Aldric "w7$S")
@@ -179,6 +208,35 @@ REPO="$SCRATCH/repo"; git init -q "$REPO"
 out=$(h create_endpoint "$REPO" "scout: x")
 eq  "5 a git copy without a group, hall's worktree open"   "${out%%#*}" "wWT|wWT:p1"
 has "5 marked the same way"                                 "$(calls)" "worktree open --path $REPO --label scout: x --no-focus --no-agent-resume"
+# A server that takes the flag and does not mark the pane is a refusal, and
+# what it made is closed: never a hand that would resume bare after a restart.
+out=$(STUB_UNMARKED=1 h create_endpoint "$PLAIN" "Scout of Aldric" "w7$S" 2>&1); rc=$?
+eq  "5 an unmarked tab is refused"                          "$rc" 1
+has "5 saying the pane was not marked"                      "$out" "did not mark w7:p9 --no-agent-resume"
+has "5 and its tab is closed"                               "$(calls)" "tab close w7:t9"
+nas "5 never its reeve's workspace"                         "$(calls)" "workspace close"
+out=$(STUB_UNMARKED=1 h create_endpoint "$REPO" "scout: x" 2>&1); rc=$?
+eq  "5 an unmarked worktree open is refused"                "$rc" 1
+has "5 and the workspace it made is closed"                 "$(calls)" "workspace close wWT"
+out=$(STUB_UNMARKED=1 h create_endpoint "$PLAIN" "scout: x" 2>&1); rc=$?
+eq  "5 an unmarked workspace is refused"                    "$rc" 1
+has "5 and closed"                                          "$(calls)" "workspace close wNEW"
+out=$(STUB_REFUSE=1 h create_endpoint "$PLAIN" "scout: x" 2>&1); rc=$?
+eq  "5 a workspace create hall refuses fails"               "$rc" 1
+has "5 echoing hall's own reason"                           "$out" "hall: workspace create refused: workspace_create_failed: no room at the inn"
+out=$(STUB_REFUSE=1 h create_endpoint "$PLAIN" "scout: x" "w7$S" 2>&1)
+has "5 a refused tab says why too"                          "$out" "hall: tab create refused: tab_create_failed: no room"
+# A checkout hall already shows open is someone else's workspace: worktree open
+# would hand back its root pane and rename it, so it is never asked.
+out=$(STUB_OPEN=$REPO h create_endpoint "$REPO" "scout: x")
+eq  "5 a checkout already open gets a workspace of its own" "${out%%#*}" "wNEW|wNEW:p1"
+has "5 found by worktree list"                              "$(calls)" "worktree list --cwd $REPO"
+nas "5 worktree open never runs on it"                      "$(calls)" "worktree open"
+nas "5 nor is its workspace renamed"                        "$(calls)" "workspace rename"
+out=$(STUB_ALREADY=1 h create_endpoint "$REPO" "scout: x" 2>"$SCRATCH/err")
+eq  "5 already_open in the answer is discarded too"         "${out%%#*}" "wNEW|wNEW:p1"
+nas "5 its workspace never closed"                          "$(calls)" "workspace close"
+has "5 saying it was left alone"                            "$(cat "$SCRATCH/err")" "already open in workspace wLIEGE, which is left alone"
 h ensure_group Aldric >/dev/null
 has "5 the reeve's own group workspace is not marked"       "$(calls)" "workspace create --cwd $HOME --label Aldric --no-focus |"
 h kill 'w7|w7:p9|w7:t9'
@@ -302,6 +360,16 @@ has "10 its target is a tab in the reeve's group"           "$(grep '^target=' "
 has "10 the hand loses hall's workspace variable too"       "$(calls)" "pane run wNEW:p9 env -u HERDR_WORKSPACE_ID -u HALL_WORKSPACE_ID REEVE_HAND='one' true"
 nas "10 every call on the socket, none by session"          "$(calls)" "--session"
 
+# A hall from before the flag refuses at the availability check, before any
+# copy is made, so the errand can go out once hall is updated.
+lead "$ROOT/bin/reeve-brief" two web --office scout >/dev/null 2>&1
+f="$REEVE_HOME/errands/two/brief.md"
+sed -e 's/{INTENT}/x/' -e 's/{SPEC}/y/' "$f" > "$f.f" && mv "$f.f" "$f"
+OUT=$(lead REEVE_ROOT="$STUB" STUB_WS=wNEW STUB_OLD=1 "$ROOT/bin/reeve-dispatch" two --harness stub 2>&1); RC=$?
+eq  "10 a dispatch on a hall without the flag refuses"      "$RC" 1
+has "10 saying hall needs updating"                         "$OUT" "predates --no-agent-resume; update hall"
+eq  "10 before any copy was made"                           "$([ -e "$(grep '^worktree=' "$REEVE_HOME/state/two.meta" | cut -d= -f2-)" ] && echo made || echo none)" none
+
 echo "--- 11. after a hall restart the hand's pane is gone, and it reads stale ---"
 # hall drops a --no-agent-resume pane on restore, and the tab it leaves empty.
 # The hand's target no longer resolves: its pane is not found, or its id now
@@ -318,6 +386,15 @@ has "11 the watch says stale, its session gone"             "$OUT" "stale: one l
 nas "11 not closed with its reeve's workspace, still there" "$OUT" "closed with its reeve's workspace"
 OUT=$(lead REEVE_ROOT="$STUB" STUB_WS=wNEW STUB_PANES='' "$ROOT/bin/reeve-status" one 2>/dev/null | sed -n 's/^process  *//p')
 eq  "11 the status shows the session gone"                  "$OUT" missing
+# And the reeve sends it out again from its brief, into the copy it left.
+WT=$(grep '^worktree=' "$M" | cut -d= -f2-)
+: > "$LOG"
+OUT=$(lead REEVE_ROOT="$STUB" STUB_WS=wNEW STUB_PANES='' STUB_FG=true "$ROOT/bin/reeve-dispatch" one --harness stub 2>&1); RC=$?
+eq  "11 dispatching it again relaunches it"                 "$RC" 0
+has "11 into the copy it left"                              "$OUT" "relaunching onto the existing copy $WT"
+has "11 a fresh pane, marked like the first"                "$(calls)" "tab create --workspace wNEW --cwd $WT --label Scout of Escanor --no-focus --no-agent-resume"
+has "11 told it is a relaunch"                              "$(calls)" "This is a relaunch"
+has "11 its status file says so"                            "$(tail -n 1 "$REEVE_HOME/errands/one/status")" "relaunched onto existing copy after its session was lost"
 
 echo "--- 12. herdr was never run, HERDR_* never read ---"
 eq  "12 the trap herdr was never called"                    "$(cat "$TRAP" 2>/dev/null)" ''
