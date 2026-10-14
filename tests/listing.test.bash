@@ -15,7 +15,11 @@
 #      and window edges, and false while the owner's watch is not running
 #   6. it writes nothing and calls no backend, whatever session it runs in
 #   7. --home over REEVE_HOME over ~/.reeve; exit 1 and one stderr line only
-#      for a home it cannot read, and nothing on stderr otherwise
+#      for a home it cannot read, and nothing on stderr otherwise; a record it
+#      cannot read left out, a status it cannot read unknown, as the help says
+#   8. owner_reeve is the owning session's name now, so a hand still nests
+#      under a renamed reeve; the recorded name only when the session has none
+#   9. always valid UTF-8, whatever bytes a hand wrote
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 PASS=0; FAIL=0
 ok()  { PASS=$((PASS+1)); printf 'ok    %s\n' "$1"; }
@@ -268,9 +272,55 @@ if [ "$(id -u)" != 0 ]; then
   chmod 644 "$H/state/fix-auth.meta"
   eq  "7 one record it cannot read: still exit 0, quietly"  "$rc:$(cat "$SCRATCH/err")" "0:"
   has "7 and the rest still listed"                         "$out" '"id":"orphan"'
+  nas "7 the record itself left out"                        "$out" '"id":"fix-auth"'
+  chmod 000 "$H/errands/fix-auth/status"
+  out=$(L 2>"$SCRATCH/err"); rc=$?
+  chmod 644 "$H/errands/fix-auth/status"
+  has "7 a status it cannot read: that errand unknown"      "$rc:$out" '"id":"fix-auth","office":"artificer","owner_reeve":"Aldric","hand_state":"unknown"'
 fi
+help=$(L --help | tr -s ' \n' '  ')
+has "7 the help says a status it cannot read shows unknown" "$help" 'whose status cannot be read shows hand_state "unknown"'
+has "7 and that a record it cannot read is left out"        "$help" 'a record that cannot be read is left out'
 out=$(L --bogus 2>&1); rc=$?
 eq  "7 an unknown argument is refused"                      "$rc" 2
+
+echo "--- 8. owner_reeve: the owning session's name now ---"
+# The liege's rename rewrites the session's name and no errand record, so the
+# name the brief recorded goes stale while the reeve row shows the new one.
+printf 'Bertram\n' > "$H/state/sessions/s-ald/name"
+out=$(L)
+has "8 renamed after dispatch: the hand's owner is the new name" "$out" '"id":"fix-auth","office":"artificer","owner_reeve":"Bertram"'
+has "8 and so is the reeve row it nests under"              "$out" '{"name":"Bertram","session":{"backend":"hall","name":"default","pane_id":"w1:p1"}'
+nas "8 the old name nowhere"                                "$out" '"Aldric"'
+printf 'Aldric\n' > "$H/state/sessions/s-ald/name"
+meta lost office=scout reeve=Dunstan session=s-vanished 'target=w3|w3:p1' dispatched=x
+has "8 an owning session that is gone: the recorded name"   "$(L)" '"id":"lost","office":"scout","owner_reeve":"Dunstan"'
+session s-noname - $NOW
+meta lost office=scout reeve=Dunstan session=s-noname 'target=w3|w3:p1' dispatched=x
+has "8 one with no valid name: the recorded name"           "$(L)" '"id":"lost","office":"scout","owner_reeve":"Dunstan"'
+meta lost office=scout session=s-vanished 'target=w3|w3:p1' dispatched=x
+has "8 neither: null"                                       "$(L)" '"id":"lost","office":"scout","owner_reeve":null'
+rm -f "$H/state/lost.meta"; rm -rf "$H/state/sessions/s-noname"
+
+echo "--- 9. bytes that are not UTF-8 ---"
+# One bad byte in any field would make the whole document unreadable to a
+# strict parser, every second, until that errand is cleaned up.
+log fix-auth 'working: reading' "$(printf 'needs-decision [key=q]: caf\303\251 x \303 y \377 \364\220\200\200 \370 \355\240\200 \300\200 z')"
+out=$(L 2>"$SCRATCH/err"); rc=$?
+eq  "9 still exit 0, quietly"                               "$rc:$(cat "$SCRATCH/err")" "0:"
+if command -v python3 >/dev/null 2>&1; then
+  q=$(printf '%s' "$out" | python3 -c 'import json,sys; d=json.loads(sys.stdin.buffer.read().decode("utf-8")); print(len(d["errands"]), [e["question"] for e in d["errands"] if e["id"]=="fix-auth"][0])' 2>&1)
+  has "9 the document is valid UTF-8 and JSON, every errand in it" "$q" '5 caf'
+  has "9 the valid character kept"                          "$q" "$(printf 'caf\303\251 x')"
+  nas "9 the bad bytes gone"                                "$q" "$(printf '\377')"
+  NOICONV="$SCRATCH/noiconv"; mkdir -p "$NOICONV"
+  printf '#!/bin/sh\nexit 127\n' > "$NOICONV/iconv"; chmod +x "$NOICONV/iconv"
+  q=$(PATH="$NOICONV:$PATH" L | python3 -c 'import json,sys; d=json.loads(sys.stdin.buffer.read().decode("utf-8")); print([e["question"] for e in d["errands"] if e["id"]=="fix-auth"][0])' 2>&1)
+  has "9 with no iconv: still JSON, each byte past ASCII a ?" "$q" 'caf?? x ? y'
+else
+  echo "skip  9 JSON parse: no python3"
+fi
+log fix-auth 'working: 2026-10-01T10:00:00Z reading' 'needs-decision [key=base]: 2026-10-01T10:05:00Z Which base?'
 
 echo "passed=$PASS failed=$FAIL"
 [ "$FAIL" -eq 0 ]

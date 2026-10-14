@@ -12,8 +12,10 @@
 # A script asking a different question of the errands passes --no-wake to
 # reeve-status; this one has no wake to pass.
 #
-# Prints, on stdout, exit 0, even when some record cannot be read (that errand
-# shows hand_state "unknown"):
+# Prints, on stdout, exit 0, even when some record cannot be read: an errand
+# whose status cannot be read shows hand_state "unknown", and a record that
+# cannot be read is left out, since without it nothing says the errand is in
+# flight. Always valid UTF-8: a byte a hand wrote that is not is dropped.
 #
 #   {"version":1,
 #    "reeves":[{"name":"Aldric",
@@ -205,9 +207,10 @@ for rec in "$@"; do
   # A record without the key predates hall, as every reader takes it.
   [ -n "$backend" ] || backend=herdr
 
-  # owner_reeve: the name the brief recorded, else its owning session's now
-  if valid_reeve_name "$reeve"; then owner=$reeve
-  elif name_of "$own"; then owner=$NAME
+  # owner_reeve: its owning session's name now, which the liege's rename
+  # changes and no errand record follows, else the name the brief recorded
+  if name_of "$own"; then owner=$NAME
+  elif valid_reeve_name "$reeve"; then owner=$reeve
   else owner=''
   fi
   [ -n "$own" ] && owners="$owners$own$NL"
@@ -328,5 +331,23 @@ for r in "$@"; do
   reeves="$reeves${reeves:+,}$e"
 done
 
-printf '{"version":1,"reeves":[%s],"errands":[%s]}\n' "$reeves" "$errands"
+doc="{\"version\":1,\"reeves\":[$reeves],\"errands\":[$errands]}"
+# A byte that is not UTF-8, in a note a hand wrote, makes the whole document
+# unreadable to a strict parser. Bytes, not characters, from here on. Only a
+# document holding a byte past ASCII pays the fork: iconv drops what is not
+# UTF-8, after the two shapes some iconv lets through are taken out by hand, a
+# lead byte no character starts with and one past U+10FFFF. Without iconv,
+# every byte past ASCII becomes `?` rather than the document going unread.
+LC_ALL=C
+case $doc in
+  *[$'\200'-$'\377']*)
+    doc=${doc//[$'\365'-$'\377']/}
+    doc=${doc//$'\364'[$'\220'-$'\277']/}
+    s=$(printf '%s' "$doc" | iconv -f UTF-8 -t UTF-8 -c)
+    case $s in
+      '{"version":1,'*']}') doc=$s ;;
+      *) doc=${doc//[$'\200'-$'\377']/?} ;;
+    esac ;;
+esac
+printf '%s\n' "$doc"
 exit 0
