@@ -20,7 +20,7 @@ a skill, listed in section 11.
 | session | one reeve, running. Owns the errands it briefed. Several share one home |
 | manor | one logical project, which may span several repos |
 | holding | one repo inside a manor |
-| backend | where a session lives: herdr |
+| backend | where a session lives: herdr, or hall |
 | harness | which agent CLI runs in it: claude, codex, pi, opencode, cursor, grok, gemini |
 | name | a reeve's short name, unique among the live reeves on one home. A hand's tab is labelled with it, `<Office> of <Name>`, and the reeve's own tab with the name |
 
@@ -548,6 +548,7 @@ fact per line, because you are the one reading it.
 | `bin/reeve-dispatch <id>` | worktree, endpoint, launch. The hand opens as a tab in this reeve's own workspace, labelled with its name. `--dry-run` changes nothing |
 | `bin/reeve-status <id>` / `--all` | the reconciled state, never the last line of the log, and `idle` in the process column for a hand idle and silent past its threshold, or `wedged` for a working hand whose status file and screen have both held still past its threshold, each on the rule the sentry wakes on. Bare lists yours, `--all` the machine's. A listing also delivers anything a caretaker left you, on stderr so a filter over the table cannot eat it, and a script asking a different question passes `--no-wake` |
 | `bin/reeve-status --orphans` | errands whose owning session is provably gone |
+| `bin/reeve-listing` | every reeve and errand in flight as JSON, for a multiplexer polling it. Writes nothing, delivers nothing, calls no backend |
 | `bin/reeve-adopt <id>` | take an orphaned errand on, so this session watches it, and relabel its hand with this reeve's name where the backend can. `--mine` takes every orphan carrying this reeve's name and lists the rest for the liege |
 | `bin/reeve-answer <id> <key> <answer>` | close an open question, durably, then tell the hand |
 | `bin/reeve-say <file> <state> <note>` | a hand's one way to append a status line, stamped in UTC |

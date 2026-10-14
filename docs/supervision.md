@@ -130,3 +130,19 @@ the price.
   once per watch for a hand silent past the window.
 - A threshold that is not a whole number turns the check off, which the sentry and the listing both
   say on stderr; 0 turns it off silently.
+
+## `bin/reeve-listing`: the latches, read
+
+A multiplexer that draws the household polls `bin/reeve-listing` once a second. Its `waiting`,
+`idle` and `wedged` are the sentry's own verdicts, read off the latches a watch writes in `state/`
+(`.attn-<id>`, `.stale-<id>`, `.wedged-<id>`) under the sentry's own dwell and window, so a flag
+turns on at the moment the sentry wakes for it.
+
+- It asks no backend and reads no screen, so it trails the sentry by up to one poll (15 seconds by
+  default). `wedged` is not read off the screen again as `bin/reeve-status` does: a screen that
+  moved voids the latch at the sentry's next poll.
+- All three are false while the owner's watch is not running. Only a running watch clears a latch,
+  so with none they would freeze on whatever they last said.
+- `waiting` holds from the dwell until a poll sees the session anything but waiting, a few seconds
+  after the dialog is answered.
+- It writes nothing, delivers no notification and touches no heartbeat, in any session.
