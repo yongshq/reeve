@@ -332,12 +332,13 @@ reap_one() {
   if kept "$i"; then say ' [session kept, %s]\n' "$(meta_get "$i" keep '')"; return; fi
   [ "$reap" = yes ] || { say '\n'; return; }
   wt=$(meta_get "$i" worktree '')
-  # A branch of the record's own already on the holding's default goes with
-  # its copy, so landed work is never left kept with commits on it. Unlanded,
-  # it is kept as before, the ordinary wait for a land.
+  # A branch of the record's own already on the holding's default, or on a
+  # long-lived branch such as dev, goes with its copy, so landed work is never
+  # left kept with commits on it. Unlanded, it is kept as before, the ordinary
+  # wait for a land.
   local drop=''
-  if [ -z "${2:-}" ] && branch_owned "$i" && branch_landed "$(meta_get "$i" repo '')" \
-       "$(meta_get "$i" branch '')" "$(holding_default "$(meta_get "$i" holding '')")"; then
+  if [ -z "${2:-}" ] && branch_owned "$i" && branch_landed_long "$(meta_get "$i" repo '')" \
+       "$(meta_get "$i" branch '')" "$(meta_get "$i" holding '')"; then
     drop=--drop-branch
   fi
   # Its stdout is dropped, its stderr kept: a refusal's reason is the one thing
@@ -495,68 +496,8 @@ live_errands() {
   done
 }
 
-# A terminal errand whose whole log has already been reported is no longer work
-# in flight for a WATCH, whatever is still on disk: an artificer keeps its copy
-# and branch until the liege lands them, and that wait is the liege's, not
-# something to keep polling over.
-#
-# Two records answer that, and they are two different facts:
-#
-#   its cursor covers the log      a watch read it and said so, here in check_one
-#   its delivered file covers it   the caretaker's line about it was handed to
-#                                  this session's spool and taken from there
-#
-# Either alone is enough, and a delivery writes only the second. The first is a
-# READ position and a delivery reads no log: written from there it marked every
-# earlier line reported too, and it silenced the errand for good on a `printf`
-# whose far end may have been a `grep` that threw the line away.
-#
-# A caretaker still makes no reports, and WRITES neither record. It reads them,
-# for the single question below: whether a report is still owed. It did not, and
-# so it re-announced an errand the reeve had reported long ago, once per
-# caretaker process, for as long as the branch went unlanded.
-#
-# This is the lifetime that keying in-flight off `target=` used to give a watch
-# by accident, restored deliberately: it ends the watch once it has said its
-# piece, instead of ending it the moment a cleanup blanked a field.
-#
-# With a watching session, the `--all` watch's own cursor over an errand not its
-# own counts as a third, for that watch alone. Only live_errands passes one: the
-# caretaker never does, so whether a wake is still owed stays the owner's
-# question.
-reported_done() { # reported_done <id> [<watching session>]
-  local i=$1 total seen
-  case $(status_field "$i" state) in done|failed) ;; *) return 1 ;; esac
-  total=$(status_lines "$(status_file "$i")")
-  seen=$(cat "$(cursor_file "$i")" 2>/dev/null | tr -d '[:space:]')
-  case $seen in ''|*[!0-9]*) ;; *) [ "$seen" = "$total" ] && return 0 ;; esac
-  if [ $# -ge 2 ]; then
-    seen=$(cat "$(cursor_file "$i" "$2")" 2>/dev/null | tr -d '[:space:]')
-    case $seen in ''|*[!0-9]*) ;; *) [ "$seen" = "$total" ] && return 0 ;; esac
-  fi
-  # delivered_get is the one reader of that file, and it answers absent,
-  # unreadable and malformed the same way: nothing reported here.
-  seen=$(delivered_get "$i") || return 1
-  [ "$seen" = "$total" ]
-}
-
-# Does this errand still owe its owner a wake. Two ways it does not, and they
-# are two different facts:
-#
-#   a wake was already left for it   `woke=` in its record, written by whichever
-#                                    caretaker left it, durable and home wide
-#   the owner already reported it    its cursor covers the whole log, so the
-#                                    reeve has said this out loud already
-#
-# Either one alone is enough, and without them a false wake is the result. Both
-# were measured: three successive caretakers left three identical lines about
-# one errand the watch had already reported, and every dispatch starts a
-# caretaker. A false alarm is worse than no guard at all, which is what the
-# errand that built this channel was told in the first place.
-wake_owed() { # wake_owed <id>
-  [ -z "$(meta_get "$1" woke '')" ] || return 1
-  ! reported_done "$1"
-}
+# reported_done and wake_owed, the two questions above and in check_one, are in
+# bin/reeve-lib.sh, which the sweep in bin/reeve-teardown asks them through too.
 
 # Absorb or escalate. One errand, one verdict.
 check_one() {

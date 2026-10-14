@@ -1,35 +1,43 @@
 #!/usr/bin/env bash
-# Land a finished errand's branch on its holding's default branch, then clean
+# Land a finished errand's branch on the branch it was based on, then clean
 # up everything that land leaves behind, in the same step.
 #
 # Usage:
 #   bin/reeve-land <id>
 #
 # The land the standing landing rule allows (AGENTS.md, hard rule 2), and only
-# that: a fast-forward of the holding's default branch (its base: in manors.md,
-# else main) to the errand's branch, in one of two forms.
+# that: a fast-forward of the branch the errand was based on to the errand's
+# branch, in one of two forms.
 #
-#   default checked out nowhere      git -C <holding> fetch . <branch>:<default>
-#   default checked out in the       git -C <holding> merge --ff-only
+#   target checked out nowhere       git -C <holding> fetch . <branch>:<target>
+#   target checked out in the        git -C <holding> merge --ff-only
 #   primary checkout, its tree          --no-overwrite-ignore <branch>
 #   clean apart from ?? and !!
 #
+# The target is the record's own base=, never a guess: the holding's default
+# (its base: in manors.md, else main), or a long-lived branch such as dev, one
+# that exists and no errand record of the holding names as its branch=. A dev
+# errand lands on dev, never on main. A base= that is another errand's branch
+# is followed down to the base that errand was given, so a mend lands where its
+# original would have; but while that errand's branch stands unlanded there,
+# this one refuses, `land that first or rebuild on <default>`.
+#
 # Asked first, and anything short of it refuses: the record exists, the errand
 # reported done with nothing open, its branch is the very ref its dispatch made
-# (bin/reeve-teardown's ownership rule), and the default fast-forwards to it. A
+# (bin/reeve-teardown's ownership rule), and the target fast-forwards to it. A
 # refusal prints one line, `branch ready: <why>`, exits 1 and changes nothing.
 # It never rebases, merges or commits to make a land hold. What it does not
 # ask is the reeve's judgement: whether a warden reviewed the tip and every
 # finding was repaired or accepted. That stays the reeve's to settle first.
 #
-# A branch already on the default lands as nothing to do and goes on to the
+# A branch already on the target lands as nothing to do and goes on to the
 # cleanup, so a land interrupted after its fast-forward finishes on a rerun.
 #
 # Then bin/reeve-teardown --sweep for the holding: this errand and every other
-# finished errand of the holding whose branch is now on the default, copies and
-# branches both, one line per errand cleaned, branch dropped, or errand kept
-# with its reason. A land is not finished until that has run, which is why it
-# is not a separate step for anyone to remember.
+# finished errand of the holding whose branch is now on the default or on the
+# target, copies and branches both, one line per errand cleaned, branch
+# dropped, or errand kept with its reason. A land is not finished until that
+# has run, which is why it is not a separate step for anyone to remember.
 #
 # Exit: 0 landed (or already landed) and swept, 1 refused.
 
@@ -61,22 +69,71 @@ default_ref=$(holding_default "$holding")
 [ "$br" != "$default_ref" ] || ready "$br is the default branch of $repo itself"
 br_sha=$(git -C "$repo" rev-parse --verify --quiet "refs/heads/$br^{commit}" 2>/dev/null) \
   || ready "no branch refs/heads/$br in $repo"
-def_sha=$(git -C "$repo" rev-parse --verify --quiet "refs/heads/$default_ref^{commit}" 2>/dev/null) \
-  || ready "no branch refs/heads/$default_ref in $repo to land on (the holding's base: in" \
-           "manors.md, else main)"
+
+# The records of this repository, other than <id>, naming <branch> as branch=.
+records_naming() { # records_naming <branch> <id>
+  local f r rp
+  for f in "$REEVE_HOME_D"/state/*.meta; do
+    [ -f "$f" ] || continue
+    r=$(basename "$f" .meta)
+    [ "$r" != "$2" ] && [ "$(meta_get "$r" branch '')" = "$1" ] || continue
+    rp=$(meta_get "$r" repo '')
+    [ -n "$rp" ] && [ "$(cd "$rp" 2>/dev/null && pwd -P)" = "$repo_p" ] && printf '%s\n' "$r"
+  done
+}
+
+# Where this errand's work lands: its base=, walked down through every errand
+# branch it names to the first base that is no errand's. That one is the
+# target: the default, or a long-lived branch. main, master, dev, develop and the
+# default are never read as an errand's, whatever a record says, as the sweep
+# never takes them. Bounded, so a loop of records refuses instead of spinning.
+repo_p=$(cd "$repo" && pwd -P)
+onto='' under='' cur=$id depth=0
+while [ -z "$onto" ]; do
+  depth=$((depth + 1))
+  [ "$depth" -le 8 ] || ready "the errand bases under $id run more than 8 deep or loop, so where it" \
+                              "lands is the liege's call"
+  b=$(meta_get "$cur" base ''); [ -n "$b" ] || b=$default_ref
+  case $b in main|master|dev|develop|"$default_ref") rs='' ;; *) rs=$(records_naming "$b" "$cur") ;; esac
+  if [ -z "$rs" ]; then
+    git -C "$repo" rev-parse --verify --quiet "refs/heads/$b^{commit}" >/dev/null 2>&1 \
+      || ready "$cur is based on $b, which is not a branch in $repo to land on"
+    [ "$b" != "$br" ] || ready "$cur is based on $br itself"
+    onto=$b; break
+  fi
+  # A name more than one record has held: the one that owns the ref now speaks
+  # for it, or a lone record does. Anything else is not this script's to pick.
+  next=''
+  for r in $rs; do branch_owned "$r" && { next=$r; break; }; done
+  [ -n "$next" ] || [ "$(printf '%s\n' "$rs" | wc -l | tr -d ' ')" != 1 ] || next=$rs
+  [ -n "$next" ] || ready "$cur is based on $b, which several errand records name and none owns, so" \
+                          "where it lands is the liege's call"
+  [ -n "$under" ] || under=$b
+  cur=$next
+done
+def_sha=$(git -C "$repo" rev-parse --verify --quiet "refs/heads/$onto^{commit}" 2>/dev/null) \
+  || ready "no branch refs/heads/$onto in $repo to land on"
+# Based on an errand's branch that still stands: that branch lands first, so
+# this one never carries it onto the target unreviewed. Gone, or already on the
+# target, it has landed, and this lands after it.
+if [ -n "$under" ] && u_sha=$(git -C "$repo" rev-parse --verify --quiet "refs/heads/$under^{commit}" \
+                               2>/dev/null) \
+   && ! git -C "$repo" merge-base --is-ancestor "$u_sha" "$def_sha" 2>/dev/null; then
+  ready "based on errand branch $under, land that first or rebuild on $default_ref"
+fi
 
 if git -C "$repo" merge-base --is-ancestor "$br_sha" "$def_sha" 2>/dev/null; then
-  printf 'already landed: %s is on %s in %s\n' "$br" "$default_ref" "$repo"
+  printf 'already landed: %s is on %s in %s\n' "$br" "$onto" "$repo"
 else
   git -C "$repo" merge-base --is-ancestor "$def_sha" "$br_sha" 2>/dev/null \
-    || ready "$br does not fast-forward $default_ref in $repo; rebasing it is the liege's call"
+    || ready "$br does not fast-forward $onto in $repo; rebasing it is the liege's call"
   at=$(git -C "$repo" worktree list --porcelain 2>/dev/null \
-       | LD_WANT="refs/heads/$default_ref" awk '
+       | LD_WANT="refs/heads/$onto" awk '
            $1 == "worktree" { p = substr($0, 10); next }
            $1 == "branch" && $2 == ENVIRON["LD_WANT"] { print p; exit }')
   if [ -z "$at" ]; then
-    out=$(git -C "$repo" fetch -q . "refs/heads/$br:refs/heads/$default_ref" 2>&1) \
-      || ready "git refused the fetch onto $default_ref: $(printf '%s\n' "$out" | tail -1)"
+    out=$(git -C "$repo" fetch -q . "refs/heads/$br:refs/heads/$onto" 2>&1) \
+      || ready "git refused the fetch onto $onto: $(printf '%s\n' "$out" | tail -1)"
   elif [ "$(cd "$at" 2>/dev/null && pwd -P)" = "$(cd "$repo" && pwd -P)" ]; then
     # Tracked changes refuse here; untracked and ignored files are git's own to
     # protect, and --no-overwrite-ignore makes it refuse over either.
@@ -88,16 +145,17 @@ else
     out=$(git -C "$repo" merge -q --ff-only --no-overwrite-ignore "$br" 2>&1) \
       || ready "git refused the fast-forward in $repo: $(printf '%s\n' "$out" | sed '/^$/d' | head -1)"
   else
-    ready "$default_ref is checked out at $at, not in the primary checkout $repo"
+    ready "$onto is checked out at $at, not in the primary checkout $repo"
   fi
-  now=$(git -C "$repo" rev-parse --verify --quiet "refs/heads/$default_ref" 2>/dev/null)
+  now=$(git -C "$repo" rev-parse --verify --quiet "refs/heads/$onto" 2>/dev/null)
   [ "$now" = "$br_sha" ] \
-    || warn "$default_ref is at ${now:-nothing} after the land, not $br_sha; look before trusting it"
-  printf 'landed: %s onto %s in %s (%s..%s)\n' "$br" "$default_ref" "$repo" \
+    || warn "$onto is at ${now:-nothing} after the land, not $br_sha; look before trusting it"
+  printf 'landed: %s onto %s in %s (%s..%s)\n' "$br" "$onto" "$repo" \
     "$(git -C "$repo" rev-parse --short "$def_sha")" "$(git -C "$repo" rev-parse --short "$br_sha")"
 fi
 
 # By name when the holding is registered, so the sweep reads the same base:.
 sweep_at=$repo
 [ -n "$holding" ] && holding_line "$holding" >/dev/null && sweep_at=$holding
-"$BIN/reeve-teardown" --sweep "$sweep_at"
+if [ "$onto" = "$default_ref" ]; then "$BIN/reeve-teardown" --sweep "$sweep_at"
+else "$BIN/reeve-teardown" --sweep "$sweep_at" --onto "$onto"; fi

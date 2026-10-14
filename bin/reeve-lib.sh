@@ -479,6 +479,74 @@ delivered_set() { # delivered_set <errand> <count>
   mv "$tmp" "$f" 2>/dev/null || { rm -f "$tmp" 2>/dev/null; return 1; }
 }
 
+# Here rather than in bin/reeve-sentry, its first reader, because the sweep in
+# bin/reeve-teardown asks the same question before it cleans up another
+# session's errand.
+#
+# A terminal errand whose whole log has already been reported is no longer work
+# in flight for a WATCH, whatever is still on disk: an artificer keeps its copy
+# and branch until the liege lands them, and that wait is the liege's, not
+# something to keep polling over.
+#
+# Two records answer that, and they are two different facts:
+#
+#   its cursor covers the log      a watch read it and said so, in
+#                                  bin/reeve-sentry's check_one
+#   its delivered file covers it   the caretaker's line about it was handed to
+#                                  this session's spool and taken from there
+#
+# Either alone is enough, and a delivery writes only the second. The first is a
+# READ position and a delivery reads no log: written from there it marked every
+# earlier line reported too, and it silenced the errand for good on a `printf`
+# whose far end may have been a `grep` that threw the line away.
+#
+# A caretaker still makes no reports, and WRITES neither record. It reads them,
+# for the single question below: whether a report is still owed. It did not, and
+# so it re-announced an errand the reeve had reported long ago, once per
+# caretaker process, for as long as the branch went unlanded.
+#
+# This is the lifetime that keying in-flight off `target=` used to give a watch
+# by accident, restored deliberately: it ends the watch once it has said its
+# piece, instead of ending it the moment a cleanup blanked a field.
+#
+# With a watching session, the `--all` watch's own cursor over an errand not its
+# own counts as a third, for that watch alone. Only bin/reeve-sentry's
+# live_errands passes one: the caretaker never does, so whether a wake is still
+# owed stays the owner's question.
+reported_done() { # reported_done <id> [<watching session>]
+  local i=$1 total seen
+  case $(status_field "$i" state) in done|failed) ;; *) return 1 ;; esac
+  total=$(status_lines "$(status_file "$i")")
+  seen=$(cat "$(cursor_file "$i")" 2>/dev/null | tr -d '[:space:]')
+  case $seen in ''|*[!0-9]*) ;; *) [ "$seen" = "$total" ] && return 0 ;; esac
+  if [ $# -ge 2 ]; then
+    seen=$(cat "$(cursor_file "$i" "$2")" 2>/dev/null | tr -d '[:space:]')
+    case $seen in ''|*[!0-9]*) ;; *) [ "$seen" = "$total" ] && return 0 ;; esac
+  fi
+  # delivered_get is the one reader of that file, and it answers absent,
+  # unreadable and malformed the same way: nothing reported here.
+  seen=$(delivered_get "$i") || return 1
+  [ "$seen" = "$total" ]
+}
+
+# Does this errand still owe its owner a wake. Two ways it does not, and they
+# are two different facts:
+#
+#   a wake was already left for it   `woke=` in its record, written by whichever
+#                                    caretaker left it, durable and home wide
+#   the owner already reported it    its cursor covers the whole log, so the
+#                                    reeve has said this out loud already
+#
+# Either one alone is enough, and without them a false wake is the result. Both
+# were measured: three successive caretakers left three identical lines about
+# one errand the watch had already reported, and every dispatch starts a
+# caretaker. A false alarm is worse than no guard at all, which is what the
+# errand that built this channel was told in the first place.
+wake_owed() { # wake_owed <id>
+  [ -z "$(meta_get "$1" woke '')" ] || return 1
+  ! reported_done "$1"
+}
+
 # --- session identity -------------------------------------------------------
 # One home is shared by every reeve on this machine, so an errand id alone
 # cannot say who is watching it. A session owns the errands it briefed, and a
@@ -1371,6 +1439,48 @@ holding_default() {
   local d=main
   [ -n "${1:-}" ] && d=$(holding_field "$1" base main)
   printf '%s\n' "$d"
+}
+
+# long_lived_branches <repo> [<holding>] -> the branches work lands on, one per
+# line: the holding's default, then each of main, master, dev and develop that
+# exists as refs/heads/<name> and that no errand record of the repository names
+# as its branch=, so an errand's branch is never one. The liege lands on these,
+# and work on any of them has landed, as bin/reeve-teardown's landed-work test
+# and its sweep read it.
+long_lived_branches() {
+  local repo=$1 d n f r rp repo_p named seen=''
+  repo_p=$(cd "$repo" 2>/dev/null && pwd -P) || return 0
+  d=$(holding_default "${2:-}")
+  for n in "$d" main master dev develop; do
+    case " $seen " in *" $n "*) continue ;; esac
+    seen="$seen $n"
+    git -C "$repo" rev-parse --verify --quiet "refs/heads/$n^{commit}" >/dev/null 2>&1 || continue
+    named=no
+    if [ "$n" != "$d" ]; then
+      for f in "$REEVE_HOME_D"/state/*.meta; do
+        [ -f "$f" ] || continue
+        r=$(basename "$f" .meta)
+        [ "$(meta_get "$r" branch '')" = "$n" ] || continue
+        rp=$(meta_get "$r" repo '')
+        [ -n "$rp" ] && [ "$(cd "$rp" 2>/dev/null && pwd -P)" = "$repo_p" ] && { named=yes; break; }
+      done
+    fi
+    [ "$named" = yes ] || printf '%s\n' "$n"
+  done
+}
+
+# branch_landed_long <repo> <branch> [<holding>] -> 0 when refs/heads/<branch>
+# is on any of long_lived_branches, the question a sweep or a watch asks before
+# it drops a branch with its copy.
+branch_landed_long() {
+  local n
+  while IFS= read -r n; do
+    [ -n "$n" ] || continue
+    branch_landed "$1" "$2" "$n" && return 0
+  done <<BLL_EOF
+$(long_lived_branches "$1" "${3:-}")
+BLL_EOF
+  return 1
 }
 
 # branch_landed <repo> <branch> <default> -> 0 when refs/heads/<branch> is
@@ -2312,6 +2422,13 @@ config_get() {
     printf '%s\n' "$fallback"
   fi
 }
+
+# proven_delete_granted -> 0 when this machine records the liege's standing
+# proven-delete grant (AGENTS.md, hard rule 3) as the file config/proven-delete.
+# Its presence is the grant, its content free text for the liege. liege.md says
+# the same in words; this is how code reads it, so a machine without the file,
+# a fresh one included, never deletes a branch on a patch-equivalence proof.
+proven_delete_granted() { [ -f "$(config_file proven-delete)" ]; }
 
 # --- the household browser --------------------------------------------------
 # A hand that changes or reviews something visible checks the result itself, in

@@ -3,19 +3,34 @@
 #
 # Usage:
 #   reeve-teardown <id> [--drop-branch] [--dismiss-only] [--dry-run]
+#   reeve-teardown <id> --drop-proven [--dry-run]
 #   reeve-teardown --prove-landed <holding> <branch>
 #   reeve-teardown --delete-proven <holding> <branch>
-#   reeve-teardown --sweep <holding> [--dry-run]
+#   reeve-teardown --sweep <holding> [--onto <branch>] [--dry-run]
 #
 # --sweep cleans up every finished errand of one holding whose branch has
-# landed on the holding's default branch: the copy and the branch, by this
-# script's own teardown with --drop-branch, or by --delete-proven for a branch
-# landed under other commit ids. Only a branch an errand record owns (its
-# dispatch's birth, nothing since dropped), never the default, main or dev,
-# never an errand in flight, blocked or with a question open, never a copy with
-# uncommitted work: each of those is kept and said, one line each. A record
-# whose branch is gone is skipped without a word. --dry-run says what it would
-# do and writes nothing. Run by bin/reeve-land after every land; safe to rerun.
+# landed on the holding's default branch, a long-lived branch such as dev, or
+# the --onto branch a land just went to: the copy and the branch, by this script's own teardown with
+# --drop-branch, or with --drop-proven for a branch landed on the default under
+# other commit ids. Only a branch an errand record owns (its dispatch's birth,
+# nothing since dropped), never the default, main or dev, never an errand in
+# flight, blocked or with a question open, never one whose finish its own reeve
+# has not yet been told of, never a copy with uncommitted work: each of those is
+# kept and said, one line each. A branch landed under other commit ids is only
+# ever dropped under the proven-delete grant, which this machine records as the
+# file config/proven-delete in the home; without it that branch is kept and
+# said too. A record whose branch is gone is skipped without a word. --dry-run
+# says what it would do and writes nothing. Run by bin/reeve-land after every
+# land; safe to rerun.
+#
+# --drop-proven, under that same grant only, is a teardown for an errand whose
+# branch landed under other commit ids while its own copy still holds it, the
+# way a sibling rebased onto the default leaves its original. Every check of a
+# teardown runs first, the copy must be clean, with nothing untracked, and sit
+# exactly on the branch tip, and the proof must fail on nothing but that copy:
+# then the session is freed, the copy removed with a plain `git worktree
+# remove`, and the branch goes by --delete-proven, its proof asked again now
+# that nothing holds it. Any other copy holding the branch is the liege's.
 #
 # --prove-landed changes nothing. It prints one verdict line, `proven:` (exit 0)
 # or `not proven:` (exit 1), saying whether `git branch -D <branch>` would lose
@@ -46,7 +61,8 @@
 #
 # What it guarantees, mechanically. A copy is removed only when the work it
 # holds has landed: its own HEAD, and its recorded branch if it has one, are
-# each reachable from the recorded base or from the holding's default branch.
+# each reachable from the recorded base, from the holding's default branch, or
+# from one of its long-lived branches such as dev (never an errand's branch).
 # Both facts are asked whenever they apply, never one or the other. And a copy
 # that is there to remove holds no git operation stopped halfway and no refs of
 # its own (check 2c). Nothing else is asked, and the rest of this block is what
@@ -195,8 +211,8 @@ prove_landed() { # prove_landed <holding> <branch> -> one verdict line
   local br_sha born at merges cherry total plus
   # What --delete-proven acts on, set only as far as the proof got: every
   # record that vouches for the branch, the repository, and the tip proved.
-  PL_RECORDS=() PL_REPO='' PL_SHA=''
-  no() { printf 'not proven: %s\n' "$*"; return 1; }
+  PL_RECORDS=() PL_REPO='' PL_SHA='' PL_VERDICT=''
+  no() { PL_VERDICT="not proven: $*"; printf '%s\n' "$PL_VERDICT"; return 1; }
   repo=$(resolve_holding_path "$holding") \
     || { no "'$holding' is not a registered holding or a git repository"; return; }
   repo_p=$(cd "$repo" && pwd -P)
@@ -236,12 +252,20 @@ prove_landed() { # prove_landed <holding> <branch> -> one verdict line
               "base: in manors.md, else main)"; return; }
   br_sha=$(git -C "$repo" rev-parse --verify --quiet "refs/heads/$br^{commit}" 2>/dev/null) \
     || { no "no branch refs/heads/$br in $repo"; return; }
-  at=$(git -C "$repo" worktree list --porcelain 2>/dev/null \
-       | PL_WANT="refs/heads/$br" awk '
-           $1 == "worktree" { p = substr($0, 10); next }
-           $1 == "branch" && $2 == ENVIRON["PL_WANT"] { print p; exit }')
-  [ -z "$at" ] || { no "$br is checked out at $at; that copy goes by reeve-teardown or not" \
-                       "at all, and a refusal there goes to the liege"; return; }
+  # Every copy holding it, not the first: --drop-proven passes PL_ALLOW_AT, the
+  # errand's own copy, and that one alone may stand. Anything else holding it
+  # goes to the liege.
+  while IFS= read -r at; do
+    [ -n "$at" ] || continue
+    [ -n "${PL_ALLOW_AT:-}" ] && [ "$at" = "$PL_ALLOW_AT" ] && continue
+    no "$br is checked out at $at; that copy goes by reeve-teardown or not at all, and a" \
+       "refusal there goes to the liege"; return
+  done <<PL_AT_EOF
+$(git -C "$repo" worktree list --porcelain 2>/dev/null \
+  | PL_WANT="refs/heads/$br" awk '
+      $1 == "worktree" { p = substr($0, 10); next }
+      $1 == "branch" && $2 == ENVIRON["PL_WANT"] { print p }')
+PL_AT_EOF
   merges=$(git -C "$repo" rev-list --merges "$default_sha..$br_sha" 2>/dev/null) \
     || { no "git could not list the merge commits on $br"; return; }
   [ -z "$merges" ] || { no "$br holds $(printf '%s\n' "$merges" | wc -l | tr -d ' ') merge" \
@@ -256,9 +280,12 @@ prove_landed() { # prove_landed <holding> <branch> -> one verdict line
   plus=$(printf '%s\n' "$cherry" | grep -cv '^- ')
   [ "$plus" -eq 0 ] || { no "$plus of $total commit(s) on $br have no patch equivalent on" \
                             "$default_ref; bring it to the liege"; return; }
-  printf 'proven: all %s commit(s) on %s have a patch equivalent on %s, no merges, checked out' \
-    "$total" "$br" "$default_ref"
-  printf ' nowhere: git -C %s branch -D %s loses nothing\n' "$repo" "$br"
+  PL_VERDICT="proven: all $total commit(s) on $br have a patch equivalent on $default_ref, no"
+  PL_VERDICT="$PL_VERDICT merges, checked out nowhere: git -C $repo branch -D $br loses nothing"
+  # Said of the errand's own copy, which --drop-proven removes before it deletes.
+  [ -z "${PL_ALLOW_AT:-}" ] \
+    || PL_VERDICT=${PL_VERDICT/checked out nowhere/checked out only in its own copy}
+  printf '%s\n' "$PL_VERDICT"
   PL_REPO=$repo PL_SHA=$br_sha
 }
 
@@ -270,7 +297,7 @@ prove_landed() { # prove_landed <holding> <branch> -> one verdict line
 # the proof was never proved, and git branch -D would take it.
 delete_proven() { # delete_proven <holding> <branch>
   local br=$2 i now
-  prove_landed "$1" "$br" || return 1
+  PL_ALLOW_AT='' prove_landed "$1" "$br" || return 1
   [ "$(git -C "$PL_REPO" rev-parse --verify --quiet "refs/heads/$br^{commit}" 2>/dev/null)" \
     = "$PL_SHA" ] || { printf 'not deleted: %s moved after the proof; prove it again\n' "$br"
                        return 1; }
@@ -293,10 +320,13 @@ delete_proven() { # delete_proven <holding> <branch>
 # cleaned up by hand. Each errand still goes through the one landed-work test,
 # this script's own teardown, so nothing here decides what is safe to remove.
 # What it adds is the choice of which errands to put to it, one line each.
-sweep() { # sweep <holding> <dry yes|no>
-  local holding=$1 dry=$2 repo repo_p name='' h p f i rp br wt st open landed out rc why
-  local default_ref ids=() owned='' n_clean=0 n_drop=0 n_kept=0
-  kept() { printf 'kept: %s %s: %s\n' "$1" "$2" "$3"; n_kept=$((n_kept + 1)); }
+sweep() { # sweep <holding> <dry yes|no> [<onto>]
+  local holding=$1 dry=$2 onto=${3:-} repo repo_p name='' h p f i rp br wt st open landed out rc
+  local why own me dflag default_ref ids=() owned='' n_clean=0 n_drop=0 n_kept=0
+  kept() { # kept <id> <branch> <why...>
+    local a=$1 b=$2; shift 2
+    printf 'kept: %s %s: %s\n' "$a" "$b" "$*"; n_kept=$((n_kept + 1))
+  }
   repo=$(resolve_holding_path "$holding") \
     || die "'$holding' is not a registered holding or a git repository"
   repo_p=$(cd "$repo" && pwd -P)
@@ -311,6 +341,9 @@ sweep() { # sweep <holding> <dry yes|no>
   git -C "$repo" rev-parse --verify --quiet "refs/heads/$default_ref^{commit}" >/dev/null 2>&1 \
     || die "no branch refs/heads/$default_ref in $repo to sweep against (the holding's base: in" \
            "manors.md, else main)"
+  [ -z "$onto" ] || git -C "$repo" rev-parse --verify --quiet "refs/heads/$onto^{commit}" \
+                      >/dev/null 2>&1 || die "no branch refs/heads/$onto in $repo to sweep against"
+  me=$(reeve_session)
   for f in "$REEVE_HOME_D"/state/*.meta; do
     [ -f "$f" ] || continue
     i=$(basename "$f" .meta)
@@ -324,10 +357,14 @@ sweep() { # sweep <holding> <dry yes|no>
     br=$(meta_get "$i" branch '')
     [ -n "$br" ] && [ -z "$(meta_get "$i" branchDropped '')" ] || continue
     git -C "$repo" rev-parse --verify --quiet "refs/heads/$br^{commit}" >/dev/null 2>&1 || continue
-    case $br in main|master|dev|develop|"$default_ref") continue ;; esac
-    # Landed by ancestry, or under other commit ids. Unlanded is the ordinary
-    # wait for the liege, not something kept, so it is not said here.
-    if branch_landed "$repo" "$br" "$default_ref"; then landed=ancestor
+    case " main master dev develop $default_ref $onto " in *" $br "*) continue ;; esac
+    # Landed by ancestry, on the default, a long-lived branch such as dev or the
+    # branch a land just went to, or under other commit ids on the default, the
+    # one ref the proof asks.
+    # Unlanded is the ordinary wait for the liege, not something kept, so it is
+    # not said here.
+    if branch_landed_long "$repo" "$br" "$name" \
+       || { [ -n "$onto" ] && branch_landed "$repo" "$br" "$onto"; }; then landed=ancestor
     else
       out=$(git -C "$repo" cherry "refs/heads/$default_ref" "refs/heads/$br" 2>/dev/null) || out=''
       [ -n "$out" ] && [ "$(printf '%s\n' "$out" | grep -cv '^- ')" = 0 ] || continue
@@ -348,6 +385,14 @@ sweep() { # sweep <holding> <dry yes|no>
       *) [ -n "$(meta_get "$i" tornDown '')" ] \
            || { kept "$i" "$br" "still in flight (last reported: ${st:-nothing yet})"; continue; } ;;
     esac
+    # Another reeve's finish not yet reported to it: torn down, it would drop
+    # out of that reeve's watch before its report was made, so the report is
+    # lost rather than late. The sentry's own test, wake_owed.
+    own=$(meta_get "$i" session '')
+    if [ -z "$(meta_get "$i" tornDown '')" ] && [ -n "$own" ] && [ "$own" != "$me" ] \
+       && wake_owed "$i"; then
+      kept "$i" "$br" "its finish not yet reported to its reeve"; continue
+    fi
     if [ -n "$(meta_get "$i" keep '')" ] && [ -n "$(meta_get "$i" target '')" ]; then
       kept "$i" "$br" "dispatched to be kept for debugging, its session still up"; continue
     fi
@@ -359,7 +404,7 @@ sweep() { # sweep <holding> <dry yes|no>
       if [ "$dry" = yes ]; then
         printf 'would clean: %s\nwould drop: %s\n' "$i" "$br"; continue
       fi
-      out=$("$BIN/reeve-teardown" "$i" --drop-branch 2>&1); rc=$?
+      out=$("$BIN/reeve-teardown" "$i" --drop-branch ${onto:+--onto "$onto"} 2>&1); rc=$?
       if [ "$rc" != 0 ]; then
         why=$(printf '%s\n' "$out" | sed -n '/REFUSED/{n;s/^ *//p;q;}')
         kept "$i" "$br" "cleanup refused: ${why:-exit $rc}"; continue
@@ -369,16 +414,25 @@ sweep() { # sweep <holding> <dry yes|no>
         kept "$i" "$br" "git refused to delete it"
       else printf 'dropped: %s\n' "$br"; n_drop=$((n_drop + 1)); fi
     else
-      # The proven route, hard rule 3's: its own proof, and it refuses a branch
-      # a copy still holds, so that copy is kept and said.
-      if [ "$dry" = yes ]; then
-        out=$("$BIN/reeve-teardown" --prove-landed "$holding" "$br" 2>&1) \
-          && printf 'would drop: %s (landed under other commit ids)\n' "$br" \
-          || kept "$i" "$br" "$out"
+      # The proven route, hard rule 3's, and only under its grant. --drop-proven
+      # runs the proof, and its own copy holding the branch is the one holder it
+      # removes first; any other is kept and said.
+      if ! proven_delete_granted; then
+        kept "$i" "$br" "landed under other commit ids; the proven-delete grant is not recorded" \
+                        "on this machine"
         continue
       fi
-      out=$("$BIN/reeve-teardown" --delete-proven "$holding" "$br" 2>&1) \
-        || { kept "$i" "$br" "$out"; continue; }
+      dflag=''; [ "$dry" = no ] || dflag=--dry-run
+      out=$("$BIN/reeve-teardown" "$i" --drop-proven $dflag 2>&1); rc=$?
+      if [ "$rc" != 0 ]; then
+        why=$(printf '%s\n' "$out" | sed -n '/REFUSED/{n;s/^ *//p;q;}')
+        kept "$i" "$br" "${why:-cleanup refused: exit $rc}"; continue
+      fi
+      if [ "$dry" = yes ]; then
+        printf 'would clean: %s\nwould drop: %s (landed under other commit ids)\n' "$i" "$br"
+        continue
+      fi
+      printf 'cleaned: %s\n' "$i"; n_clean=$((n_clean + 1))
       printf 'dropped: %s (landed under other commit ids)\n' "$br"; n_drop=$((n_drop + 1))
     fi
   done
@@ -395,19 +449,26 @@ case ${1:-} in
     [ $# -eq 3 ] || die "usage: reeve-teardown --delete-proven <holding> <branch>"
     delete_proven "$2" "$3"; exit ;;
   --sweep)
-    case $# in
-      2) sweep "$2" no ;;
-      3) [ "$3" = --dry-run ] || die "usage: reeve-teardown --sweep <holding> [--dry-run]"
-         sweep "$2" yes ;;
-      *) die "usage: reeve-teardown --sweep <holding> [--dry-run]" ;;
-    esac
+    sw_use="usage: reeve-teardown --sweep <holding> [--onto <branch>] [--dry-run]"
+    [ $# -ge 2 ] || die "$sw_use"
+    sw_at=$2 sw_dry=no sw_onto=''; shift 2
+    while [ $# -gt 0 ]; do
+      case $1 in
+        --dry-run) sw_dry=yes; shift ;;
+        --onto) [ -n "${2:-}" ] || die "$sw_use"; sw_onto=$2; shift 2 ;;
+        *) die "$sw_use" ;;
+      esac
+    done
+    sweep "$sw_at" "$sw_dry" "$sw_onto"
     exit ;;
 esac
 id=${1:-}; shift 2>/dev/null || :
-drop_branch=no dry=no dismiss_only=no
+drop_branch=no dry=no dismiss_only=no drop_proven=no onto=''
 while [ $# -gt 0 ]; do
   case $1 in
     --drop-branch) drop_branch=yes; shift ;;
+    --onto) [ -n "${2:-}" ] || die "--onto takes a branch"; onto=$2; shift 2 ;;
+    --drop-proven) drop_proven=yes; shift ;;
     --dismiss-only) dismiss_only=yes; shift ;;
     --dry-run) dry=yes; shift ;;
     -h|--help) print_help "$0"; exit 0 ;;
@@ -416,6 +477,12 @@ while [ $# -gt 0 ]; do
 done
 require_id "$id"
 [ -f "$(meta_file "$id")" ] || die "no errand '$id'"
+[ "$drop_proven" = no ] || { [ "$drop_branch" = no ] && [ "$dismiss_only" = no ]; } \
+  || die "--drop-proven takes no --drop-branch or --dismiss-only"
+# Asked before anything is freed: without the grant this mode has nothing to do.
+[ "$drop_proven" = no ] || proven_delete_granted \
+  || die "--drop-proven deletes under the proven-delete grant, and it is not recorded on this" \
+         "machine ($(config_file proven-delete) is absent)"
 
 # One errand, one teardown at a time. A foreground watch and a caretaker can
 # both decide the same hand is finished in the same instant, and two concurrent
@@ -459,6 +526,26 @@ backend=$(meta_get "$id" backend herdr)
 # while it reads alive, closed on a teardown. herdr never writes it.
 launching=$(meta_get "$id" launching '')
 [ "$launching" != "$target" ] || launching=''
+# --onto names a landing place, so never an errand's branch: one that does not
+# exist here, or that an errand record of this repository names as branch=, is
+# refused. main, master, dev, develop and the default are never an errand's, as
+# bin/reeve-land and the sweep read them.
+if [ -n "$onto" ]; then
+  git -C "$repo" rev-parse --verify --quiet "refs/heads/$onto^{commit}" >/dev/null 2>&1 \
+    || refuse "--onto $onto is not a branch in $repo."
+  o_default=main
+  [ -n "$holding" ] && o_default=$(holding_field "$holding" base main)
+  case $onto in
+    main|master|dev|develop|"$o_default") ;;
+    *) for f in "$REEVE_HOME_D"/state/*.meta; do
+         [ -f "$f" ] || continue
+         r=$(basename "$f" .meta)
+         [ "$(meta_get "$r" branch '')" = "$onto" ] || continue
+         [ "$(cd "$(meta_get "$r" repo '')" 2>/dev/null && pwd -P)" = "$(cd "$repo" && pwd -P)" ] \
+           && refuse "--onto $onto is errand $r's branch, not a place work lands."
+       done ;;
+  esac
+fi
 
 # 1. the hand must not still be WORKING.
 #
@@ -697,7 +784,16 @@ base= line in $(meta_file "$id") to the branch the work actually landed on."
 # misconfigured base: line pass unlanded work, because a tag, a sha or a tag
 # named main shadowing the branch can each sit on the copy's own commit. The
 # errand's own branch is never a landing place for it either.
-default_ref='' default_sha='' landed_refs=''
+#
+# The holding's other long-lived branches are asked too, the third place: main,
+# master, dev and develop, each that exists and no errand record names as its
+# branch= (long_lived_branches in bin/reeve-lib.sh), the branches the liege
+# lands on. Work fast-forwarded onto dev has landed there whatever base= says.
+# --onto <branch>, from the sweep after a land, adds the branch that land went
+# to, validated below as never an errand's branch. An errand's branch is never
+# one of these, so the strict reading holds: a landing place, not any ref that
+# happens to keep the commits.
+default_ref='' default_sha='' landed_refs='' also_refs='' also_shas=''
 resolve_default() {
   default_ref=main
   [ -n "$holding" ] && default_ref=$(holding_field "$holding" base main)
@@ -712,6 +808,14 @@ resolve_default() {
   landed_refs=$base
   [ -n "$default_sha" ] && landed_refs="$base or $default_ref"
   [ -n "$base_sha" ] || landed_refs=$default_ref
+  local n sha
+  also_refs='' also_shas=''
+  for n in $(long_lived_branches "$repo" "$holding") $onto; do
+    case " $base $default_ref $br $also_refs " in *" $n "*) continue ;; esac
+    sha=$(git -C "$repo" rev-parse --verify --quiet "refs/heads/$n^{commit}" 2>/dev/null) || continue
+    also_refs="${also_refs:+$also_refs }$n" also_shas="${also_shas:+$also_shas }$sha"
+    landed_refs="$landed_refs or $n"
+  done
   return 0
 }
 
@@ -723,7 +827,13 @@ resolve_default() {
 landed_on() {
   [ -n "$base_sha" ] && git -C "$repo" merge-base --is-ancestor "$1" "$base_sha" 2>/dev/null \
     && return 0
-  [ -n "$default_sha" ] && git -C "$repo" merge-base --is-ancestor "$1" "$default_sha" 2>/dev/null
+  [ -n "$default_sha" ] && git -C "$repo" merge-base --is-ancestor "$1" "$default_sha" 2>/dev/null \
+    && return 0
+  local sha
+  for sha in $also_shas; do
+    git -C "$repo" merge-base --is-ancestor "$1" "$sha" 2>/dev/null && return 0
+  done
+  return 1
 }
 
 # A base that moved out from under the errand.
@@ -952,6 +1062,57 @@ if [ "$writes" != home ] && [ -n "$wt" ]; then
   fi
 fi
 
+# --drop-proven: the landed-work test below asks ancestry, and a branch landed
+# under other commit ids fails it however safe it is to remove. This mode asks
+# the proof instead, the grant's own, with one holder allowed to stand: this
+# errand's own copy, clean (checks 2c and 3 above, and nothing untracked) and
+# sitting exactly on the tip the proof covered, so removing it loses nothing the
+# proof did not. Then the copy goes, and the branch by --delete-proven, which
+# proves again with nothing holding it. The session, if any, was freed at 1b.
+if [ "$drop_proven" = yes ]; then
+  [ -n "$br" ] || refuse "this errand records no branch, so there is nothing to prove."
+  ph=$repo
+  [ -n "$holding" ] && holding_line "$holding" >/dev/null && ph=$holding
+  own_copy=''
+  if [ "$writes" != home ] && [ -n "$wt" ] && [ -d "$wt" ]; then
+    [ -z "$(git -C "$wt" status --porcelain --untracked-files=all 2>/dev/null)" ] \
+      || refuse "the copy at $wt holds untracked files, which go with it."
+    own_copy=$(phys_path "$wt")
+  fi
+  PL_ALLOW_AT=$own_copy prove_landed "$ph" "$br" >/dev/null || refuse "$PL_VERDICT"
+  vouched=no
+  for r in "${PL_RECORDS[@]}"; do [ "$r" = "$id" ] && vouched=yes; done
+  [ "$vouched" = yes ] || refuse "this errand's record does not vouch for $br, so it is the liege's."
+  if [ -n "$own_copy" ]; then
+    head_now=$(git -C "$wt" rev-parse --verify --quiet HEAD 2>/dev/null) || head_now=''
+    [ "$head_now" = "$PL_SHA" ] \
+      || refuse "the copy at $wt is at ${head_now:-no readable HEAD}, not on the tip of $br the" \
+                "proof covered ($PL_SHA), so removing it could lose what the proof never saw."
+  fi
+  [ -z "$target" ] || run "$BIN/reeve-backend" call kill "$target" --backend "$backend" \
+    || warn "could not close the endpoint $target, continuing"
+  [ -z "$launching" ] || run "$BIN/reeve-backend" call kill "$launching" --backend "$backend" \
+    || warn "could not close the endpoint $launching, continuing"
+  if [ -n "$own_copy" ]; then
+    run git -C "$repo" worktree remove "$wt" || refuse "git refused to remove the worktree at $wt." \
+      "That refusal is the safety net. Do not add --force; find out what git objected to."
+    [ "$dry" = yes ] || rmdir "$(dirname "$wt")" 2>/dev/null || :
+  fi
+  if [ "$dry" = yes ]; then
+    printf '  would run: reeve-teardown --delete-proven %s %s\n' "$ph" "$br"
+    info "dry run, nothing changed"; exit 0
+  fi
+  delete_proven "$ph" "$br" || refuse "the copy is removed, but the branch was not deleted:" \
+                                      "${PL_VERDICT:-see above}"
+  meta_set "$id" tornDown "$(date +%Y-%m-%dT%H:%M:%S)"
+  meta_set "$id" target ''
+  [ -z "$launching" ] || meta_set "$id" launching ''
+  info "torn down $id"
+  [ -f "$(report_file "$id")" ] && info "  report kept: $(report_file "$id")"
+  info "  record kept: $(meta_file "$id")"
+  exit 0
+fi
+
 if [ -n "$br" ] || [ "$copy_at_risk" = yes ]; then
   # The repository is not tested in this condition. Doing so short circuited the
   # whole check before require_base could apply its own guard, so a bad repo=
@@ -982,13 +1143,16 @@ if [ -n "$br" ] || [ "$copy_at_risk" = yes ]; then
       # the way the old fallback to 0 did. Counted against every ref landed_on
       # asked, so the number is the commits that neither of them holds.
       # Both are unquoted on purpose: each is a sha or empty, and empty drops out.
-      ahead=$(git -C "$repo" rev-list --count "$br_sha" --not $base_sha $default_sha 2>/dev/null) \
+      ahead=$(git -C "$repo" rev-list --count "$br_sha" --not $base_sha $default_sha $also_shas \
+              2>/dev/null) \
         || ahead=''
-      unlanded=$(git -C "$repo" log --oneline "$br_sha" --not $base_sha $default_sha 2>/dev/null \
+      unlanded=$(git -C "$repo" log --oneline "$br_sha" --not $base_sha $default_sha $also_shas \
+                 2>/dev/null \
                  | head -5 | sed 's/^/    /')
       not_on="$base does not have"
       [ -n "$default_sha" ] && not_on="neither $base nor $default_ref has"
       [ -n "$base_sha" ] || not_on="$default_ref does not have"
+      [ -z "$also_refs" ] || not_on="$not_on, nor $(printf '%s' "$also_refs" | sed 's/ /, nor /g')"
       # Unless the base did not resolve: that is a record to correct, not the
       # ordinary keep, so it stays a 1.
       [ -n "$base_missing_note" ] || refuse_rc=3
@@ -1128,17 +1292,34 @@ if [ "$drop_branch" = yes ] && [ -n "$br" ]; then
   # ref, so a reuse is born again and matches no branchMade=; the record is
   # marked branchDropped= too, which `--prove-landed` refuses outright.
   # -d asks whether the branch is merged into the holding's HEAD. A land onto a
-  # default checked out nowhere leaves HEAD elsewhere, so -d refused landed
-  # work there. The default is then made the branch's upstream, the ref -d asks
-  # instead: still -d, still refusing anything not on it.
+  # branch checked out nowhere leaves HEAD elsewhere, so -d refused landed work
+  # there. The default, else the base, whichever holds it, is then made the
+  # branch's upstream, the ref -d asks instead: still -d, still refusing anything
+  # not on it. Never over an upstream the branch already has, never on a branch
+  # some copy has checked out, since -d refuses that anyway and the upstream
+  # would outlive the refusal; and taken back off if -d refuses all the same.
+  up='' up_set=no
   if ! git -C "$repo" merge-base --is-ancestor "refs/heads/$br" HEAD 2>/dev/null \
-     && [ -n "$default_ref" ] && branch_landed "$repo" "$br" "$default_ref"; then
-    run git -C "$repo" branch -q --set-upstream-to="$default_ref" "$br" \
-      || warn "could not point '$br' at $default_ref for the delete"
+     && [ -z "$(git -C "$repo" for-each-ref --format='%(upstream)' "refs/heads/$br" 2>/dev/null)" ] \
+     && [ -z "$(git -C "$repo" worktree list --porcelain 2>/dev/null \
+                | TD_W="branch refs/heads/$br" awk '$0 == ENVIRON["TD_W"]')" ]; then
+    if [ -n "$default_ref" ] && branch_landed "$repo" "$br" "$default_ref"; then up=$default_ref
+    elif branch_landed "$repo" "$br" "$base"; then up=$base
+    else
+      for n in $also_refs; do branch_landed "$repo" "$br" "$n" && { up=$n; break; }; done
+    fi
+  fi
+  if [ -n "$up" ]; then
+    if run git -C "$repo" branch -q --set-upstream-to="$up" "$br"; then up_set=yes
+    else warn "could not point '$br' at $up for the delete"; fi
   fi
   if run git -C "$repo" branch -d "$br"; then
     [ "$dry" = yes ] || meta_set "$id" branchDropped "$(date +%Y-%m-%dT%H:%M:%S)"
-  else warn "git refused to delete '$br' (it is not merged). Leaving it."; fi
+  else
+    [ "$up_set" = no ] || [ "$dry" = yes ] \
+      || git -C "$repo" branch -q --unset-upstream "$br" 2>/dev/null || :
+    warn "git refused to delete '$br' (it is not merged). Leaving it."
+  fi
 fi
 
 if [ "$dry" = yes ]; then info "dry run, nothing changed"; exit 0; fi

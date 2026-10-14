@@ -48,20 +48,23 @@ delete (3).
    all hold: a warden reviewed the branch tip, or reviewed the repair commits against the findings,
    in fresh context; every finding is repaired, or accepted by the liege by name for this errand;
    the test run above passed, so an untested holding never lands this way; and you land with
-   `bin/reeve-land <id>`, which is one of:
+   `bin/reeve-land <id>`, which does one of:
    - `main` checked out nowhere: `git -C <holding> fetch . <branch>:main`.
    - the holding's primary checkout on `main` with a clean tree apart from `??` and `!!` entries:
      `git -C <holding> merge --ff-only --no-overwrite-ignore <branch>`. Git itself refuses to
      overwrite an untracked or ignored file there.
 
-   It cleans up the landed errand and every finished errand of that holding already landed,
-   branches included; a land is not finished until it has run. Then report what landed. Anything
+   It lands on the errand's own base (never `main` for a `dev` errand), and cleans up the landed
+   errand and every finished errand of that holding already landed, branches included; a land is
+   not finished until it has run. Then report what landed. Anything
    else, or any refusal, is "branch ready"; never rebase or commit to make it hold. Pushes and PRs
    wait for the liege.
-3. **You never tear down unlanded work.** `bin/reeve-teardown` owns the landed-work test. A refusal
+3. **You never tear down unlanded work.** `bin/reeve-teardown` owns the landed-work test (landed:
+   on the base, the default, or a long-lived branch such as `dev` that no errand names). A refusal
    is a stop-and-investigate result, never an obstacle to route around. Never `--force`, never `-D`,
    never `git stash` someone else's work away. One exception, under a **standing proven-delete
-   rule** the liege granted and `liege.md` records (per machine, like the landing rule):
+   rule** the liege granted and `liege.md` records (per machine, like the landing rule; code reads
+   it as the file `config/proven-delete` in `$REEVE_HOME`):
    `bin/reeve-teardown --delete-proven <holding> <branch>`, the grant's only delete. It runs the
    proof `--prove-landed` prints, deletes only on `proven:`, and marks the errand records that
    vouched. A raw `git branch -D` stays the liege's. The grant covers only the very ref the
@@ -561,7 +564,8 @@ fact per line, because you are the one reading it.
 | `bin/reeve-teardown <id>` | remove a finished errand's copy, refusing on unlanded work |
 | `bin/reeve-teardown --prove-landed <holding> <branch>` | verdict: may `branch -D` run. Read only |
 | `bin/reeve-teardown --delete-proven <hold> <br>` | the grant's delete: prove, `-D`, mark records |
-| `bin/reeve-teardown --sweep <holding>` | clean every finished errand of the holding already landed, branches included. `--dry-run` writes nothing |
+| `bin/reeve-teardown --sweep <holding>` | clean every finished errand of the holding already landed, branches included; one landed under other commit ids only when `config/proven-delete` records the grant. `--dry-run` writes nothing |
+| `bin/reeve-teardown <id> --drop-proven` | the grant's teardown for a branch landed under other commit ids that the errand's own clean copy still holds |
 | `bin/reeve-land <id>` | the standing landing rule's land, then `--sweep`. Refuses as `branch ready: <why>`, changing nothing |
 | `bin/reeve-memory` | the mechanics behind `/inscribe`, `/strike`, `/recall`, `/glean` |
 | `bin/reeve-handoff new <manor>` | scaffold a handoff, with the factual parts already filled in |

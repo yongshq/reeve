@@ -31,6 +31,11 @@ An owner's watching right now (the caretaker stands aside for it, `AGENTS.md` se
 by that session's own watch marker; an owner merely alive is not watching. The caretaker acts
 within one of its polls, after leaving the terminal line in your spool if it is still owed.
 
+A watch or caretaker tearing down a finished errand whose own branch is already an ancestor of the
+holding's default, or of a long-lived branch such as `dev` that no errand names, drops that branch
+with `--drop-branch` in the same step, said as `landed branch <branch> dropped`; an unlanded branch
+is kept as before, `kept with N commit(s)`.
+
 ## After a `waiting` wake: watch again at once
 
 Every wake ends the watch, `waiting` included. A `waiting` errand is usually cleared by the liege

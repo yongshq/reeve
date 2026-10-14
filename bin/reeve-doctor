@@ -28,6 +28,13 @@ if [ -d "$REEVE_HOME_D/.git" ]; then
 else
   printf '  home git    no. Your learned memory has no history and no backup.\n'; WARN=$((WARN+1))
 fi
+# Not a warning either way: the grant is the liege's to give, per machine.
+if proven_delete_granted; then
+  printf '  grants      proven-delete recorded (%s)\n' "$(config_file proven-delete)"
+else
+  printf '  grants      proven-delete not recorded (%s absent)\n' "$(config_file proven-delete)"
+  printf '              so a sweep keeps branches landed under other commit ids\n'
+fi
 
 # --- sessions ----------------------------------------------------------------
 # Several reeves share one home, and each watches only what it briefed. Running

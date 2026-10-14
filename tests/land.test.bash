@@ -14,11 +14,18 @@
 #   2  the land with the default checked out nowhere, HEAD on another branch
 #   3  every refusal says `branch ready:` and changes nothing
 #   4  a chain of an original and three mends, each based on the one before:
-#      landing the last drops all four branches and copies, beside a liege
-#      branch, an in-flight errand, a dirty copy, a ported branch and a branch
-#      no record names
+#      the last refuses while the one under it stands, and landing them in turn
+#      drops all four branches and copies, beside a liege branch, an in-flight
+#      errand, a dirty copy, a ported branch and a branch no record names
 #   5  --sweep --dry-run writes nothing, and the sweep is idempotent
 #   6  a watch's teardown drops a branch already landed, keeps one that is not
+#   7  what the sweep never takes, and a ported branch kept without the grant
+#   8  a dev errand lands on dev, never on main, in both forms
+#   9  siblings: one rebased and landed, the original and its copy dropped
+#   10 another reeve's finish not yet reported to it is kept
+#   11 the -d upstream fallback never touches a branch checked out elsewhere
+#   12 a chain fast-forwarded onto dev by hand: teardown and sweep take both
+#   13 the doctor shows the grant
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 
 # --- safety -----------------------------------------------------------------
@@ -97,6 +104,8 @@ snapshot() {
   (cd "$REEVE_HOME" && find . -type f | sort | xargs cat)
 }
 land()  { OUT=$("$ROOT/bin/reeve-land" "$@" 2>&1); RC=$?; }
+# The liege's standing proven-delete grant, as this machine records it.
+grant() { mkdir -p "$REEVE_HOME/config" && echo granted > "$REEVE_HOME/config/proven-delete"; }
 sweep() { OUT=$("$ROOT/bin/reeve-teardown" --sweep "$@" 2>&1); RC=$?; }
 
 echo "--- 1. default in the primary checkout ---"
@@ -186,8 +195,8 @@ ck_eq  "3 no record refuses"                  "$RC" 1
 ck_has "3 says so"                            "$OUT" "branch ready: no errand record"
 ck_eq  "3 and changed nothing"                "$(snapshot)" "$before"
 
-echo "--- 4. a chain of four, landed by its last ---"
-fresh_home four; holding four
+echo "--- 4. a chain of four, landed in turn ---"
+fresh_home four; holding four; grant
 git -C "$repo" branch liege/wip main          # the liege's, on main already
 git -C "$repo" branch stray main              # no record names it
 errand busy main "working: just started"      # in flight, its commit not landed
@@ -203,10 +212,21 @@ errand mend-1 feat/orig
 errand mend-2 feat/mend-1
 errand mend-3 feat/mend-2
 git -C "$(wt_of mend-3)" cherry-pick "$port_sha" >/dev/null
-land mend-3
-ck_eq  "4 lands"                              "$RC" 0
+before=$(snapshot); land mend-3
+ck_eq  "4 the last refuses while the one under it stands" "$RC" 1
+ck_has "4 and says which to land first"       "$OUT" \
+  "branch ready: based on errand branch feat/mend-2, land that first or rebuild on main"
+ck_eq  "4 and changed nothing"                "$(snapshot)" "$before"
+ALL=''
 for e in orig mend-1 mend-2 mend-3; do
-  ck_has "4 cleans $e"                        "$OUT" "cleaned: $e"
+  land "$e"
+  ck_eq  "4 $e lands"                         "$RC" 0
+  ck_has "4 $e lands on main"                 "$OUT" "landed: feat/$e onto main"
+  ALL="$ALL
+$OUT"
+done
+for e in orig mend-1 mend-2 mend-3; do
+  ck_has "4 cleans $e"                        "$ALL" "cleaned: $e"
   ck_eq  "4 feat/$e is gone"                  "$(has_br "feat/$e")" no
   ck_eq  "4 its copy is gone"                 "$(present "$(wt_of "$e")")" removed
 done
@@ -222,7 +242,7 @@ ck_eq  "4 its copy stays"                     "$(present "$(wt_of busy)")" prese
 ck_has "4 the dirty copy is kept, with why"   "$OUT" "kept: dirty feat/dirty: uncommitted work"
 ck_eq  "4 its work is intact"                 "$(cat "$(wt_of dirty)/scratch.txt")" wip
 ck_eq  "4 its branch stays"                   "$(has_br feat/dirty)" yes
-ck_has "4 the tally"                          "$OUT" "4 cleaned, 5 dropped, 2 kept"
+ck_has "4 the last land's tally"              "$OUT" "2 cleaned, 2 dropped, 2 kept"
 
 echo "--- 5. dry run and idempotence ---"
 fresh_home five; holding five
@@ -247,18 +267,25 @@ ck_has "5 a holding given by path sweeps too" "$OUT" "swept $repo"
 echo "--- 6. a watch drops a branch already landed ---"
 fresh_home six; holding six
 OWNER=sess-S
+git -C "$repo" branch dev main
 errand s main
 errand u main
+errand t main
 OWNER=''
 git -C "$repo" merge -q --ff-only feat/s
-OUT=$(REEVE_SESSION=sess-S "$ROOT/bin/reeve-sentry" --once --poll 1 2>&1)
-OUT="$OUT
+git -C "$repo" fetch -q . feat/t:dev
+OUT=''
+for n in 1 2 3; do
+  OUT="$OUT
 $(REEVE_SESSION=sess-S "$ROOT/bin/reeve-sentry" --once --poll 1 2>&1)"
+done
 ck_has "6 the landed one: copy and branch go"  "$OUT" "landed branch feat/s dropped"
 ck_eq  "6 feat/s is gone"                      "$(has_br feat/s)" no
 ck_eq  "6 its copy is gone"                    "$(present "$(wt_of s)")" removed
 ck_has "6 the unlanded one is kept as before"  "$OUT" "feat/u kept with 1 commit(s)"
 ck_eq  "6 feat/u stays"                        "$(has_br feat/u)" yes
+ck_has "6 one landed on dev goes too"         "$OUT" "landed branch feat/t dropped"
+ck_eq  "6 feat/t is gone"                      "$(has_br feat/t)" no
 
 echo "--- 7. what the sweep never takes ---"
 fresh_home seven; holding seven
@@ -285,10 +312,220 @@ ck_has "7 a reused name is kept as the liege's" \
 ck_eq  "7 and the reused branch stays"         "$(has_br feat/r)" yes
 ck_not "7 a record naming main is not acted on" "$OUT" "m main"
 ck_eq  "7 main stays"                          "$(has_br main)" yes
-ck_has "7 a ported branch its copy holds is kept, with why" \
-  "$OUT" "kept: c feat/c: not proven: feat/c is checked out at"
+# No grant recorded, as on a fresh machine: the proven route is never taken.
+ck_has "7 a ported branch is kept without the grant" \
+  "$OUT" "kept: c feat/c: landed under other commit ids; the proven-delete grant is not recorded on this machine"
 ck_eq  "7 its copy stays"                      "$(present "$(wt_of c)")" present
 ck_eq  "7 its branch stays"                    "$(has_br feat/c)" yes
+OUT=$("$ROOT/bin/reeve-teardown" c --drop-proven 2>&1); RC=$?
+ck_eq  "7 --drop-proven refuses without the grant" "$RC" 1
+ck_has "7 and says the grant is not recorded"  "$OUT" "it is not recorded on this machine"
+ck_eq  "7 the copy still stays"                "$(present "$(wt_of c)")" present
+
+echo "--- 8. a dev errand lands on dev ---"
+fresh_home eight; holding eight
+git -C "$repo" checkout -q -b dev
+echo d > "$repo/d"; git -C "$repo" add d; git -C "$repo" commit -qm "dev-only unreleased"
+main0=$(tip main)
+errand e dev
+want=$(tip feat/e)
+land e
+ck_eq  "8 lands"                               "$RC" 0
+ck_has "8 onto dev, in the primary checkout"   "$OUT" "landed: feat/e onto dev"
+ck_eq  "8 dev gains the work"                  "$(tip dev)" "$want"
+ck_eq  "8 main is untouched"                   "$(tip main)" "$main0"
+ck_has "8 the sweep measures against dev"      "$OUT" "cleaned: e"
+ck_eq  "8 feat/e is gone"                      "$(has_br feat/e)" no
+ck_eq  "8 its copy is gone"                    "$(present "$(wt_of e)")" removed
+git -C "$repo" checkout -q main
+errand f dev
+want=$(tip feat/f)
+land f
+ck_eq  "8 lands with dev checked out nowhere"  "$RC" 0
+ck_has "8 by the fetch form, onto dev"         "$OUT" "landed: feat/f onto dev"
+ck_eq  "8 dev gains the work"                  "$(tip dev)" "$want"
+ck_eq  "8 main is still untouched"             "$(tip main)" "$main0"
+ck_eq  "8 feat/f is gone, though HEAD lacks it" "$(has_br feat/f)" no
+ck_eq  "8 and no upstream is left behind"      "$(git -C "$repo" config branch.feat/f.merge || echo none)" none
+errand g dev
+errand h feat/g
+before=$(snapshot); land h
+ck_eq  "8 a mend on an unlanded dev errand refuses" "$RC" 1
+ck_has "8 land that first"                     "$OUT" "based on errand branch feat/g, land that first"
+ck_eq  "8 and changed nothing"                 "$(snapshot)" "$before"
+land g
+ck_has "8 its original lands on dev"           "$OUT" "landed: feat/g onto dev"
+land h
+ck_has "8 then the mend lands on dev, not main" "$OUT" "landed: feat/h onto dev"
+ck_eq  "8 main is still untouched"             "$(tip main)" "$main0"
+ck_has "8 and is cleaned, its errand base gone" "$OUT" "cleaned: h"
+ck_eq  "8 feat/h is gone"                      "$(has_br feat/h)" no
+errand j dev
+errand l main
+OUT=$("$ROOT/bin/reeve-teardown" l --drop-branch --onto feat/j 2>&1); RC=$?
+ck_eq  "8 a teardown --onto an errand's branch refuses" "$RC" 1
+ck_has "8 and says why"                        "$OUT" "is errand j's branch, not a place work lands"
+ck_eq  "8 and its copy stays"                  "$(present "$(wt_of l)")" present
+
+echo "--- 9. siblings, one rebased ---"
+for withgrant in yes no; do
+  fresh_home "nine-$withgrant"; holding "nine-$withgrant"
+  [ "$withgrant" = yes ] && grant
+  errand p main
+  errand s1 feat/p
+  errand s2 feat/p
+  land p
+  land s1
+  ck_eq  "9 ($withgrant) s1 lands after p"     "$RC" 0
+  land s2
+  ck_has "9 ($withgrant) s2 no longer fast-forwards" "$OUT" "does not fast-forward main"
+  errand s2r main
+  git -C "$(wt_of s2r)" reset -q --hard main
+  git -C "$(wt_of s2r)" cherry-pick "$(tip feat/s2)" >/dev/null
+  land s2r
+  ck_eq  "9 ($withgrant) s2r lands"            "$RC" 0
+  if [ "$withgrant" = yes ]; then
+    ck_has "9 the original is cleaned"         "$OUT" "cleaned: s2"
+    ck_has "9 its branch dropped by the proof" "$OUT" "dropped: feat/s2 (landed under other commit ids)"
+    ck_eq  "9 feat/s2 is gone"                 "$(has_br feat/s2)" no
+    ck_eq  "9 its copy is gone"                "$(present "$(wt_of s2)")" removed
+    ck_has "9 the record says it was dropped"  "$(meta_of s2 branchDropped)" 2026
+  else
+    ck_has "9 without the grant it is kept, with why" \
+      "$OUT" "kept: s2 feat/s2: landed under other commit ids; the proven-delete grant is not recorded"
+    ck_eq  "9 feat/s2 stays"                   "$(has_br feat/s2)" yes
+    ck_eq  "9 its copy stays"                  "$(present "$(wt_of s2)")" present
+  fi
+done
+# The proven route's dry run writes nothing, then the sweep drops it.
+fresh_home nine-dry; holding nine-dry; grant
+errand q main
+q_sha=$(tip feat/q)
+echo t > "$repo/t"; git -C "$repo" add t; git -C "$repo" commit -qm trunk
+git -C "$repo" cherry-pick "$q_sha" >/dev/null
+before=$(snapshot); sweep nine-dry --dry-run
+ck_eq  "9 a dry run exits 0"                   "$RC" 0
+ck_has "9 says it would drop the original"     "$OUT" "would drop: feat/q (landed under other commit ids)"
+ck_eq  "9 and wrote nothing"                   "$(snapshot)" "$before"
+sweep nine-dry
+ck_has "9 then the sweep drops it"             "$OUT" "dropped: feat/q (landed under other commit ids)"
+ck_eq  "9 its copy is gone"                    "$(present "$(wt_of q)")" removed
+# A copy that is not on the tip the proof covers, and a second copy holding it.
+fresh_home nine-off; holding nine-off; grant
+errand k main
+k_sha=$(tip feat/k)
+echo t > "$repo/t"; git -C "$repo" add t; git -C "$repo" commit -qm trunk
+git -C "$repo" cherry-pick "$k_sha" >/dev/null
+git -C "$(wt_of k)" checkout -q --detach HEAD~1
+sweep nine-off
+ck_has "9 a copy off the tip is kept, with why" "$OUT" "not on the tip of feat/k"
+ck_eq  "9 its copy stays"                      "$(present "$(wt_of k)")" present
+ck_eq  "9 its branch stays"                    "$(has_br feat/k)" yes
+git -C "$(wt_of k)" checkout -q feat/k
+git -C "$repo" worktree add -q -f "$SCRATCH/another" feat/k
+sweep nine-off
+ck_has "9 a second copy holding it goes to the liege" "$OUT" "feat/k is checked out at"
+ck_eq  "9 its copy stays"                      "$(present "$(wt_of k)")" present
+ck_eq  "9 the other copy stays"                "$(present "$SCRATCH/another")" present
+ck_eq  "9 its branch stays"                    "$(has_br feat/k)" yes
+git -C "$repo" worktree remove "$SCRATCH/another"
+
+echo "--- 10. another reeve's finish, not yet reported ---"
+fresh_home ten; holding ten
+OWNER=sess-A
+errand x main
+errand z main
+OWNER=''
+git -C "$repo" merge -q --ff-only feat/z
+git -C "$repo" merge -q feat/x -m "x by hand" 2>/dev/null || git -C "$repo" merge -q --no-edit feat/x
+printf 'woke=2026-10-14T11:00:00\n' >> "$REEVE_HOME/state/z.meta"
+OUT=$(REEVE_SESSION=sess-B "$ROOT/bin/reeve-teardown" --sweep ten 2>&1)
+ck_has "10 kept, with why"                     "$OUT" "kept: x feat/x: its finish not yet reported to its reeve"
+ck_eq  "10 its branch stays"                   "$(has_br feat/x)" yes
+ck_eq  "10 its copy stays"                     "$(present "$(wt_of x)")" present
+ck_eq  "10 its record is not torn down"        "$(meta_of x tornDown)" ""
+ck_has "10 one whose wake was left is cleaned"  "$OUT" "cleaned: z"
+OUT=$(REEVE_SESSION=sess-A "$ROOT/bin/reeve-sentry" --once --poll 1 2>&1)
+ck_has "10 its own reeve still hears of it"    "$OUT" "x"
+ck_has "10 and reports it done"                "$OUT" "done"
+OUT=$(REEVE_SESSION=sess-B "$ROOT/bin/reeve-teardown" --sweep ten 2>&1)
+ck_not "10 once reported it is no longer kept for that" "$OUT" "not yet reported"
+
+echo "--- 11. the upstream fallback leaves a checked-out branch alone ---"
+fresh_home eleven; holding eleven
+errand v main
+git -C "$repo" checkout -q -b side
+git -C "$repo" fetch -q . feat/v:main
+git -C "$(wt_of v)" checkout -q --detach
+git -C "$repo" worktree add -q "$SCRATCH/liege-v" feat/v
+git -C "$repo" update-ref refs/remotes/origin/feat/v "$(tip feat/v)"
+git -C "$repo" config branch.feat/v.remote origin
+git -C "$repo" config branch.feat/v.merge refs/heads/feat/v
+OUT=$("$ROOT/bin/reeve-teardown" v --drop-branch 2>&1)
+ck_has "11 git refuses the delete"             "$OUT" "git refused to delete 'feat/v'"
+ck_eq  "11 the branch stays"                   "$(has_br feat/v)" yes
+ck_eq  "11 its upstream is untouched"          "$(git -C "$repo" config branch.feat/v.merge)" refs/heads/feat/v
+ck_eq  "11 its remote is untouched"            "$(git -C "$repo" config branch.feat/v.remote)" origin
+git -C "$repo" worktree remove "$SCRATCH/liege-v"
+git -C "$repo" config --unset branch.feat/v.remote; git -C "$repo" config --unset branch.feat/v.merge
+git -C "$repo" worktree add -q "$SCRATCH/liege-v" feat/v
+OUT=$("$ROOT/bin/reeve-teardown" v --drop-branch 2>&1)
+ck_eq  "11 no upstream is set on a branch checked out elsewhere" \
+  "$(git -C "$repo" config branch.feat/v.merge || echo none)" none
+
+echo "--- 12. a chain landed on dev, main behind ---"
+fresh_home thirteen; holding thirteen
+git -C "$repo" branch dev main
+errand ldf main                                # base=main, as the live record
+errand mend-ldf feat/ldf
+git -C "$repo" fetch -q . feat/mend-ldf:dev    # the liege's fast-forward onto dev
+main0=$(tip main)
+for e in ldf mend-ldf; do
+  OUT=$("$ROOT/bin/reeve-teardown" "$e" --drop-branch 2>&1); RC=$?
+  ck_eq  "12 $e tears down"                    "$RC" 0
+  ck_not "12 and is not refused over main"     "$OUT" "that main does not have"
+  ck_eq  "12 feat/$e is gone"                  "$(has_br "feat/$e")" no
+  ck_eq  "12 its copy is gone"                 "$(present "$(wt_of "$e")")" removed
+done
+ck_eq  "12 main is untouched"                  "$(tip main)" "$main0"
+ck_eq  "12 no upstream is left behind"         "$(git -C "$repo" config --get-regexp '^branch\.feat/' || echo none)" none
+# The same by the sweep, and what never counts as a landing place.
+fresh_home thirteen-sweep; holding thirteen-sweep
+git -C "$repo" branch dev main
+git -C "$repo" branch liege/x main
+errand a2 main
+errand b2 feat/a2
+git -C "$repo" fetch -q . feat/b2:dev
+errand c2 main
+git -C "$repo" fetch -q . feat/c2:liege/x       # only on the liege's own branch
+errand d2 main
+errand e2 feat/d2                              # its work only on another errand's branch
+sweep thirteen-sweep
+ck_has "12 the sweep cleans the dev chain's original" "$OUT" "cleaned: a2"
+ck_has "12 and its mend"                       "$OUT" "cleaned: b2"
+ck_eq  "12 feat/a2 is gone"                    "$(has_br feat/a2)" no
+ck_eq  "12 feat/b2 is gone"                    "$(has_br feat/b2)" no
+ck_not "12 a branch only on a liege branch is not taken" "$OUT" "c2"
+ck_eq  "12 feat/c2 stays"                      "$(has_br feat/c2)" yes
+ck_eq  "12 its copy stays"                     "$(present "$(wt_of c2)")" present
+ck_not "12 nor one only on an errand's branch" "$OUT" "cleaned: d2"
+ck_eq  "12 feat/d2 stays"                      "$(has_br feat/d2)" yes
+OUT=$("$ROOT/bin/reeve-teardown" c2 2>&1); RC=$?
+ck_eq  "12 teardown refuses work only on a liege branch" "$RC" 3
+# A dev an errand record names as its branch= is an errand's, never a landing place.
+printf 'office=artificer\nholding=thirteen-sweep\nrepo=%s\nbranch=dev\n' "$repo" \
+  > "$REEVE_HOME/state/odd.meta"
+errand f2 main
+git -C "$repo" fetch -q . feat/f2:dev
+OUT=$("$ROOT/bin/reeve-teardown" f2 2>&1); RC=$?
+ck_eq  "12 a dev a record names is not asked" "$RC" 3
+ck_eq  "12 and the copy stays"                 "$(present "$(wt_of f2)")" present
+
+echo "--- 13. the doctor shows the grant ---"
+fresh_home twelve
+ck_has "13 not recorded"                       "$("$ROOT/bin/reeve-doctor" 2>&1)" "proven-delete not recorded"
+grant
+ck_has "13 recorded"                           "$("$ROOT/bin/reeve-doctor" 2>&1)" "proven-delete recorded"
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
