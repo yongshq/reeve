@@ -929,10 +929,15 @@ session_names() { # session_names <sid>   every name the record held, current la
 }
 
 pane_store() { # pane_store <sid>   record the pane, when there is one and it moved
-  local d p; p=$(reeve_pane); [ -n "$p" ] || return 0
+  local d p b='' n='' rest; p=$(reeve_pane); [ -n "$p" ] || return 0
   d=$(session_dir "$1")
   if [ "$(session_pane "$1")" = "$p" ]; then
-    [ "${HALL_ENV:-}" = 1 ] && [ ! -f "$d/place" ] && place_store "$d"
+    # Inside hall, a place missing or holding no session name, which a hall
+    # that could not say leaves, is asked again rather than kept for life.
+    if [ "${HALL_ENV:-}" = 1 ]; then
+      [ -f "$d/place" ] && { read -r b n rest < "$d/place"; } 2>/dev/null
+      [ -n "$n" ] || place_store "$d"
+    fi
     return 0
   fi
   mkdir -p "$d" 2>/dev/null || return 0

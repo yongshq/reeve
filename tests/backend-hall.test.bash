@@ -240,6 +240,19 @@ eq  "9 and no place, so it reads herdr as before"           "$([ -f "$SESS/r1/pl
 eq  "9 session_backend reads herdr without one"             "$(bash -c '. "$1/bin/reeve-lib.sh"; session_backend r1' _ "$ROOT")" herdr
 printf 'hall dev\n' > "$SESS/r1/place"
 eq  "9 and hall with one"                                   "$(bash -c '. "$1/bin/reeve-lib.sh"; session_backend r1' _ "$ROOT")" hall
+# A place hall could not name, from a pane with no socket set when no default
+# session was listed, is asked again on the next heartbeat, not kept for life.
+storehall() { # storehall <sid> <pane>   pane_store inside hall, on its socket
+  env HALL_ENV=1 HALL_SOCKET_PATH="$STUB_SOCK" HALL_PANE_ID="$2" HALL_SESSION=dev REEVE_SESSION="$1" \
+    bash -c '. "$1/bin/reeve-lib.sh"; pane_store "$2"' _ "$ROOT" "$1"
+}
+mkdir -p "$SESS/r2"; printf 'w62:p1@%s\n' "$STUB_SOCK" > "$SESS/r2/pane"
+printf 'hall \n' > "$SESS/r2/place"
+storehall r2 w62:p1
+eq  "9 a place with no session name is asked again"         "$(cat "$SESS/r2/place")" "hall dev"
+printf 'hall kept\n' > "$SESS/r2/place"
+storehall r2 w62:p1
+eq  "9 one with a name is kept, the pane unmoved"           "$(cat "$SESS/r2/place")" "hall kept"
 
 echo "--- 10. a dispatch on hall ---"
 git init -q "$SCRATCH/web"
