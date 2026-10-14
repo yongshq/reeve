@@ -92,13 +92,34 @@ hall_copy=no
 # A first dispatch on hall takes it too, since it records its session before
 # its launch and a relaunch could otherwise read that session mid start. Which
 # backend this run will use is only read here, resolved for real below.
-dispatch_lock=''
+dispatch_lock='' launch_open=''
+# dispatch_exit   the EXIT trap of a hall dispatch. A run stopped by a signal
+# (TERM, INT, HUP) mid launch left its new session under `launching=`, which
+# only dispatch reads: the watch called the hand lost, or saw nothing in flight,
+# and teardown removed the copy under it. So that session is recorded as the
+# errand's, as a launch that returned would record it, and never closed: the
+# hand may be coming up, and a stale line for a pane still starting is the
+# honest cost of an interrupted dispatch. SIGKILL runs no trap; teardown reads
+# `launching=` for that one.
+dispatch_exit() {
+  if [ -n "$launch_open" ]; then
+    meta_set "$id" target "$launch_open"; meta_set "$id" launching ''; launch_open=''
+    meta_set "$id" harness "$harness"
+    meta_set "$id" cwd "$cwd"
+    meta_set "$id" dispatched "$(date +%Y-%m-%dT%H:%M:%S)"
+    if [ -n "${REEVE_NO_CARETAKER:-}" ]; then meta_set "$id" keep REEVE_NO_CARETAKER
+    else meta_set "$id" keep ''; fi
+    touch "$(status_file "$id")"
+    [ "$relaunch" = yes ] && "$BIN/reeve-say" "$(status_file "$id")" working "$relaunch_note"
+  fi
+  lock_release "$dispatch_lock"
+}
 if [ "$dry" = no ] && { [ "$rec_backend" = hall ] \
      || [ "$("$BIN/reeve-backend" resolve ${backend:+--backend "$backend"} 2>/dev/null)" = hall ]; }; then
   lock_stale=$(config_get lock-stale 10)
   dispatch_lock=$(lock_acquire "dispatch-$id" 1 "$lock_stale") \
     || die "errand '$id' is being dispatched by another run right now, or by one stopped outright under ${lock_stale}s ago, holding $REEVE_HOME_D/state/.lock-dispatch-$id, which is broken once its holder is dead past that. let it finish, then look at its state before dispatching again"
-  trap 'lock_release "$dispatch_lock"' EXIT
+  trap dispatch_exit EXIT
 fi
 
 # already out? A relaunch onto an existing copy asks more of this answer than a
@@ -590,13 +611,13 @@ fi
 # refuses on it. herdr's order is left as it was.
 if [ "$backend" = hall ]; then
   meta_set "$id" backend "$backend"
-  meta_set "$id" launching "$target"
+  meta_set "$id" launching "$target"; launch_open=$target
   if ! "$BIN/reeve-backend" call launch "$target" "$cmdline" --backend "$backend"; then
     if "$BIN/reeve-backend" call kill "$target" --backend "$backend"; then
-      meta_set "$id" target "$target"; meta_set "$id" launching ''
+      meta_set "$id" target "$target"; meta_set "$id" launching ''; launch_open=''
       die "endpoint opened at $target but the launch line could not be submitted. that session was closed and is recorded, so dispatching '$id' again sends out one fresh hand into $cwd"
     fi
-    meta_set "$id" target "$target"; meta_set "$id" launching ''
+    meta_set "$id" target "$target"; meta_set "$id" launching ''; launch_open=''
     die "endpoint opened at $target but the launch line could not be submitted, and that session could not be closed. it is recorded as the errand's session: look at it before retrying, it may still be starting a hand in $cwd"
   fi
 else
@@ -636,6 +657,8 @@ meta_set "$id" browser "$browser_say"
 if [ -n "${REEVE_NO_CARETAKER:-}" ]; then meta_set "$id" keep REEVE_NO_CARETAKER
 else meta_set "$id" keep ''; fi
 touch "$(status_file "$id")"
+# Recorded in full: a signal from here on leaves the trap nothing to record.
+launch_open=''
 # Said in the errand's own log, so the reeve and any reviewer read that this
 # hand started in a copy that was already worked in.
 [ "$relaunch" = yes ] && "$BIN/reeve-say" "$(status_file "$id")" working "$relaunch_note"

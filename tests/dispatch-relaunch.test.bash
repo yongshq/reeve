@@ -483,5 +483,79 @@ done
 eq  "14 one hand alive, not two"                            "$alive" 1
 eq  "14 recorded as its session"                            "$(meta kl launching)|$([ "$(meta kl target)" != "$L" ] && echo new)" "|new"
 
+echo "--- 15. a dispatch stopped by a signal mid launch records its new session ---"
+# The EXIT trap released the lock and nothing else, so the new hand stayed under
+# `launching=`, which only dispatch reads: a first dispatch read `nothing in
+# flight`, a relaunch read its lost session `stale:`, and teardown removed the
+# copy under the live hand and left its session open. The trap moves it to
+# `target=`, as a launch that returned would, and closes nothing.
+REEVE_HOME="$SCRATCH/home15"; export REEVE_HOME; mkdir -p "$REEVE_HOME"
+teardown() { # teardown <id> -> TOUT, TRC
+  TOUT=$(REEVE_ROOT="$STUB" "$ROOT/bin/reeve-teardown" "$1" 2>&1); TRC=$?
+}
+stopped() { # stopped <id> <signal>: dispatch, held mid launch, sent <signal>
+  local hold="$SCRATCH/hold.$1.$RANDOM" p
+  REEVE_ROOT="$STUB" STUB_LAUNCH_HOLD=$hold "$ROOT/bin/reeve-dispatch" "$1" --backend hall --harness stub >/dev/null 2>&1 &
+  p=$!
+  n=0; while [ "$n" -lt 100 ] && [ -z "$(meta "$1" launching)" ]; do sleep 0.1; n=$((n + 1)); done
+  L=$(meta "$1" launching)
+  kill "-$2" "$p" 2>/dev/null; wait "$p" 2>/dev/null
+  touch "$hold"; sleep 0.5
+}
+brief_for tm scout || bad "15 reeve-brief refused"
+E0=$(wc -l < "$EVENTS")
+stopped tm TERM
+eq  "15 a first dispatch stopped by TERM records its session" "$(meta tm target)|$(meta tm launching)" "$L|"
+eq  "15 as dispatched, on hall"                             "$([ -n "$(meta tm dispatched)" ] && echo yes)|$(meta tm backend)" "yes|hall"
+eq  "15 with a status file to read"                         "$([ -f "$REEVE_HOME/errands/tm/status" ] && echo yes)" yes
+nas "15 and closes nothing, the hand may be coming up"      "$(sed -n "$((E0 + 1)),\$p" "$EVENTS")" "kill"
+eq  "15 and leaves no lock"                                 "$(ls -d "$REEVE_HOME"/state/.lock-dispatch-tm 2>/dev/null)" ''
+W=$(watch)
+nas "15 a watch sees it in flight"                          "$W" "nothing in flight"
+has "15 working"                                            "$W" "quiet: 1 errand(s) working"
+TWT=$(meta tm worktree)
+teardown tm
+eq  "15 teardown refuses while it is alive"                 "$TRC" 1
+has "15 naming it"                                          "$TOUT" "a hand is still working at $L"
+eq  "15 and keeps its copy"                                 "$([ -d "$TWT" ] && echo kept)" kept
+dispatch tm
+eq  "15 a dispatch again refuses on it"                     "$RC|$(printf '%s' "$ERR" | grep -c "already running at $L")" "1|1"
+# The relaunch the same way: its lost session already said once by a watch.
+lose tm missing; W=$(watch)
+has "15 (the lost hand is said once)"                       "$W" "stale: tm"
+OLD=$(meta tm target)
+stopped tm TERM
+eq  "15 a relaunch stopped by TERM records its new session" "$([ "$L" != "$OLD" ] && echo new)|$(meta tm target)|$(meta tm launching)" "new|$L|"
+has "15 and says in its log it was relaunched"              "$(tail -n 1 "$REEVE_HOME/errands/tm/status")" "relaunched onto existing copy after its session was lost"
+W=$(watch)
+nas "15 a watch calls nothing lost"                         "$W" "stale:"
+has "15 and sees the new hand working"                      "$W" "quiet: 1 errand(s) working"
+teardown tm
+eq  "15 teardown refuses while the new hand is alive"       "$TRC" 1
+has "15 naming the new session"                             "$TOUT" "a hand is still working at $L"
+eq  "15 and keeps the copy under it"                        "$([ -d "$TWT" ] && echo kept)" kept
+lose tm missing; W=$(watch)
+has "15 a later loss of the new hand is said"               "$W" "stale: tm"
+
+echo "--- 16. teardown reads a session left launching by a dispatch killed outright ---"
+# SIGKILL runs no trap, so the new session stays under `launching=` alone.
+brief_for kt scout || bad "16 reeve-brief refused"
+KWT=$(meta kt worktree)
+stopped kt KILL
+eq  "16 killed outright, it is still launching"             "$(meta kt launching)|$(meta kt target)" "$L|"
+teardown kt
+eq  "16 teardown refuses while it is alive"                 "$TRC" 1
+has "16 naming it"                                          "$TOUT" "a hand is still working at $L"
+eq  "16 and keeps its copy"                                 "$([ -d "$KWT" ] && echo kept)" kept
+printf 'unreadable\n' > "$STATES/${L#stub:}"
+teardown kt
+eq  "16 one that cannot be read refuses too"                "$TRC|$(printf '%s' "$TOUT" | grep -c "the state of the endpoint at $L cannot be read")" "1|1"
+printf 'dead\n' > "$STATES/${L#stub:}"; E0=$(wc -l < "$EVENTS")
+teardown kt
+eq  "16 a dead one is torn down"                            "$TRC" 0
+has "16 closing it, as it closes a target"                  "$(sed -n "$((E0 + 1)),\$p" "$EVENTS")" "kill $L"
+eq  "16 and clearing it from the record"                    "$(meta kt launching)" ''
+eq  "16 the copy removed"                                   "$([ -e "$KWT" ] && echo kept || echo gone)" gone
+
 echo "passed=$PASS failed=$FAIL"
 [ "$FAIL" -eq 0 ]

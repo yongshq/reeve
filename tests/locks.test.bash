@@ -73,6 +73,20 @@ esac
 printf '%s\n' "$$" > "$held/pid"
 out=$(probe probe-a 1 2>&1); rc=$?
 eq "3 a live holder is waited for, then refused" "$rc" 1
+# A dead holder, inside the stale age or with none given: still refused, and
+# told how. A caller that gave a stale age has it broken by itself once old
+# enough, so it is never told to remove it by hand.
+sh -c 'exit 0' & dead=$!; wait "$dead"
+printf '%s\n' "$dead" > "$held/pid"
+out=$(probe probe-a 1 2>&1); rc=$?
+eq  "3 a dead holder with no stale age is refused"  "$rc" 1
+has "3 told it is not broken automatically"         "$out" "held by dead pid $dead, not breaking it automatically"
+has "3 and how to remove it by hand"                "$out" "remove it by hand if you are sure: rm -rf $held"
+out=$(bash -c '. "$0"/bin/reeve-lib.sh; lock_acquire probe-a 1 600' "$ROOT" 2>&1); rc=$?
+eq  "3 one inside its stale age is refused"         "$rc" 1
+has "3 told when it breaks"                         "$out" "held by dead pid $dead, broken once it is 600s old"
+case $out in *"not breaking it automatically"*|*"remove it by hand"*)
+  bad "3 and never to remove it by hand" "$out" ;; *) ok "3 and never to remove it by hand" ;; esac
 rm -rf "$held"
 eq "3 and releasing frees the name"   "$([ -d "$held" ] && echo yes || echo no)" no
 

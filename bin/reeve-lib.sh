@@ -2241,9 +2241,15 @@ lock_acquire() {
         continue
       fi
     fi
+    # A caller that passed a stale age has it broken above once old enough, so
+    # it is told that, never to remove by hand what clears by itself.
     if [ -f "$d/pid" ] && ! kill -0 "$(cat "$d/pid" 2>/dev/null)" 2>/dev/null; then
-      warn "stale lock $name held by dead pid $(cat "$d/pid" 2>/dev/null), not breaking it automatically"
-      warn "remove it by hand if you are sure: rm -rf $d"
+      if [ -n "$brk" ]; then
+        warn "stale lock $name held by dead pid $(cat "$d/pid" 2>/dev/null), broken once it is ${brk}s old"
+      else
+        warn "stale lock $name held by dead pid $(cat "$d/pid" 2>/dev/null), not breaking it automatically"
+        warn "remove it by hand if you are sure: rm -rf $d"
+      fi
     fi
     elapsed=$((elapsed + 1))
     [ "$elapsed" -lt "$timeout" ] || die "could not acquire lock '$name' after ${timeout}s"

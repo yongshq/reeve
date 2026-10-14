@@ -336,6 +336,11 @@ holding=$(meta_get "$id" holding '')
 writes=$(meta_get "$id" writes yes)
 target=$(meta_get "$id" target '')
 backend=$(meta_get "$id" backend herdr)
+# A hall dispatch killed outright mid launch, which runs no trap, leaves its new
+# session under `launching=` alone. It is an endpoint like `target=`: refused on
+# while it reads alive, closed on a teardown. herdr never writes it.
+launching=$(meta_get "$id" launching '')
+[ "$launching" != "$target" ] || launching=''
 
 # 1. the hand must not still be WORKING.
 #
@@ -347,8 +352,9 @@ backend=$(meta_get "$id" backend herdr)
 # state only decides when the report does not.
 reported=$(status_field "$id" state)
 open_q=$(status_field "$id" open); open_q=${open_q:-0}
-if [ -n "$target" ]; then
-  st=$("$BIN/reeve-backend" call agent_state "$target" --backend "$backend" 2>/dev/null || echo unreadable)
+endpoint_check() { # endpoint_check <endpoint>: refuse while a hand works there
+  local ep=$1 st
+  st=$("$BIN/reeve-backend" call agent_state "$ep" --backend "$backend" 2>/dev/null || echo unreadable)
   case $st in
     alive)
       case "$reported" in
@@ -362,12 +368,14 @@ if [ -n "$target" ]; then
           # so the message described something that never happened.
           dismiss=yes ;;
         *)
-          refuse "a hand is still working at $target (last reported: ${reported:-nothing yet})." "Let it finish, or stop it deliberately, then tear down." ;;
+          refuse "a hand is still working at $ep (last reported: ${reported:-nothing yet})." "Let it finish, or stop it deliberately, then tear down." ;;
       esac ;;
     unreadable)
-      refuse "the state of the endpoint at $target cannot be read." "Investigate before removing anything: this script cannot tell a working hand from a dead one right now." ;;
+      refuse "the state of the endpoint at $ep cannot be read." "Investigate before removing anything: this script cannot tell a working hand from a dead one right now." ;;
   esac
-fi
+}
+[ -z "$target" ] || endpoint_check "$target"
+[ -z "$launching" ] || endpoint_check "$launching"
 
 # 1b. Dismiss the finished hand's session NOW, before the removal checks.
 # A hand that has reported a terminal state with nothing open is done working;
@@ -382,6 +390,14 @@ if [ "$dismiss" = yes ] && [ -n "$target" ]; then
   [ "$dry" = yes ] || meta_set "$id" target ''
   dismissed=yes
   target=''
+fi
+if [ "$dismiss" = yes ] && [ -n "$launching" ]; then
+  info "dismissing the hand's session at $launching, it reported $reported"
+  run "$BIN/reeve-backend" call kill "$launching" --backend "$backend" \
+    || warn "could not close the endpoint $launching, continuing"
+  [ "$dry" = yes ] || meta_set "$id" launching ''
+  dismissed=yes
+  launching=''
 fi
 
 if [ "$dismiss_only" = yes ]; then
@@ -956,6 +972,9 @@ info "landed-work checks passed for $id"
 if [ -n "$target" ]; then
   run "$BIN/reeve-backend" call kill "$target" --backend "$backend" || warn "could not close the endpoint $target, continuing"
 fi
+if [ -n "$launching" ]; then
+  run "$BIN/reeve-backend" call kill "$launching" --backend "$backend" || warn "could not close the endpoint $launching, continuing"
+fi
 # The check above and this removal are two decisions that want different answers
 # to the same question, asked at different times, so they are deliberately not
 # folded into one shared condition. What they must not do is derive that answer
@@ -998,6 +1017,7 @@ fi
 if [ "$dry" = yes ]; then info "dry run, nothing changed"; exit 0; fi
 meta_set "$id" tornDown "$(date +%Y-%m-%dT%H:%M:%S)"
 meta_set "$id" target ''
+[ -z "$launching" ] || meta_set "$id" launching ''
 info "torn down $id"
 [ -f "$(report_file "$id")" ] && info "  report kept: $(report_file "$id")"
 info "  record kept: $(meta_file "$id")"
