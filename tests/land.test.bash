@@ -33,6 +33,8 @@
 #      one landed only on another errand's branch, or not its own, is kept
 #   16 --drop-proven over a copy whose folder is gone refuses unless git's
 #      entry for it sits on the proved tip
+#   17 a stray REEVE_LONG_LIVED naming a liege or an errand branch widens
+#      nothing: the cache may only narrow
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 
 # --- safety -----------------------------------------------------------------
@@ -633,6 +635,39 @@ rm -rf "$(wt_of pt)"
 sweep sixteen-tip
 ck_has "16 one on the proved tip is dropped"   "$OUT" "dropped: feat/pt (landed under other commit ids)"
 ck_eq  "16 its branch is gone"                 "$(has_br feat/pt)" no
+
+echo "--- 17. a stray REEVE_LONG_LIVED never widens the long-lived set ---"
+# The review's repro: the sweep's cache, inherited from an outside environment,
+# naming a liege branch or an unlanded errand's branch as long-lived. Either
+# would pass unlanded work as landed; the cache may only narrow.
+fresh_home seventeen; holding seventeen
+repo_p=$(cd "$repo" && pwd -P)
+errand x main
+git -C "$repo" branch wip feat/x
+OUT=$(REEVE_LONG_LIVED="$repo_p	main	main wip" "$ROOT/bin/reeve-teardown" x 2>&1); RC=$?
+ck_eq  "17 a liege branch in the cache: refused" "$RC" 3
+ck_eq  "17 the copy stays"                     "$(present "$(wt_of x)")" present
+ck_eq  "17 feat/x stays"                       "$(has_br feat/x)" yes
+errand y main
+errand z feat/y needs-decision
+OUT=$(REEVE_LONG_LIVED="$repo_p	main	main feat/z" "$ROOT/bin/reeve-teardown" y 2>&1); RC=$?
+ck_eq  "17 an errand's branch in the cache: refused" "$RC" 3
+ck_eq  "17 the copy stays"                     "$(present "$(wt_of y)")" present
+ck_eq  "17 feat/y stays"                       "$(has_br feat/y)" yes
+# dev is one of the names, but an errand record names it as its branch=, so it
+# is no landing place, cached or not.
+errand w main
+git -C "$repo" branch dev feat/w
+printf 'office=artificer\nholding=seventeen\nrepo=%s\nbranch=dev\nbase=main\n' "$repo" \
+  > "$REEVE_HOME/state/devs.meta"
+OUT=$(REEVE_LONG_LIVED="$repo_p	main	main dev" "$ROOT/bin/reeve-teardown" w 2>&1); RC=$?
+ck_eq  "17 a dev some record names, cached: refused" "$RC" 3
+ck_eq  "17 feat/w stays"                       "$(has_br feat/w)" yes
+rm "$REEVE_HOME/state/devs.meta"
+# The cache still narrows, and a genuine one still lands: dev, named by nobody.
+OUT=$(REEVE_LONG_LIVED="$repo_p	main	main dev" "$ROOT/bin/reeve-teardown" w 2>&1); RC=$?
+ck_eq  "17 a true cache still takes landed work" "$RC" 0
+ck_eq  "17 feat/w is gone"                     "$(has_br feat/w)" no
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

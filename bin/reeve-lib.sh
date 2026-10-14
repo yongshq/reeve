@@ -1480,26 +1480,61 @@ ROR_EOF
 #
 # A sweep computes the set once and hands it to every teardown it runs as
 # REEVE_LONG_LIVED, "<repo>\t<default>\t<names...>", read back only for that
-# same repository and default. Anything else is computed afresh.
+# same repository and default. It is an environment variable, so anyone can set
+# it, and this set is the landed-work test itself: the cache may only narrow.
+# Its names are put to the very test below, each one of the default, main,
+# master, dev or develop, existing, and named by no record; it only spares the
+# `cd` per distinct repo= that records_of_repo pays, since records_naming_any
+# asks only about the few records that name one of them.
 long_lived_branches() {
-  local repo=$1 d n repo_p named seen='' c_repo c_def c_names
+  local repo=$1 d n repo_p named seen='' c_repo c_def c_names cand=''
   repo_p=$(cd "$repo" 2>/dev/null && pwd -P) || return 0
   d=$(holding_default "${2:-}")
   if [ -n "${REEVE_LONG_LIVED:-}" ]; then
     IFS=$'\t' read -r c_repo c_def c_names <<< "$REEVE_LONG_LIVED"
     if [ "$c_repo" = "$repo_p" ] && [ "$c_def" = "$d" ]; then
-      for n in $c_names; do printf '%s\n' "$n"; done
-      return 0
+      for n in $c_names; do
+        case " $d main master dev develop " in *" $n "*) cand="$cand $n" ;; esac
+      done
+      [ -n "$cand" ] || return 0
+      # shellcheck disable=SC2086 # cand: the vetted names, word-split on purpose
+      named=$(records_naming_any "$repo" $cand)
     fi
   fi
-  named=$(records_of_repo "$repo" | cut -f2)
-  for n in "$d" main master dev develop; do
+  if [ -z "$cand" ]; then
+    cand="$d main master dev develop"
+    named=$(records_of_repo "$repo" | cut -f2)
+  fi
+  for n in $cand; do
     case " $seen " in *" $n "*) continue ;; esac
     seen="$seen $n"
     git -C "$repo" rev-parse --verify --quiet "refs/heads/$n^{commit}" >/dev/null 2>&1 || continue
     [ "$n" != "$d" ] && lines_has "$n" "$named" && continue
     printf '%s\n' "$n"
   done
+}
+
+# records_naming_any <repo> <branch...> -> the branch= of every errand record
+# of the repository whose branch= is one of those names, read the way
+# records_of_repo reads them (the first repo= and branch= of each file). One
+# awk over every record, then a `cd` only for the records naming one.
+records_naming_any() {
+  local repo_p rr rb
+  repo_p=$(cd "$1" 2>/dev/null && pwd -P) || return 0
+  shift
+  [ "$#" -gt 0 ] || return 0
+  RNA_NAMES="$*" awk '
+    BEGIN { n = split(ENVIRON["RNA_NAMES"], a, " ")
+            for (k = 1; k <= n; k++) want[a[k]] = 1 }
+    function flush() { if (f && hr && hb && (b in want)) print r "\t" b }
+    FNR == 1 { flush(); f = 1; r = ""; b = ""; hr = 0; hb = 0 }
+    /^repo=/ && !hr { r = substr($0, 6); hr = 1 }
+    /^branch=/ && !hb { b = substr($0, 8); hb = 1 }
+    END { flush() }' "$REEVE_HOME_D"/state/*.meta 2>/dev/null \
+  | while IFS=$'\t' read -r rr rb; do
+      [ -n "$rr" ] && [ "$(cd "$rr" 2>/dev/null && pwd -P)" = "$repo_p" ] && printf '%s\n' "$rb"
+    done
+  return 0
 }
 
 # long_lived_cache <repo> [<holding>] -> the REEVE_LONG_LIVED value for that
