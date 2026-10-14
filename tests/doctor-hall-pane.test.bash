@@ -25,7 +25,7 @@ real_home=$(cd "${HOME:-/nonexistent-home}" 2>/dev/null && pwd -P) || real_home=
 SCRATCH=$(mktemp -d) && SCRATCH=$(cd -P "$SCRATCH" && pwd) \
   || { printf 'FAIL  could not make a scratch directory\n'; exit 1; }
 case $SCRATCH in "$real_home"|"$real_home"/*) printf 'FAIL  refusing: scratch is inside the real home\n'; exit 1 ;; esac
-trap 'rm -rf "$SCRATCH"' EXIT
+trap 'rm -rf "${SCRATCH:?}"' EXIT
 export REEVE_HOME="$SCRATCH/home"
 export REEVE_NO_CARETAKER=1
 export CLAUDE_CONFIG="$SCRATCH/claude.json"
@@ -103,26 +103,52 @@ eq  "2 list: that is herdr's only line"                       "$(printf '%s\n' "
 reset
 inpane=$(inhall "$ROOT/bin/reeve-doctor" 2>&1)
 eq  "2 doctor: no herdr call"                                 "$(cat "$HERDR_LOG")" ''
-has "2 doctor: tools says herdr is on PATH, not run"          "$inpane" "herdr   ok    not run from a hall pane"
+has "2 doctor: tools says herdr was not probed"               "$inpane" "  herdr   not probed (hall pane)"
+nas "2 doctor: and never calls that row ok"                   "$inpane" "herdr   ok"
 has "2 doctor: backends says herdr was not probed"            "$inpane" "  herdr    not probed from a hall pane."
 has "2 doctor: hall is still checked"                         "$(cat "$HALL_LOG")" "--version"
 
 echo "--- 3. and only those two lines differ ---"
 # Same home, same session, HALL_ENV the one difference: everything but herdr's
-# two rows reads the same.
+# two rows and the default backend (section 5) reads the same.
 reset
 gated=$(HALL_ENV=1 "$ROOT/bin/reeve-doctor" 2>&1)
 eq  "3 HALL_ENV alone: no herdr call"                         "$(cat "$HERDR_LOG")" ''
 eq  "3 the rest of the doctor is the same in both"            "$(diff <(printf '%s\n' "$plain") <(printf '%s\n' "$gated") | grep '^[<>]' | sed 's/^[<>] //' | sort)" \
-"  herdr    available   herdr 0.9.0 (session default)
+"  default     hall
+  default     herdr
+  herdr    available   herdr 0.9.0 (session default)
   herdr    not probed from a hall pane. run reeve-backend list in a herdr pane or a plain terminal to check it
-  herdr   ok    0.9.0
-  herdr   ok    not run from a hall pane"
+  herdr   not probed (hall pane)
+  herdr   ok    0.9.0"
 
 echo "--- 4. HALL_ENV set to anything else is not a hall pane ---"
 reset
 HALL_ENV=0 "$ROOT/bin/reeve-backend" list >/dev/null 2>&1
 has "4 HALL_ENV=0: herdr asked as before"                     "$(cat "$HERDR_LOG")" "status server --json"
+
+echo "--- 5. a hall pane with no backend named resolves hall ---"
+# Hall sets REEVE_BACKEND=hall in its panes. Without it (an older hall, a shell
+# that unset it) the default must still not be herdr, or reeve-name and
+# dispatch would make a workspace on the live herdr server.
+eq  "5 HALL_ENV=1 alone resolves hall"                        "$(HALL_ENV=1 "$ROOT/bin/reeve-backend" resolve)" hall
+eq  "5 REEVE_BACKEND still wins"                              "$(HALL_ENV=1 REEVE_BACKEND=herdr "$ROOT/bin/reeve-backend" resolve)" herdr
+eq  "5 so does --backend"                                     "$(HALL_ENV=1 "$ROOT/bin/reeve-backend" resolve --backend herdr)" herdr
+printf 'herdr\n' > "$REEVE_HOME/config/backend"
+eq  "5 and so does config/backend"                            "$(HALL_ENV=1 "$ROOT/bin/reeve-backend" resolve)" herdr
+rm -f "$REEVE_HOME/config/backend"
+eq  "5 outside hall the default is herdr"                     "$("$ROOT/bin/reeve-backend" resolve)" herdr
+eq  "5 HALL_ENV=0 is not a hall pane"                         "$(HALL_ENV=0 "$ROOT/bin/reeve-backend" resolve)" herdr
+reset
+env HALL_ENV=1 HALL_PANE_ID=w1:p1 HALL_SOCKET_PATH=/fake/hall.sock HALL_WORKSPACE_ID=w1 HALL_TAB_ID=w1:t1 \
+    HERDR_ENV=1 HERDR_PANE_ID=w1:p1 HERDR_SOCKET_PATH=/fake/hall.sock HERDR_WORKSPACE_ID=w1 \
+    REEVE_SESSION=name-test "$ROOT/bin/reeve-name" >/dev/null 2>&1
+eq  "5 reeve-name in a hall pane, no REEVE_BACKEND: no herdr call" "$(cat "$HERDR_LOG")" ''
+has "5 it labels through hall instead"                        "$(cat "$HALL_LOG")" "workspace"
+
+echo "--- 6. cleanup can never widen ---"
+# An rm on a variable path refuses an empty variable rather than deleting from /.
+eq  "6 every rm -rf here on a variable uses :?"               "$(grep -n 'rm -rf "\$' "${BASH_SOURCE[0]}" | grep -v ':?}' | grep -v 'grep -n')" ''
 
 echo "passed=$PASS failed=$FAIL"
 [ "$FAIL" -eq 0 ]

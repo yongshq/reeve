@@ -18,9 +18,13 @@ backend_known() { ls "$REEVE_ROOT_D/backends"/*.sh 2>/dev/null | while read -r f
 
 backend_resolve() {
   local want=${1:-}
-  # Precedence: explicit flag, environment, config file, then herdr.
+  # Precedence: explicit flag, environment, config file, then the default:
+  # hall inside a hall pane (HALL_ENV=1), herdr everywhere else. Hall sets
+  # REEVE_BACKEND=hall in its panes; should that be lost, a default of herdr
+  # there would reach herdr's own server from inside hall.
   [ -n "$want" ] || want=${REEVE_BACKEND:-}
   [ -n "$want" ] || want=$(config_get backend '')
+  [ -n "$want" ] || { [ "${HALL_ENV:-}" = 1 ] && want=hall; }
   [ -n "$want" ] || want=herdr
   # A record or config naming a backend that has since been removed refuses
   # by name, so the reader knows it is gone rather than misspelt.
