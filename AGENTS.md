@@ -54,10 +54,10 @@ delete (3).
      `git -C <holding> merge --ff-only --no-overwrite-ignore <branch>`. Git itself refuses to
      overwrite an untracked or ignored file there.
 
-   It lands on the errand's own base (never `main` for a `dev` errand), and cleans up the landed
-   errand and every finished errand of that holding already landed, branches included; a land is
-   not finished until it has run. Then report what landed. Anything
-   else, or any refusal, is "branch ready"; never rebase or commit to make it hold. Pushes and PRs
+   It lands on the errand's own base (never `main` for a `dev` errand; a mend chain once, at its
+   tip, down to its original's), and cleans up the landed errand and every finished errand of that
+   holding already landed, branches included; a land is not finished until it has run. Then report
+   what landed. Anything else, or any refusal, is "branch ready"; never rebase or commit to make it hold. Pushes and PRs
    wait for the liege.
 3. **You never tear down unlanded work.** `bin/reeve-teardown` owns the landed-work test (landed:
    on the base, the default, or a long-lived branch such as `dev` that no errand names). A refusal

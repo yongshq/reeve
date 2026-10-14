@@ -14,9 +14,9 @@
 #   2  the land with the default checked out nowhere, HEAD on another branch
 #   3  every refusal says `branch ready:` and changes nothing
 #   4  a chain of an original and three mends, each based on the one before:
-#      the last refuses while the one under it stands, and landing them in turn
-#      drops all four branches and copies, beside a liege branch, an in-flight
-#      errand, a dirty copy, a ported branch and a branch no record names
+#      landing the tip, once, drops all four branches and copies, beside a
+#      liege branch, an in-flight errand, a dirty copy, a ported branch and a
+#      branch no record names
 #   5  --sweep --dry-run writes nothing, and the sweep is idempotent
 #   6  a watch's teardown drops a branch already landed, keeps one that is not
 #   7  what the sweep never takes, and a ported branch kept without the grant
@@ -26,6 +26,8 @@
 #   11 the -d upstream fallback never touches a branch checked out elsewhere
 #   12 a chain fast-forwarded onto dev by hand: teardown and sweep take both
 #   13 the doctor shows the grant
+#   14 a tip missing a base commit, a loop and a missing record refuse; an inner
+#      member lands alone by its own chain
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 
 # --- safety -----------------------------------------------------------------
@@ -195,7 +197,7 @@ ck_eq  "3 no record refuses"                  "$RC" 1
 ck_has "3 says so"                            "$OUT" "branch ready: no errand record"
 ck_eq  "3 and changed nothing"                "$(snapshot)" "$before"
 
-echo "--- 4. a chain of four, landed in turn ---"
+echo "--- 4. a chain of four, landed at its tip ---"
 fresh_home four; holding four; grant
 git -C "$repo" branch liege/wip main          # the liege's, on main already
 git -C "$repo" branch stray main              # no record names it
@@ -212,19 +214,12 @@ errand mend-1 feat/orig
 errand mend-2 feat/mend-1
 errand mend-3 feat/mend-2
 git -C "$(wt_of mend-3)" cherry-pick "$port_sha" >/dev/null
-before=$(snapshot); land mend-3
-ck_eq  "4 the last refuses while the one under it stands" "$RC" 1
-ck_has "4 and says which to land first"       "$OUT" \
-  "branch ready: based on errand branch feat/mend-2, land that first or rebuild on main"
-ck_eq  "4 and changed nothing"                "$(snapshot)" "$before"
-ALL=''
-for e in orig mend-1 mend-2 mend-3; do
-  land "$e"
-  ck_eq  "4 $e lands"                         "$RC" 0
-  ck_has "4 $e lands on main"                 "$OUT" "landed: feat/$e onto main"
-  ALL="$ALL
-$OUT"
-done
+want=$(tip feat/mend-3)
+land mend-3
+ck_eq  "4 the tip lands"                      "$RC" 0
+ck_has "4 onto main, in one call"             "$OUT" "landed: feat/mend-3 onto main"
+ck_eq  "4 main gains the whole chain"         "$(tip main)" "$want"
+ALL=$OUT
 for e in orig mend-1 mend-2 mend-3; do
   ck_has "4 cleans $e"                        "$ALL" "cleaned: $e"
   ck_eq  "4 feat/$e is gone"                  "$(has_br "feat/$e")" no
@@ -242,7 +237,7 @@ ck_eq  "4 its copy stays"                     "$(present "$(wt_of busy)")" prese
 ck_has "4 the dirty copy is kept, with why"   "$OUT" "kept: dirty feat/dirty: uncommitted work"
 ck_eq  "4 its work is intact"                 "$(cat "$(wt_of dirty)/scratch.txt")" wip
 ck_eq  "4 its branch stays"                   "$(has_br feat/dirty)" yes
-ck_has "4 the last land's tally"              "$OUT" "2 cleaned, 2 dropped, 2 kept"
+ck_has "4 the one land's tally"               "$OUT" "5 cleaned, 5 dropped, 2 kept"
 
 echo "--- 5. dry run and idempotence ---"
 fresh_home five; holding five
@@ -349,17 +344,17 @@ ck_eq  "8 feat/f is gone, though HEAD lacks it" "$(has_br feat/f)" no
 ck_eq  "8 and no upstream is left behind"      "$(git -C "$repo" config branch.feat/f.merge || echo none)" none
 errand g dev
 errand h feat/g
-before=$(snapshot); land h
-ck_eq  "8 a mend on an unlanded dev errand refuses" "$RC" 1
-ck_has "8 land that first"                     "$OUT" "based on errand branch feat/g, land that first"
-ck_eq  "8 and changed nothing"                 "$(snapshot)" "$before"
-land g
-ck_has "8 its original lands on dev"           "$OUT" "landed: feat/g onto dev"
+want=$(tip feat/h)
 land h
-ck_has "8 then the mend lands on dev, not main" "$OUT" "landed: feat/h onto dev"
+ck_eq  "8 a dev chain lands at its tip"        "$RC" 0
+ck_has "8 onto dev, not main"                  "$OUT" "landed: feat/h onto dev"
+ck_eq  "8 dev gains both"                      "$(tip dev)" "$want"
 ck_eq  "8 main is still untouched"             "$(tip main)" "$main0"
-ck_has "8 and is cleaned, its errand base gone" "$OUT" "cleaned: h"
+ck_has "8 the original is cleaned"             "$OUT" "cleaned: g"
+ck_has "8 and the mend"                        "$OUT" "cleaned: h"
+ck_eq  "8 feat/g is gone"                      "$(has_br feat/g)" no
 ck_eq  "8 feat/h is gone"                      "$(has_br feat/h)" no
+ck_eq  "8 its copy is gone"                    "$(present "$(wt_of g)")" removed
 errand j dev
 errand l main
 OUT=$("$ROOT/bin/reeve-teardown" l --drop-branch --onto feat/j 2>&1); RC=$?
@@ -526,6 +521,40 @@ fresh_home twelve
 ck_has "13 not recorded"                       "$("$ROOT/bin/reeve-doctor" 2>&1)" "proven-delete not recorded"
 grant
 ck_has "13 recorded"                           "$("$ROOT/bin/reeve-doctor" 2>&1)" "proven-delete recorded"
+
+echo "--- 14. a chain that does not hold together refuses ---"
+fresh_home fourteen; holding fourteen
+errand o1 main
+errand o2 feat/o1
+errand o3 feat/o2
+git -C "$(wt_of o1)" commit -q --allow-empty -m "after the mend was cut"
+before=$(snapshot); land o3
+ck_eq  "14 a tip missing a base commit refuses" "$RC" 1
+ck_has "14 naming the base it lacks"           "$OUT" "branch ready: feat/o3 does not contain feat/o1"
+ck_eq  "14 and changed nothing"                "$(snapshot)" "$before"
+git -C "$(wt_of o1)" reset -q --hard HEAD~1
+land o2
+ck_eq  "14 an inner member lands on its own"   "$RC" 0
+ck_has "14 by its own chain to main"           "$OUT" "landed: feat/o2 onto main"
+ck_has "14 its original cleaned with it"       "$OUT" "cleaned: o1"
+ck_eq  "14 the tip stays, unlanded"            "$(has_br feat/o3)" yes
+land o3
+ck_has "14 then the tip lands after it"        "$OUT" "landed: feat/o3 onto main"
+errand c1 main
+errand c2 feat/c1
+sed 's|^base=.*|base=feat/c2|' "$REEVE_HOME/state/c1.meta" > "$REEVE_HOME/state/c1.t" \
+  && mv "$REEVE_HOME/state/c1.t" "$REEVE_HOME/state/c1.meta"
+before=$(snapshot); land c2
+ck_eq  "14 a loop of bases refuses"            "$RC" 1
+ck_has "14 naming the loop"                    "$OUT" "loop (feat/c2 -> feat/c1 -> feat/c2)"
+ck_eq  "14 and changed nothing"                "$(snapshot)" "$before"
+errand m1 main
+errand m2 feat/m1
+rm "$REEVE_HOME/state/m1.meta"
+before=$(snapshot); land m2
+ck_eq  "14 a missing record refuses"           "$RC" 1
+ck_has "14 naming the base it lost"            "$OUT" "m2 is based on feat/m1, which no errand record names"
+ck_eq  "14 and changed nothing"                "$(snapshot)" "$before"
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

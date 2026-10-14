@@ -18,9 +18,11 @@
 # (its base: in manors.md, else main), or a long-lived branch such as dev, one
 # that exists and no errand record of the holding names as its branch=. A dev
 # errand lands on dev, never on main. A base= that is another errand's branch
-# is followed down to the base that errand was given, so a mend lands where its
-# original would have; but while that errand's branch stands unlanded there,
-# this one refuses, `land that first or rebuild on <default>`.
+# is followed through that errand's record down to the base it was given, so a
+# mend chain (an original, its mend, the mend's mend) lands once, at its tip,
+# where its original would have, and the land carries every branch under it.
+# The tip must contain each of those still standing, `<tip> does not contain
+# <b>` if not; a loop or a missing record in the chain refuses, naming it.
 #
 # Asked first, and anything short of it refuses: the record exists, the errand
 # reported done with nothing open, its branch is the very ref its dispatch made
@@ -83,24 +85,27 @@ records_naming() { # records_naming <branch> <id>
 }
 
 # Where this errand's work lands: its base=, walked down through every errand
-# branch it names to the first base that is no errand's. That one is the
-# target: the default, or a long-lived branch. main, master, dev, develop and the
-# default are never read as an errand's, whatever a record says, as the sweep
-# never takes them. Bounded, so a loop of records refuses instead of spinning.
+# branch it names (that errand's record, its base=, and on) to the first base
+# that is no errand's. That one is the target, and only a long-lived branch is
+# one (long_lived_branches: the default, or main, master, dev or develop where no
+# record names it), the same set the sweep measures landed against. A base that
+# is neither has lost its record, and a record already walked is a loop: both
+# refuse, naming it.
+#
+# A mend chain is reviewed at its tip and lands there once, carrying every
+# errand branch under it, so the tip must contain each of them that still
+# stands. One it does not contain was never reviewed with it, and refuses.
 repo_p=$(cd "$repo" && pwd -P)
-onto='' under='' cur=$id depth=0
+long=$(long_lived_branches "$repo" "$holding")
+onto='' cur=$id walked=" $id " path=$br chain=''
 while [ -z "$onto" ]; do
-  depth=$((depth + 1))
-  [ "$depth" -le 8 ] || ready "the errand bases under $id run more than 8 deep or loop, so where it" \
-                              "lands is the liege's call"
   b=$(meta_get "$cur" base ''); [ -n "$b" ] || b=$default_ref
-  case $b in main|master|dev|develop|"$default_ref") rs='' ;; *) rs=$(records_naming "$b" "$cur") ;; esac
-  if [ -z "$rs" ]; then
-    git -C "$repo" rev-parse --verify --quiet "refs/heads/$b^{commit}" >/dev/null 2>&1 \
-      || ready "$cur is based on $b, which is not a branch in $repo to land on"
-    [ "$b" != "$br" ] || ready "$cur is based on $br itself"
-    onto=$b; break
-  fi
+  if printf '%s\n' "$long" | grep -qxF -- "$b"; then onto=$b; break; fi
+  [ "$b" != "$br" ] || ready "the errand bases under $id loop ($path -> $b), so where it lands is the" \
+                             "liege's call"
+  rs=$(records_naming "$b" "$cur")
+  [ -n "$rs" ] || ready "$cur is based on $b, which no errand record names and is no long-lived" \
+                        "branch in $repo, so its record is missing and where it lands is the liege's call"
   # A name more than one record has held: the one that owns the ref now speaks
   # for it, or a lone record does. Anything else is not this script's to pick.
   next=''
@@ -108,19 +113,22 @@ while [ -z "$onto" ]; do
   [ -n "$next" ] || [ "$(printf '%s\n' "$rs" | wc -l | tr -d ' ')" != 1 ] || next=$rs
   [ -n "$next" ] || ready "$cur is based on $b, which several errand records name and none owns, so" \
                           "where it lands is the liege's call"
-  [ -n "$under" ] || under=$b
+  path="$path -> $b"
+  case $walked in *" $next "*) ready "the errand bases under $id loop ($path), so where it lands is the" \
+                                     "liege's call" ;; esac
+  walked="$walked$next "
+  chain="$chain $b"
   cur=$next
 done
 def_sha=$(git -C "$repo" rev-parse --verify --quiet "refs/heads/$onto^{commit}" 2>/dev/null) \
   || ready "no branch refs/heads/$onto in $repo to land on"
-# Based on an errand's branch that still stands: that branch lands first, so
-# this one never carries it onto the target unreviewed. Gone, or already on the
-# target, it has landed, and this lands after it.
-if [ -n "$under" ] && u_sha=$(git -C "$repo" rev-parse --verify --quiet "refs/heads/$under^{commit}" \
-                               2>/dev/null) \
-   && ! git -C "$repo" merge-base --is-ancestor "$u_sha" "$def_sha" 2>/dev/null; then
-  ready "based on errand branch $under, land that first or rebuild on $default_ref"
-fi
+# An errand branch already gone landed and was cleaned up, so there is nothing
+# of it left for the tip to carry.
+for b in $chain; do
+  b_sha=$(git -C "$repo" rev-parse --verify --quiet "refs/heads/$b^{commit}" 2>/dev/null) || continue
+  git -C "$repo" merge-base --is-ancestor "$b_sha" "$br_sha" 2>/dev/null \
+    || ready "$br does not contain $b"
+done
 
 if git -C "$repo" merge-base --is-ancestor "$br_sha" "$def_sha" 2>/dev/null; then
   printf 'already landed: %s is on %s in %s\n' "$br" "$onto" "$repo"
