@@ -21,6 +21,13 @@ stays on herdr whatever the caller's environment, and a record with none is herd
 From a hall pane (`HALL_ENV=1`), `reeve-backend list` and `reeve-doctor` do not run herdr at all,
 since herdr's own checks there would read herdr's config folder; each says so in one line, and a
 herdr pane or a plain terminal checks it.
+On hall every pane a hand gets (`tab create`, `worktree open`, `workspace create` in
+`create_endpoint`) is made with `--no-agent-resume`. A hall restart drops a pane so marked, and any
+tab or workspace it leaves empty, instead of resuming the hand's harness bare, without its
+environment or flags. So after a restart the hand is gone: its target no longer resolves,
+`agent_state` reads `missing`, the watch says `stale:`, and the reeve sends it out again from its
+instructions. Work committed on its branch is kept; its unfinished conversation is not. The reeve's
+own pane is never made with the flag, so it resumes as before.
 The tests drive the contract through stub backends of their own.
 
 ## Required functions

@@ -106,8 +106,9 @@ for t in git herdr jq gh python3; do
     printf '  %-7s MISSING\n' "$t"; WARN=$((WARN+1))
   fi
 done
-# hall is optional: herdr stays the default backend. Found the way the hall
-# backend finds it, never by herdr's variables, and not a warning when absent.
+# hall is optional: the default backend is hall inside a hall pane and herdr
+# everywhere else, as reeve-backend resolves it. Found the way the hall backend
+# finds it, never by herdr's variables, and not a warning when absent.
 if hb=$(bash -c '. "$1/reeve-lib.sh"; . "$2/backends/hall.sh"; _hb' _ "$BIN" "$REEVE_ROOT_D" 2>/dev/null) \
    && command -v "$hb" >/dev/null 2>&1; then
   printf '  %-7s ok    %s\n' hall "$("$hb" --version 2>/dev/null | awk '{print $NF}')"

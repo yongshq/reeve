@@ -8,7 +8,8 @@
 # variable is set to a bogus value that must not show up anywhere. Then the
 # herdr backend's own guarantees, re-run against hall: a reeve's group, a hand
 # as a tab, kill never closing the workspace, label_own touching only its own
-# tab, relabel by id.
+# tab, relabel by id. Every pane a hand gets is marked --no-agent-resume, so a
+# hall restart drops it and the watch reads the hand stale.
 #
 # hall is a stub named by REEVE_HALL_BIN that records its argv and the server
 # variables it was run with, so nothing here touches a real server. Scratch
@@ -55,7 +56,8 @@ chmod +x "$FAKE/herdr"
 # Only the server on $STUB_SOCK answers; any other socket is refused the way a
 # socket nothing listens on is. Its sessions: `other`, then the default one,
 # named $STUB_SES, on $STUB_SOCK. STUB_WS, STUB_PANES, STUB_TABS, STUB_FG and
-# STUB_LABEL as in tests/backend-nest.test.bash.
+# STUB_LABEL as in tests/backend-nest.test.bash; STUB_CWD the cwd every pane
+# reads back, none when unset.
 cat > "$FAKE/hall" <<'HALL'
 #!/usr/bin/env bash
 printf '%s |sock=%s|ses=%s|cli=%s\n' "$*" "${HALL_SOCKET_PATH-}" "${HALL_SESSION-}" "${HALL_CLIENT_SOCKET_PATH-}" >> "$STUB_LOG"
@@ -76,6 +78,8 @@ case "$1 $2" in
     printf '{"error":{"code":"workspace_not_found"}}\n' >&2; exit 1 ;;
   'workspace create')
     printf '{"result":{"workspace":{"workspace_id":"wNEW"},"tab":{"tab_id":"wNEW:t1"},"root_pane":{"pane_id":"wNEW:p1"}}}\n' ;;
+  'worktree open')
+    printf '{"result":{"workspace":{"workspace_id":"wWT"},"root_pane":{"pane_id":"wWT:p1"}}}\n' ;;
   'tab create')
     ws=''; prev=''
     for a in "$@"; do [ "$prev" = --workspace ] && ws=$a; prev=$a; done
@@ -84,7 +88,7 @@ case "$1 $2" in
     for t in ${STUB_TABS:-}; do [ "$t" = "$3" ] && { printf '{"result":{"tab":{"tab_id":"%s"}}}\n' "$3"; exit 0; }; done
     printf '{"error":{"code":"tab_not_found"}}\n' >&2; exit 1 ;;
   'pane get')
-    for p in ${STUB_PANES:-}; do [ "$p" = "$3" ] && { printf '{"result":{"pane":{"pane_id":"%s"}}}\n' "$3"; exit 0; }; done
+    for p in ${STUB_PANES:-}; do [ "$p" = "$3" ] && { printf '{"result":{"pane":{"pane_id":"%s","cwd":"%s"}}}\n' "$3" "${STUB_CWD:-}"; exit 0; }; done
     [ -n "${STUB_PANE_ERR:-}" ] && { printf '{"error":{"code":"server_error"}}\n' >&2; exit 1; }
     printf '{"error":{"code":"pane_not_found"}}\n' >&2; exit 1 ;;
   'pane process-info')
@@ -167,8 +171,16 @@ out=$(h create_endpoint "$PLAIN" "Scout of Aldric" "w7$S")
 eq  "5 with a group, a three field target"                  "${out%%#*}" "w7|w7:p9|w7:t9"
 has "5 carrying its identity"                               "$out" "w7|w7:p9|w7:t9#c"
 has "5 opened as a tab in that workspace"                   "$(calls)" "tab create --workspace w7 --cwd $PLAIN --label Scout of Aldric --no-focus"
+has "5 marked so a hall restart drops it, never resumes it" "$(calls)" "tab create --workspace w7 --cwd $PLAIN --label Scout of Aldric --no-focus --no-agent-resume"
 out=$(h create_endpoint "$PLAIN" "scout: x")
 eq  "5 without a group, a workspace of its own"             "${out%%#*}" "wNEW|wNEW:p1"
+has "5 marked the same way"                                 "$(calls)" "workspace create --cwd $PLAIN --label scout: x --no-focus --no-agent-resume"
+REPO="$SCRATCH/repo"; git init -q "$REPO"
+out=$(h create_endpoint "$REPO" "scout: x")
+eq  "5 a git copy without a group, hall's worktree open"   "${out%%#*}" "wWT|wWT:p1"
+has "5 marked the same way"                                 "$(calls)" "worktree open --path $REPO --label scout: x --no-focus --no-agent-resume"
+h ensure_group Aldric >/dev/null
+has "5 the reeve's own group workspace is not marked"       "$(calls)" "workspace create --cwd $HOME --label Aldric --no-focus |"
 h kill 'w7|w7:p9|w7:t9'
 has "5 kill closes a nested hand's tab"                     "$(calls)" "tab close w7:t9"
 nas "5 and never its reeve's workspace"                     "$(calls)" "workspace close"
@@ -290,11 +302,28 @@ has "10 its target is a tab in the reeve's group"           "$(grep '^target=' "
 has "10 the hand loses hall's workspace variable too"       "$(calls)" "pane run wNEW:p9 env -u HERDR_WORKSPACE_ID -u HALL_WORKSPACE_ID REEVE_HAND='one' true"
 nas "10 every call on the socket, none by session"          "$(calls)" "--session"
 
-echo "--- 11. herdr was never run, HERDR_* never read ---"
-eq  "11 the trap herdr was never called"                    "$(cat "$TRAP" 2>/dev/null)" ''
-nas "11 no bogus herdr value reached any hall call"         "$(cat "$LOG")" "BOGUS"
-eq  "11 hall.sh reads no HERDR_ variable"                   "$(grep -nE '\$\{?HERDR_' "$ROOT/backends/hall.sh")" ''
-eq  "11 and never runs herdr or passes --session"           "$(grep -nE '(^|[^_a-z])herdr [a-z]|--session' "$ROOT/backends/hall.sh" | grep -v '^[0-9]*: *#')" ''
+echo "--- 11. after a hall restart the hand's pane is gone, and it reads stale ---"
+# hall drops a --no-agent-resume pane on restore, and the tab it leaves empty.
+# The hand's target no longer resolves: its pane is not found, or its id now
+# names another pane. Either reads missing, so the watch says stale and the
+# reeve sends it out again. A server that does not answer proves nothing.
+T=$(grep '^target=' "$M" | cut -d= -f2-)
+eq  "11 a live hand reads alive"                            "$(STUB_PANES=wNEW:p9 STUB_FG=claude h agent_state "$T")" alive
+eq  "11 its pane not found reads missing"                   "$(STUB_PANES='' h agent_state "$T")" missing
+eq  "11 its pane id now another pane's reads missing"       "$(REEVE_IDENT_TRIES=1 STUB_PANES=wNEW:p9 STUB_CWD=/elsewhere STUB_FG=claude h agent_state "$T")" missing
+eq  "11 a server that does not answer is not proof"         "$(STUB_PANES='' STUB_DOWN=1 h agent_state "$T")" unreadable
+"$ROOT/bin/reeve-say" "$REEVE_HOME/errands/one/status" working 'mapping the parser' >/dev/null
+OUT=$(lead REEVE_ROOT="$STUB" STUB_WS=wNEW STUB_PANES='' "$ROOT/bin/reeve-sentry" --once --no-reap 2>&1)
+has "11 the watch says stale, its session gone"             "$OUT" "stale: one left no result and its session is missing, last reported working"
+nas "11 not closed with its reeve's workspace, still there" "$OUT" "closed with its reeve's workspace"
+OUT=$(lead REEVE_ROOT="$STUB" STUB_WS=wNEW STUB_PANES='' "$ROOT/bin/reeve-status" one 2>/dev/null | sed -n 's/^process  *//p')
+eq  "11 the status shows the session gone"                  "$OUT" missing
+
+echo "--- 12. herdr was never run, HERDR_* never read ---"
+eq  "12 the trap herdr was never called"                    "$(cat "$TRAP" 2>/dev/null)" ''
+nas "12 no bogus herdr value reached any hall call"         "$(cat "$LOG")" "BOGUS"
+eq  "12 hall.sh reads no HERDR_ variable"                   "$(grep -nE '\$\{?HERDR_' "$ROOT/backends/hall.sh")" ''
+eq  "12 and never runs herdr or passes --session"           "$(grep -nE '(^|[^_a-z])herdr [a-z]|--session' "$ROOT/backends/hall.sh" | grep -v '^[0-9]*: *#')" ''
 
 echo "passed=$PASS failed=$FAIL"
 [ "$FAIL" -eq 0 ]

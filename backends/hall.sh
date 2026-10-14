@@ -227,10 +227,17 @@ reeve_backend_hall_create_endpoint() {
   group=$(_h_gid "${3:-}")   # the workspace, without the socket ensure_group checked
   [ -d "$cwd" ] || { echo "cwd does not exist: $cwd" >&2; return 1; }
 
+  # Every pane made here is marked --no-agent-resume: a hall restart drops it,
+  # and a tab or workspace it leaves empty, rather than starting a bare
+  # `claude --resume` in it with none of the hand's environment or flags. The
+  # hand's target then no longer resolves, so agent_state reads it missing, the
+  # watch says stale and the reeve sends it out again from its brief. The
+  # reeve's own pane is never made here, so it resumes as before.
+  #
   # With a group, the hand is a tab in its reeve's workspace. Anything missing
   # and the hand gets a workspace of its own instead.
   if [ -n "$group" ]; then
-    out=$(_h tab create --workspace "$group" --cwd "$cwd" --label "$label" --no-focus) || out=''
+    out=$(_h tab create --workspace "$group" --cwd "$cwd" --label "$label" --no-focus --no-agent-resume) || out=''
     tab=$(printf '%s' "$out"  | jq -r '.result.tab.tab_id // .result.root_pane.tab_id // empty' 2>/dev/null)
     pane=$(printf '%s' "$out" | jq -r '.result.root_pane.pane_id // empty' 2>/dev/null)
     if [ -z "$pane" ] && [ -n "$tab" ]; then
@@ -247,13 +254,13 @@ reeve_backend_hall_create_endpoint() {
   fi
 
   if git -C "$cwd" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    out=$(_h worktree open --path "$cwd" --label "$label" --no-focus) || out=''
+    out=$(_h worktree open --path "$cwd" --label "$label" --no-focus --no-agent-resume) || out=''
     ws=$(printf '%s' "$out"   | jq -r '.result.workspace.workspace_id // empty' 2>/dev/null)
     pane=$(printf '%s' "$out" | jq -r '.result.root_pane.pane_id // empty'      2>/dev/null)
   fi
 
   if [ -z "${pane:-}" ]; then
-    out=$(_h workspace create --cwd "$cwd" --label "$label" --no-focus) || return 1
+    out=$(_h workspace create --cwd "$cwd" --label "$label" --no-focus --no-agent-resume) || return 1
     ws=$(printf '%s' "$out"   | jq -r '.result.workspace.workspace_id // .result.workspace_id // empty' 2>/dev/null)
     pane=$(printf '%s' "$out" | jq -r '.result.root_pane.pane_id // empty' 2>/dev/null)
     if [ -z "$pane" ] && [ -n "$ws" ]; then

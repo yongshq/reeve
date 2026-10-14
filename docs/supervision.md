@@ -149,7 +149,9 @@ turns on at the moment the sentry wakes for it.
   first field of the latch behind it, in epoch seconds, or `null` while that flag is false. A watch
   that wakes exits and drops every flag until it is started again, so one silence rises twice. Its
   `since` does not change, since nothing deletes a latch on a watch's start or exit, so a reader
-  that alerts once per errand, flag and `since` alerts once per silence. A new silence (a line
-  written since, a steer, a poll that reads the session out of that state) or a screen that moved
-  starts a new latch, and so a new `since`.
+  that alerts once per errand, flag and `since` alerts once per silence. A new silence starts a new
+  latch, and so a new `since`, and what starts one differs per flag. `waiting`: a line written
+  since, or a poll that reads the session as anything but waiting. `idle`: a line written since, a
+  steer, or a poll that reads it `working`. `wedged`: a line written since, a steer, a screen that
+  moved, or a poll that reads it `settled` or `waiting`.
 - It writes nothing, delivers no notification and touches no heartbeat, in any session.

@@ -136,7 +136,7 @@ eq  "5 REEVE_BACKEND still wins"                              "$(HALL_ENV=1 REEV
 eq  "5 so does --backend"                                     "$(HALL_ENV=1 "$ROOT/bin/reeve-backend" resolve --backend herdr)" herdr
 printf 'herdr\n' > "$REEVE_HOME/config/backend"
 eq  "5 and so does config/backend"                            "$(HALL_ENV=1 "$ROOT/bin/reeve-backend" resolve)" herdr
-rm -f "$REEVE_HOME/config/backend"
+rm -f "${REEVE_HOME:?}/config/backend"
 eq  "5 outside hall the default is herdr"                     "$("$ROOT/bin/reeve-backend" resolve)" herdr
 eq  "5 HALL_ENV=0 is not a hall pane"                         "$(HALL_ENV=0 "$ROOT/bin/reeve-backend" resolve)" herdr
 reset
