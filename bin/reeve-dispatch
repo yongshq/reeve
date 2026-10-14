@@ -100,17 +100,33 @@ dispatch_lock='' launch_open=''
 # errand's, as a launch that returned would record it, and never closed: the
 # hand may be coming up, and a stale line for a pane still starting is the
 # honest cost of an interrupted dispatch. SIGKILL runs no trap; teardown reads
-# `launching=` for that one.
+# `launching=` for that one. Every field a returned launch records is recorded,
+# `place=` above all: a relaunch from another hall session checks it, and a
+# blank one let that relaunch through onto a copy a live hand may hold. The run
+# starts no caretaker, so with nothing watching the home it says so, in the
+# line the run would have ended on.
 dispatch_exit() {
+  local hand_place
   if [ -n "$launch_open" ]; then
+    hand_place=$("$BIN/reeve-backend" call place --backend "$backend" 2>/dev/null | head -n 1) || hand_place=''
+    if [ -n "$hand_place" ]; then meta_set "$id" place "$hand_place"
+    elif [ -n "$(meta_get "$id" place '')" ]; then meta_set "$id" place ''
+    fi
     meta_set "$id" target "$launch_open"; meta_set "$id" launching ''; launch_open=''
     meta_set "$id" harness "$harness"
     meta_set "$id" cwd "$cwd"
+    [ -n "$model" ]  && meta_set "$id" model "$model"
+    [ -n "$effort" ] && meta_set "$id" effort "$effort"
+    meta_set "$id" model_from "$model_from"
+    meta_set "$id" effort_from "$effort_from"
     meta_set "$id" dispatched "$(date +%Y-%m-%dT%H:%M:%S)"
+    meta_set "$id" browser "$browser_say"
     if [ -n "${REEVE_NO_CARETAKER:-}" ]; then meta_set "$id" keep REEVE_NO_CARETAKER
     else meta_set "$id" keep ''; fi
     touch "$(status_file "$id")"
     [ "$relaunch" = yes ] && "$BIN/reeve-say" "$(status_file "$id")" working "$relaunch_note"
+    caretaker_live || watch_live \
+      || warn "NOTHING IS WATCHING $id. It will finish, report into its status file, and tell nobody."
   fi
   lock_release "$dispatch_lock"
 }

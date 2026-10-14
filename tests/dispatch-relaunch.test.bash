@@ -493,14 +493,16 @@ REEVE_HOME="$SCRATCH/home15"; export REEVE_HOME; mkdir -p "$REEVE_HOME"
 teardown() { # teardown <id> -> TOUT, TRC
   TOUT=$(REEVE_ROOT="$STUB" "$ROOT/bin/reeve-teardown" "$1" 2>&1); TRC=$?
 }
-stopped() { # stopped <id> <signal>: dispatch, held mid launch, sent <signal>
-  local hold="$SCRATCH/hold.$1.$RANDOM" p
-  REEVE_ROOT="$STUB" STUB_LAUNCH_HOLD=$hold "$ROOT/bin/reeve-dispatch" "$1" --backend hall --harness stub >/dev/null 2>&1 &
+stopped() { # stopped <id> <signal> [args...]: dispatch, held mid launch, sent <signal> -> L, SERR
+  local id=$1 sig=$2 hold="$SCRATCH/hold.$1.$RANDOM" p err; shift 2
+  err=$(mktemp "$SCRATCH/serr.XXXXXX")
+  REEVE_ROOT="$STUB" STUB_LAUNCH_HOLD=$hold "$ROOT/bin/reeve-dispatch" "$id" --backend hall --harness stub "$@" >/dev/null 2>"$err" &
   p=$!
-  n=0; while [ "$n" -lt 100 ] && [ -z "$(meta "$1" launching)" ]; do sleep 0.1; n=$((n + 1)); done
-  L=$(meta "$1" launching)
-  kill "-$2" "$p" 2>/dev/null; wait "$p" 2>/dev/null
+  n=0; while [ "$n" -lt 100 ] && [ -z "$(meta "$id" launching)" ]; do sleep 0.1; n=$((n + 1)); done
+  L=$(meta "$id" launching)
+  kill "-$sig" "$p" 2>/dev/null; wait "$p" 2>/dev/null
   touch "$hold"; sleep 0.5
+  SERR=$(cat "$err")
 }
 brief_for tm scout || bad "15 reeve-brief refused"
 E0=$(wc -l < "$EVENTS")
@@ -536,6 +538,27 @@ has "15 naming the new session"                             "$TOUT" "a hand is s
 eq  "15 and keeps the copy under it"                        "$([ -d "$TWT" ] && echo kept)" kept
 lose tm missing; W=$(watch)
 has "15 a later loss of the new hand is said"               "$W" "stale: tm"
+# It records every field a returned launch does. `place=` above all: blank, a
+# relaunch from another hall session skipped its check and could put a second
+# hand in a copy the first still holds.
+brief_for tp scout || bad "15 reeve-brief refused"
+STUB_PLACE=p1 stopped tp TERM --model m1
+eq  "15 a stopped dispatch records the hall session"        "$(meta tp place)" p1
+eq  "15 and the tier and browser, as a returned one does"   "$(meta tp model)|$(meta tp model_from)|$(grep -c '^effort_from=' "$REEVE_HOME/state/tp.meta")|$(grep -c '^browser=' "$REEVE_HOME/state/tp.meta")" "m1|flag|1|1"
+has "15 nothing watching, it says so"                       "$SERR" "NOTHING IS WATCHING tp. It will finish, report into its status file, and tell nobody."
+lose tp missing; W=$(watch)
+STUB_PLACE=p2 dispatch tp
+eq  "15 a relaunch from another hall session refuses"       "$RC" 1
+has "15 naming both"                                        "$ERR" "its hand was made on hall session 'p1', and this reeve talks to 'p2'"
+STUB_PLACE=p1 stopped tp TERM --model m2
+eq  "15 a relaunch stopped by TERM records its new tier"    "$(meta tp target)|$(meta tp model)" "$L|m2"
+# A watch live on the home: the stopped run says nothing more.
+printf '%s %s 15\n' "$$" "$(date +%s)" > "$REEVE_HOME/state/.sentry.watch-other"
+lose tp missing; W=$(watch)
+STUB_PLACE=p1 stopped tp TERM
+nas "15 with a watch live, no warning"                      "$SERR" "NOTHING IS WATCHING"
+eq  "15 and the hand is still recorded"                     "$(meta tp target)|$(meta tp launching)" "$L|"
+rm -f "$REEVE_HOME/state/.sentry.watch-other"
 
 echo "--- 16. teardown reads a session left launching by a dispatch killed outright ---"
 # SIGKILL runs no trap, so the new session stays under `launching=` alone.
