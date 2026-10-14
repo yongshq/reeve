@@ -145,4 +145,11 @@ turns on at the moment the sentry wakes for it.
   so with none they would freeze on whatever they last said.
 - `waiting` holds from the dwell until a poll sees the session anything but waiting, a few seconds
   after the dialog is answered.
+- Each errand's `since` object, `{"waiting":N,"idle":N,"wedged":N}`, gives each flag's start: the
+  first field of the latch behind it, in epoch seconds, or `null` while that flag is false. A watch
+  that wakes exits and drops every flag until it is started again, so one silence rises twice. Its
+  `since` does not change, since nothing deletes a latch on a watch's start or exit, so a reader
+  that alerts once per errand, flag and `since` alerts once per silence. A new silence (a line
+  written since, a steer, a poll that reads the session out of that state) or a screen that moved
+  starts a new latch, and so a new `since`.
 - It writes nothing, delivers no notification and touches no heartbeat, in any session.

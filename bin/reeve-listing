@@ -24,6 +24,7 @@
 #    "errands":[{"id":"fix-auth","office":"artificer","owner_reeve":"Aldric",
 #                "hand_state":"needs-decision","question":"Which base?","open":1,
 #                "waiting":false,"idle":false,"wedged":false,
+#                "since":{"waiting":null,"idle":null,"wedged":null},
 #                "session":{"backend":"hall","name":"default","pane_id":"w1:p3"}}]}
 #
 # One line, no spaces. A session's `name` is null where its backend cannot say
@@ -45,6 +46,12 @@
 #              state/: true from the moment that watch wakes for it. All false
 #              while the owner's watch is not running, since only a running
 #              watch clears a latch
+#   since      per flag, the epoch seconds that flag's latch records as its
+#              start, its first field (.attn-<id>, .stale-<id>, .wedged-<id>),
+#              or null while that flag is false. One silence keeps one `since`
+#              across a watch that stops and starts again, so a reader rings a
+#              flag once per (errand, flag, since), not once per rise. A new
+#              silence, or a screen that moved, is a new `since`
 #
 # Exit 1, with one line on stderr and nothing on stdout, only when the home
 # cannot be read. Nothing else is ever said on stderr.
@@ -231,6 +238,8 @@ for rec in "$@"; do
   [ -n "$st" ] || st=unknown
 
   waiting=false; idle=false; wedged=false
+  # Each flag's `since`: the first field of the latch that raised it, or null
+  sw=null; si=null; sd=null
   if [ "$st" = working ] && watch_of "$own"; then
     # waiting: the attention latch past the dwell, the moment the sentry wakes
     a=''
@@ -238,12 +247,12 @@ for rec in "$@"; do
     since=${a%% *}
     case $since in
       ''|*[!0-9]*) ;;
-      *) [ $(( anow - since )) -ge "$attn_dwell" ] && waiting=true ;;
+      *) [ $(( anow - since )) -ge "$attn_dwell" ] && { waiting=true; sw=$((10#$since)); } ;;
     esac
     # idle: the idle latch over this very silence, past the dwell
     if [ -f "$state/.stale-$id" ] && l=$(stale_latch "$id" "$(stale_mark "$id")") \
        && [ $(( anow - ${l%% *} )) -ge "$attn_dwell" ]; then
-      idle=true
+      idle=true; si=$((10#${l%% *}))
     fi
     # wedged: the wedged latch over this silence and the screen it recorded,
     # held for the whole window. The screen is never read here: the sentry is
@@ -254,7 +263,7 @@ for rec in "$@"; do
       set -- $a
       if [ $# -ge 5 ] && l=$(stale_latch "$id" "$(stale_mark "$id") $4" wedged) \
          && age=$(status_silence "$id") && wedge_due "$age" "${l%% *}"; then
-        wedged=true
+        wedged=true; sd=$((10#${l%% *}))
       fi
     fi
   fi
@@ -266,6 +275,7 @@ for rec in "$@"; do
   js "$st";       e="$e,\"hand_state\":$J"
   js "$question"; e="$e,\"question\":$J,\"open\":$open"
   e="$e,\"waiting\":$waiting,\"idle\":$idle,\"wedged\":$wedged"
+  e="$e,\"since\":{\"waiting\":$sw,\"idle\":$si,\"wedged\":$sd}"
   js "$backend";  e="$e,\"session\":{\"backend\":$J"
   js "$place";    e="$e,\"name\":$J"
   js "$PANE";     e="$e,\"pane_id\":$J}}"

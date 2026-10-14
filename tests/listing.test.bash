@@ -12,7 +12,8 @@
 #      flight; one row per name, a live one first; a session another took over
 #      from is not live
 #   5. waiting, idle and wedged from the sentry's own latches, at its own dwell
-#      and window edges, and false while the owner's watch is not running
+#      and window edges, and false while the owner's watch is not running; each
+#      flag's since the first field of its latch, null while it is false
 #   6. it writes nothing and calls no backend, whatever session it runs in
 #   7. --home over REEVE_HOME over ~/.reeve; exit 1 and one stderr line only
 #      for a home it cannot read, and nothing on stderr otherwise; a record it
@@ -20,6 +21,9 @@
 #   8. owner_reeve is the owning session's name now, so a hand still nests
 #      under a renamed reeve; the recorded name only when the session has none
 #   9. always valid UTF-8, whatever bytes a hand wrote
+#  10. against the real sentry: a watch that wakes, exits and starts again over
+#      the same silence, screen or dialog raises the flag with the same since;
+#      a new one raises it with a new since
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 PASS=0; FAIL=0
 ok()  { PASS=$((PASS+1)); printf 'ok    %s\n' "$1"; }
@@ -107,7 +111,7 @@ echo "--- 1. the golden document ---"
 out=$(L 2>"$SCRATCH/err"); rc=$?
 eq  "1 exit 0"                                              "$rc" 0
 eq  "1 nothing on stderr"                                   "$(cat "$SCRATCH/err")" ''
-GOLD='{"version":1,"reeves":[{"name":"Aldric","session":{"backend":"hall","name":"default","pane_id":"w1:p1"},"live":true},{"name":"Bran","session":{"backend":"herdr","name":null,"pane_id":"w4:p2"},"live":true},{"name":"Cedric","session":{"backend":"hall","name":"default","pane_id":"w2:p1"},"live":false}],"errands":[{"id":"fix-auth","office":"artificer","owner_reeve":"Aldric","hand_state":"needs-decision","question":"Which base?","open":1,"waiting":false,"idle":false,"wedged":false,"session":{"backend":"hall","name":"default","pane_id":"w1:p3"}},{"id":"orphan","office":"scribe","owner_reeve":"Cedric","hand_state":"working","question":null,"open":0,"waiting":false,"idle":false,"wedged":false,"session":{"backend":"hall","name":"default","pane_id":"w2:p5"}},{"id":"scout-x","office":"scout","owner_reeve":"Bran","hand_state":"done","question":null,"open":0,"waiting":false,"idle":false,"wedged":false,"session":{"backend":"herdr","name":null,"pane_id":"w4:p7"}},{"id":"silent","office":"warden","owner_reeve":"Aldric","hand_state":"absent","question":null,"open":0,"waiting":false,"idle":false,"wedged":false,"session":{"backend":"herdr","name":null,"pane_id":null}}]}'
+GOLD='{"version":1,"reeves":[{"name":"Aldric","session":{"backend":"hall","name":"default","pane_id":"w1:p1"},"live":true},{"name":"Bran","session":{"backend":"herdr","name":null,"pane_id":"w4:p2"},"live":true},{"name":"Cedric","session":{"backend":"hall","name":"default","pane_id":"w2:p1"},"live":false}],"errands":[{"id":"fix-auth","office":"artificer","owner_reeve":"Aldric","hand_state":"needs-decision","question":"Which base?","open":1,"waiting":false,"idle":false,"wedged":false,"since":{"waiting":null,"idle":null,"wedged":null},"session":{"backend":"hall","name":"default","pane_id":"w1:p3"}},{"id":"orphan","office":"scribe","owner_reeve":"Cedric","hand_state":"working","question":null,"open":0,"waiting":false,"idle":false,"wedged":false,"since":{"waiting":null,"idle":null,"wedged":null},"session":{"backend":"hall","name":"default","pane_id":"w2:p5"}},{"id":"scout-x","office":"scout","owner_reeve":"Bran","hand_state":"done","question":null,"open":0,"waiting":false,"idle":false,"wedged":false,"since":{"waiting":null,"idle":null,"wedged":null},"session":{"backend":"herdr","name":null,"pane_id":"w4:p7"}},{"id":"silent","office":"warden","owner_reeve":"Aldric","hand_state":"absent","question":null,"open":0,"waiting":false,"idle":false,"wedged":false,"since":{"waiting":null,"idle":null,"wedged":null},"session":{"backend":"herdr","name":null,"pane_id":null}}]}'
 eq  "1 exactly the document"                                "$out" "$GOLD"
 if command -v python3 >/dev/null 2>&1; then
   printf '%s' "$out" | python3 -c 'import json,sys; json.load(sys.stdin)' 2>/dev/null; rc=$?
@@ -172,22 +176,29 @@ echo "--- 5. waiting, idle and wedged ---"
 # clock, which is the one marker_alive reads.
 watch_on()  { printf '%s %s 15\n' "$$" "$(date +%s)" > "$H/state/.sentry.watch-s-ald"; }
 watch_off() { rm -f "$H/state/.sentry.watch-s-ald"; }
-flags() { L | grep -o '"id":"w-1"[^}]*' | grep -o '"waiting":[a-z]*,"idle":[a-z]*,"wedged":[a-z]*'; }
+flags() { L | grep -o '"id":"w-1"[^}]*' | grep -o '"waiting":[a-z]*,"idle":[a-z]*,"wedged":[a-z]*,"since"' | sed 's/,"since"$//'; }
+# since <id>   that errand's since object, its three values as `w i d`
+since() { L | grep -o "\"id\":\"$1\"[^}]*}" | sed -n 's/.*"since":{"waiting":\([^,]*\),"idle":\([^,]*\),"wedged":\([^}]*\)}.*/\1 \2 \3/p'; }
 lib() { bash -c '. "$1/bin/reeve-lib.sh"; shift; "$@"' _ "$ROOT" "$@"; }
 meta w-1 office=artificer reeve=Aldric session=s-ald backend=hall place=default 'target=w1|w1:p8|w1:t8' dispatched=x
 log w-1 'working: one' 'working: two'
 backdate "$H/errands/w-1/status" 20000
 watch_on
 eq  "5 no latch: nothing"                                   "$(flags)" '"waiting":false,"idle":false,"wedged":false'
+eq  "5 every flag false: every since null"                  "$(since w-1)" 'null null null'
 
 printf '%s no\n' "$((NOW - 89))" > "$H/state/.attn-w-1"
 eq  "5 waiting, one second inside the dwell: not yet"       "$(flags)" '"waiting":false,"idle":false,"wedged":false'
+eq  "5 a latch whose flag is false: since still null"       "$(since w-1)" 'null null null'
 printf '%s no\n' "$((NOW - 90))" > "$H/state/.attn-w-1"
 eq  "5 waiting at the dwell, the moment the sentry wakes"   "$(flags)" '"waiting":true,"idle":false,"wedged":false'
+eq  "5 its since: the latch's first field"                  "$(since w-1)" "$((NOW - 90)) null null"
 printf '%s yes 2\n' "$((NOW - 900))" > "$H/state/.attn-w-1"
 eq  "5 and while the dialog stands after it woke"           "$(flags)" '"waiting":true,"idle":false,"wedged":false'
+eq  "5 since the latch's start, not when it woke"           "$(since w-1)" "$((NOW - 900)) null null"
 watch_off
 eq  "5 no watch running: every flag false, the latch frozen" "$(flags)" '"waiting":false,"idle":false,"wedged":false'
+eq  "5 and every since null"                                "$(since w-1)" 'null null null'
 printf '%s 1 15\n' "$$" "$(( $(date +%s) - 600 ))" > "$H/state/.sentry.watch-s-ald"
 eq  "5 a watch marker gone stale is no watch"               "$(flags)" '"waiting":false,"idle":false,"wedged":false'
 watch_on
@@ -198,8 +209,10 @@ printf '%s %s no\n' "$((NOW - 89))" "$mark" > "$H/state/.stale-w-1"
 eq  "5 idle, one second inside the dwell: not yet"          "$(flags)" '"waiting":false,"idle":false,"wedged":false'
 printf '%s %s yes\n' "$((NOW - 90))" "$mark" > "$H/state/.stale-w-1"
 eq  "5 idle at the dwell"                                   "$(flags)" '"waiting":false,"idle":true,"wedged":false'
+eq  "5 its since: the idle latch's first field"             "$(since w-1)" "null $((NOW - 90)) null"
 printf '%s\n' "$((NOW - 10))" > "$H/state/.steered-w-1"
 eq  "5 a steer since the latch started voids it"            "$(flags)" '"waiting":false,"idle":false,"wedged":false'
+eq  "5 and its since"                                       "$(since w-1)" 'null null null'
 rm -f "$H/state/.steered-w-1"
 printf 'working: three\n' >> "$H/errands/w-1/status"; backdate "$H/errands/w-1/status" 20000
 eq  "5 a line since voids it too: a new silence"            "$(flags)" '"waiting":false,"idle":false,"wedged":false'
@@ -211,6 +224,11 @@ printf '%s %s 123-45 no\n' "$((NOW - 99))" "$mark" > "$H/state/.wedged-w-1"
 eq  "5 wedged, one second inside the window: not yet"       "$(flags)" '"waiting":false,"idle":false,"wedged":false'
 printf '%s %s 123-45 yes\n' "$((NOW - 100))" "$mark" > "$H/state/.wedged-w-1"
 eq  "5 wedged at the window"                                "$(flags)" '"waiting":false,"idle":false,"wedged":true'
+eq  "5 its since: the wedged latch's first field"           "$(since w-1)" "null null $((NOW - 100))"
+printf '%s yes 1\n' "$((NOW - 300))" > "$H/state/.attn-w-1"
+printf '%s %s yes\n' "$((NOW - 200))" "$mark" > "$H/state/.stale-w-1"
+eq  "5 all three up: each its own latch's since"           "$(since w-1)" "$((NOW - 300)) $((NOW - 200)) $((NOW - 100))"
+rm -f "$H/state/.attn-w-1" "$H/state/.stale-w-1"
 backdate "$H/errands/w-1/status" 99
 eq  "5 not while the status file spoke inside the window"   "$(flags)" '"waiting":false,"idle":false,"wedged":false'
 backdate "$H/errands/w-1/status" 20000
@@ -221,6 +239,7 @@ printf '%s %s 123-45 yes\n' "$((NOW - 100))" "$mark" > "$H/state/.attn-w-1"
 printf '%s %s yes\n' "$((NOW - 100))" "$mark" > "$H/state/.stale-w-1"
 log w-1 'working: one' 'needs-decision [key=x]: asked'
 eq  "5 a hand that is not working has no flag at all"       "$(flags)" '"waiting":false,"idle":false,"wedged":false'
+eq  "5 nor any since"                                       "$(since w-1)" 'null null null'
 rm -f "$H/state/.attn-w-1" "$H/state/.stale-w-1" "$H/state/.wedged-w-1" "$H/config/hand-wedged"
 log w-1 'working: one'
 
@@ -321,6 +340,89 @@ else
   echo "skip  9 JSON parse: no python3"
 fi
 log fix-auth 'working: 2026-10-01T10:00:00Z reading' 'needs-decision [key=base]: 2026-10-01T10:05:00Z Which base?'
+
+echo "--- 10. since across a watch that stops and starts again ---"
+# The real sentry, over a stub backend, in a home of its own. A watch that wakes
+# exits, so the listing drops every flag until a watch runs again, and the one
+# started again over the same silence raises it again. A reader that rings once
+# per since rings once only if that second rise carries the first one's since.
+H3="$SCRATCH/watched"
+mkdir -p "$H3/state/sessions/s-w" "$H3/errands/r-1" "$H3/config"
+printf 'Wynn\n' > "$H3/state/sessions/s-w/name"; printf '%s\n' "$NOW" > "$H3/state/sessions/s-w/seen"
+printf '%s\n' office=artificer reeve=Wynn session=s-w backend=stub 'target=s|s:p1' dispatched=x > "$H3/state/r-1.meta"
+export STUB_ATTN="$SCRATCH/stub-attn" STUB_PANE="$SCRATCH/stub-pane"
+cat > "$REEVE_ROOT/backends/stub.sh" <<'STUB'
+reeve_backend_stub_available()        { return 0; }
+reeve_backend_stub_describe()         { echo stub; }
+reeve_backend_stub_agent_state()      { echo alive; }
+reeve_backend_stub_attention_state()  { cat "$STUB_ATTN"; }
+reeve_backend_stub_capture()          { cat "$STUB_PANE"; }
+reeve_backend_stub_wait_change()      { return 2; }
+reeve_backend_stub_kill()             { :; }
+reeve_backend_stub_send_text_submit() { :; }
+STUB
+ST3="$H3/errands/r-1/status"
+# speak <line>   the hand says one more line, read by the watch as progress, and
+# falls silent again long past every threshold
+speak() {
+  printf '%s\n' "$1" >> "$ST3"
+  wc -l < "$ST3" | tr -d ' ' > "$H3/state/.cursor-r-1"
+  backdate "$ST3" 20000
+}
+# watch <seconds past NOW>   one pass of the owner's watch at that time
+watch() {
+  OUT=$(REEVE_HOME="$H3" REEVE_SESSION=s-w REEVE_ATTN_NOW=$((NOW + $1)) \
+        "$ROOT/bin/reeve-sentry" --once --no-reap 2>&1); RC=$?
+}
+# at <seconds past NOW>   the listing's since for r-1 at that time, with the
+# owner's watch running, or with none as `at <s> off`
+at() {
+  if [ "${2:-}" = off ]; then rm -f "$H3/state/.sentry.watch-s-w"
+  else printf '%s %s 15\n' "$$" "$(date +%s)" > "$H3/state/.sentry.watch-s-w"; fi
+  REEVE_ATTN_NOW=$((NOW + $1)) "$ROOT/bin/reeve-listing" --home "$H3" \
+    | sed -n 's/.*"since":{"waiting":\([^,]*\),"idle":\([^,]*\),"wedged":\([^}]*\)}.*/\1 \2 \3/p'
+  rm -f "$H3/state/.sentry.watch-s-w"
+}
+: > "$ST3"; speak 'working: one'
+printf 'frame one\n' > "$STUB_PANE"
+
+# idle
+printf 'settled\n' > "$STUB_ATTN"
+watch 0;   eq "10 idle: the first look starts the latch, no wake"   "$RC" 4
+watch 90;  has "10 idle: the watch wakes at the dwell"             "$OUT" 'idle: r-1'
+eq  "10 idle: the watch gone, since null"                    "$(at 90 off)" 'null null null'
+eq  "10 idle: since the latch's start"                       "$(at 90)" "null $NOW null"
+watch 200; eq "10 idle: a watch started again does not wake again" "$RC" 4
+eq  "10 idle: and since is the same over the same silence"   "$(at 200)" "null $NOW null"
+speak 'working: two'
+watch 300; watch 390; has "10 idle: a new silence wakes again"    "$OUT" 'idle: r-1'
+eq  "10 idle: with a new since"                              "$(at 390)" "null $((NOW + 300)) null"
+
+# wedged
+printf 'working\n' > "$STUB_ATTN"; printf '100\n' > "$H3/config/hand-wedged"
+watch 1000; eq "10 wedged: the first look starts the latch"        "$RC" 4
+watch 1100; has "10 wedged: the watch wakes at the window"         "$OUT" 'wedged: r-1'
+eq  "10 wedged: the watch gone, since null"                  "$(at 1100 off)" 'null null null'
+eq  "10 wedged: since the latch's start"                     "$(at 1100)" "null null $((NOW + 1000))"
+watch 1200; eq "10 wedged: a watch started again does not wake again" "$RC" 4
+eq  "10 wedged: and since is the same over the same screen"  "$(at 1200)" "null null $((NOW + 1000))"
+printf 'frame two\n' > "$STUB_PANE"
+watch 1300; watch 1400; has "10 wedged: a screen that moved wakes again" "$OUT" 'wedged: r-1'
+eq  "10 wedged: with a new since"                            "$(at 1400)" "null null $((NOW + 1300))"
+rm -f "$H3/config/hand-wedged"
+
+# waiting
+printf 'waiting\n' > "$STUB_ATTN"
+watch 2000; eq "10 waiting: the first look starts the latch"       "$RC" 4
+watch 2090; has "10 waiting: the watch wakes at the dwell"         "$OUT" 'r-1 is waiting'
+eq  "10 waiting: the watch gone, since null"                 "$(at 2090 off)" 'null null null'
+eq  "10 waiting: since the latch's start"                    "$(at 2090)" "$((NOW + 2000)) null null"
+watch 2200; eq "10 waiting: a watch started again does not wake again" "$RC" 4
+eq  "10 waiting: and since is the same over the same dialog" "$(at 2200)" "$((NOW + 2000)) null null"
+printf 'working\n' > "$STUB_ATTN"; watch 2300
+printf 'waiting\n' > "$STUB_ATTN"; watch 2400; watch 2490
+has "10 waiting: a new dialog wakes again"                   "$OUT" 'r-1 is waiting'
+eq  "10 waiting: with a new since"                           "$(at 2490)" "$((NOW + 2400)) null null"
 
 echo "passed=$PASS failed=$FAIL"
 [ "$FAIL" -eq 0 ]
