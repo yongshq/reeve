@@ -5,15 +5,29 @@ ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 PASS=0; FAIL=0
 ok()  { PASS=$((PASS+1)); printf 'ok    %s\n' "$1"; }
 bad() { FAIL=$((FAIL+1)); printf 'FAIL  %s\n' "$1"; }
-allows() { # allows <office> <tool>
-  python3 -c 'import json,sys; sys.exit(0 if sys.argv[2] in json.load(open(sys.argv[1]))["permissions"]["allow"] else 1)' \
-    "$ROOT/offices/$1.settings.json" "$2"
+OFFICES=${OFFICES:-$ROOT/offices}
+# allows <office> <tool>: 0 allowed, 1 not allowed, 2 settings could not be read.
+# A bare T or a scoped T(...) entry both grant T.
+allows() {
+  python3 -c '
+import json, sys
+try:
+    allow = json.load(open(sys.argv[1]))["permissions"]["allow"]
+except Exception:
+    sys.exit(2)
+t = sys.argv[2]
+sys.exit(0 if any(e == t or e.startswith(t + "(") for e in allow) else 1)' \
+    "$OFFICES/$1.settings.json" "$2"
+}
+expect() { # expect <office> <tool> <allow|deny>
+  allows "$1" "$2"; local rc=$?
+  if [ "$rc" -eq 2 ]; then bad "$1 settings unreadable ($2)"
+  elif [ "$3" = allow ]; then [ "$rc" -eq 0 ] && ok "$1 allows $2" || bad "$1 allows $2"
+  else [ "$rc" -eq 1 ] && ok "$1 does not allow $2" || bad "$1 must not allow $2"; fi
 }
 for t in WebSearch WebFetch; do
-  allows scout "$t" && ok "scout allows $t" || bad "scout allows $t"
-  for o in artificer warden scribe steward; do
-    allows "$o" "$t" && bad "$o must not allow $t" || ok "$o does not allow $t"
-  done
+  expect scout "$t" allow
+  for o in artificer warden scribe steward; do expect "$o" "$t" deny; done
 done
 echo "passed=$PASS failed=$FAIL"
 [ "$FAIL" -eq 0 ]

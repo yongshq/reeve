@@ -53,6 +53,7 @@ the user's terminal:
 | `--settings <file>` with an explicit `allow` list | **works.** No dialog, no prompt, Bash runs |
 | the same, on a machine with any MCP tool source | **stalls, silently.** An inherited MCP tool falls outside the allow list and raises a consent dialog. `--strict-mcp-config --no-chrome`, with no `--mcp-config`, starts the hand with no MCP tools at all and removes the class |
 | the same, plus `--mcp-config` naming the household browser alone, its tools in the allow list | **works.** Only that server's tools load and a call to one raises no dialog. See the household browser below |
+| the same, scout settings, claude 2.1.308, interactive | **works.** `WebSearch` and `WebFetch` ran with no dialog; the same prompt under the warden settings raised "Do you want to proceed?" |
 
 The first row is the trap, because it *looks* like it works: common commands match the user's own
 `settings.local.json` allow list and run fine, so a hand gets minutes into real work before hitting
