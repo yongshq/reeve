@@ -60,7 +60,7 @@ claude
 | Office | For | Can write |
 |---|---|---|
 | artificer | building and fixing code | its worktree |
-| scout | investigating, root-causing, mapping | its report only, `Edit` denied |
+| scout | investigating, root-causing, mapping | its report only, `Edit` denied; may search the web and fetch pages |
 | warden | reviewing finished work in a fresh context | its review only, `Edit` denied |
 | scribe | docs and prose | its worktree |
 | steward | memory maintenance | the reeve's home only |

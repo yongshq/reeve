@@ -1,7 +1,7 @@
 {
   "permissions": {
     "defaultMode": "acceptEdits",
-    "allow": ["Bash", "Read", "Write", "Glob", "Grep", "TodoWrite"],
+    "allow": ["Bash", "Read", "Write", "Glob", "Grep", "TodoWrite", "WebSearch", "WebFetch"],
     "deny": ["Edit", "NotebookEdit"]
   }
 }
