@@ -266,7 +266,8 @@ if [ "$harness" = claude ] && [ "$writes" != home ]; then
       exit 1
     elif [ "$dry" = yes ]; then
       printf '  would grant trust: %s, under trusted root %s\n' "$repo" "$trust_root"
-    elif granted=$("$BIN/reeve-trust" --grant "$repo" 2>&1); then
+    elif granted=$("$BIN/reeve-trust" --grant "$repo" 2>&1) \
+         && "$BIN/reeve-trust" --check "$repo" >/dev/null 2>&1; then
       info "trust granted: $repo, under trusted root $trust_root ($(printf '%s\n' "$granted" | sed -n 's/^  backup: /backup /p'))"
     else
       printf 'reeve: refusing to dispatch into %s: granting trust under %s failed\n' "$repo" "$trust_root" >&2

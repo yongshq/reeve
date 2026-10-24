@@ -52,11 +52,21 @@ else
   printf '              so a sweep keeps branches landed under other commit ids\n'
 fi
 roots=$("$BIN/reeve-trust" --roots)
+skipped=$(printf '%s\n' "$roots" | sed -n 's/^skipped //p')
+roots=$(printf '%s\n' "$roots" | grep -v '^skipped ' || true)
 if [ -n "$roots" ]; then
   printf '  grants      trusted roots (%s), claude trust granted at dispatch under:\n' "$(config_file trusted-roots)"
   printf '%s\n' "$roots" | sed 's/^/                /'
+elif [ -f "$(config_file trusted-roots)" ] && [ -n "$skipped" ]; then
+  printf '  grants      no usable trusted roots (%s has lines, all skipped)\n' "$(config_file trusted-roots)"
+elif [ -f "$(config_file trusted-roots)" ]; then
+  printf '  grants      no trusted roots (%s has no root lines, only comments or blanks)\n' "$(config_file trusted-roots)"
 else
-  printf '  grants      no trusted roots (%s absent or empty)\n' "$(config_file trusted-roots)"
+  printf '  grants      no trusted roots (%s absent)\n' "$(config_file trusted-roots)"
+fi
+if [ -n "$skipped" ]; then
+  printf '%s\n' "$skipped" | sed 's/^/              skipped: /'
+  WARN=$((WARN+1))
 fi
 
 # --- sessions ----------------------------------------------------------------

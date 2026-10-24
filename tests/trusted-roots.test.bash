@@ -66,7 +66,10 @@ cat > "$ROOTS" <<EOF
 relative/path
 /no/such/root
 EOF
-eq  "1 comments, blanks, relative and missing lines are skipped" "$("$TRUST" --roots)" "$SCRATCH/yong"
+roots_out=$("$TRUST" --roots)
+has "1 comments, blanks and dot-dot lines resolve to the real root"  "$roots_out" "$SCRATCH/yong"
+has "1 a relative line is named as skipped, with its reason"          "$roots_out" "skipped relative/path (not an absolute path)"
+has "1 a missing path is named as skipped, with its reason"           "$roots_out" "skipped /no/such/root (not a directory)"
 eq  "1 a repository directly under the root"                "$("$TRUST" --root-for "$SCRATCH/yong/a")" "$SCRATCH/yong"
 eq  "1 one further down"                                    "$("$TRUST" --root-for "$SCRATCH/yong/deep/b")" "$SCRATCH/yong"
 eq  "1 a worktree elsewhere resolves to its repository"     "$("$TRUST" --root-for "$SCRATCH/elsewhere/a.wt")" "$SCRATCH/yong"
@@ -79,6 +82,27 @@ eq  "1 a repository outside every root"                     "$?" 1
 ln -s "$SCRATCH/yong" "$SCRATCH/alias"
 printf '%s\n' "$SCRATCH/alias" > "$ROOTS"
 eq  "1 a root named through a symlink resolves to its real path" "$("$TRUST" --root-for "$SCRATCH/yong/a")" "$SCRATCH/yong"
+printf '%s # mine\n' "$SCRATCH/yong" > "$ROOTS"
+has "1 an inline comment is named as skipped"                 "$("$TRUST" --roots)" "(inline comment"
+"$TRUST" --root-for "$SCRATCH/yong/a" >/dev/null 2>&1
+eq  "1 and grants nothing"                                    "$?" 1
+mkdir -p "$SCRATCH/Case/Sub"; mkrepo "$SCRATCH/Case/Sub/r"
+lower=$(printf '%s' "$SCRATCH/Case" | tr '[:upper:]' '[:lower:]')
+if [ -d "$lower" ] && [ "$(cd -P "$lower" && pwd -P)" != "" ] && [ -e "$lower/Sub" ] && [ "$lower" != "$SCRATCH/Case" ]; then
+  printf '%s\n' "$lower" > "$ROOTS"
+  eq  "1 a root typed in the wrong case matches on a case-insensitive disk" "$("$TRUST" --root-for "$SCRATCH/Case/Sub/r")" "$SCRATCH/Case"
+else
+  ok  "1 (case-sensitive disk: wrong-case root test not applicable)"
+fi
+printf '/\n' > "$ROOTS"
+has "1 a root of / is named as too broad"                     "$("$TRUST" --roots)" "skipped / (too broad"
+"$TRUST" --root-for "$SCRATCH/yong/a" >/dev/null 2>&1
+eq  "1 and never matches"                                     "$?" 1
+printf '%s\n%s\n' "$SCRATCH/yong" "$SCRATCH" > "$ROOTS"
+eq  "1 the home directory and its parent are both too broad"  "$(HOME="$SCRATCH/yong" "$TRUST" --roots | grep -c 'too broad')" 2
+HOME="$SCRATCH/yong" "$TRUST" --root-for "$SCRATCH/yong/a" >/dev/null 2>&1
+eq  "1 and never match"                                       "$?" 1
+printf '%s\n' "$SCRATCH/alias" > "$ROOTS"
 eq  "1 --check is unchanged: still not trusted"             "$("$TRUST" --check "$SCRATCH/yong/a" >/dev/null 2>&1; echo $?)" 1
 
 # --- dispatch, with a stub backend and a claude harness that runs nothing ----
@@ -152,6 +176,23 @@ printf '# %s\n\n' "$SCRATCH/yong" > "$ROOTS"
 go "$SCRATCH/yong/deep/b"
 eq  "6 a commented root grants nothing"                     "$RC" 1
 eq  "6 the config is untouched for it"                      "$(trusted "$SCRATCH/yong/deep/b")" None
+
+echo "--- 7. a grant that fails is not reported as one ---"
+printf '%s\n' "$SCRATCH/yong" > "$ROOTS"
+good_cfg=$(cat "$CLAUDE_CONFIG")
+printf '{"projects": {' > "$CLAUDE_CONFIG"
+cfg_before=$(cksum < "$CLAUDE_CONFIG")
+go "$SCRATCH/yong/deep/b"
+eq  "7 dispatch refuses"                                    "$RC" 1
+nas "7 and never says trust was granted"                    "$ERR$OUT" "trust granted"
+has "7 naming the failed grant"                             "$ERR" "granting trust under $SCRATCH/yong failed"
+eq  "7 the config is left as it was"                        "$(cksum < "$CLAUDE_CONFIG")" "$cfg_before"
+"$TRUST" --grant "$SCRATCH/yong/deep/b" >/dev/null 2>&1
+eq  "7 reeve-trust --grant itself exits non-zero"           "$?" 1
+out=$("$TRUST" --grant "$SCRATCH/yong/deep/b" 2>&1)
+has "7 saying where the backup is"                          "$out" "grant failed;"
+nas "7 and not claiming it granted"                         "$out" "granted."
+printf '%s\n' "$good_cfg" > "$CLAUDE_CONFIG"
 
 echo "passed=$PASS failed=$FAIL"
 [ "$FAIL" -eq 0 ]

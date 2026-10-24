@@ -7,7 +7,8 @@
 #   reeve-trust --grant <repo-path>     record trust, after backing the file up
 #   reeve-trust --root-for <repo-path>  print the trusted root it sits under,
 #                                       exit 0 if one, 1 if none
-#   reeve-trust --roots                 the trusted roots, as resolved
+#   reeve-trust --roots                 the trusted roots, as resolved, then each
+#                                       skipped line as `skipped <line> (<why>)`
 #   reeve-trust --list
 #
 # Why this exists. A directory claude has not been trusted for raises a full
@@ -32,20 +33,59 @@
 
 CFG="${CLAUDE_CONFIG:-$HOME/.claude.json}"
 
-# trusted_roots -> each root of config/trusted-roots that exists, resolved to
-# its real path, one per line. A relative line, or one naming nothing on disk,
-# is skipped: it cannot be compared honestly.
-trusted_roots() {
-  local f line r
+# canon_path <dir> -> the directory's real path in its on-disk case. Symlinks
+# and `..` are resolved, then each component is matched against its parent's
+# listing, so a root typed /users/yong on case-insensitive APFS compares equal
+# to the path git reports for a repository under /Users/yong.
+canon_path() {
+  python3 - "$1" <<'PY'
+import os,sys
+p=os.path.realpath(sys.argv[1])
+if not os.path.isdir(p): sys.exit(1)
+cur='/'
+for comp in [c for c in p.split('/') if c]:
+    try: names=os.listdir(cur)
+    except OSError: names=[]
+    if comp not in names:
+        m=[n for n in names if n.casefold()==comp.casefold()]
+        if len(m)==1: comp=m[0]
+    cur=os.path.join(cur,comp)
+print(cur)
+PY
+}
+
+# trusted_roots_scan -> one line per usable line of config/trusted-roots:
+# `root <real path>`, or `skipped <line> (<reason>)`. A line that cannot be
+# compared honestly is skipped, and says why. A root that is / or the home
+# directory, or any ancestor of it, is too broad: it would trust everything.
+trusted_roots_scan() {
+  local f line r home
   f=$(config_file trusted-roots)
   [ -f "$f" ] || return 0
+  home=$(canon_path "${HOME:-/nonexistent-home}" 2>/dev/null) || home=''
   while IFS= read -r line || [ -n "$line" ]; do
     line=${line#"${line%%[![:space:]]*}"}; line=${line%"${line##*[![:space:]]}"}
-    case $line in ''|'#'*) continue ;; /*) ;; *) continue ;; esac
-    r=$(cd -P "$line" 2>/dev/null && pwd -P) || continue
-    printf '%s\n' "$r"
+    case $line in ''|'#'*) continue ;; esac
+    case $line in
+      *[[:space:]]'#'*) printf 'skipped %s (inline comment: comments take a line of their own)\n' "$line"; continue ;;
+      /*) ;;
+      *) printf 'skipped %s (not an absolute path)\n' "$line"; continue ;;
+    esac
+    r=$(canon_path "$line" 2>/dev/null) || { printf 'skipped %s (not a directory)\n' "$line"; continue; }
+    case $r in
+      /) printf 'skipped %s (too broad: it is /)\n' "$line"; continue ;;
+    esac
+    if [ -n "$home" ]; then
+      case $home in
+        "$r"|"${r%/}"/*) printf 'skipped %s (too broad: it is the home directory or above it)\n' "$line"; continue ;;
+      esac
+    fi
+    printf 'root %s\n' "$r"
   done < "$f"
 }
+
+# trusted_roots -> the usable roots only, one per line.
+trusted_roots() { trusted_roots_scan | sed -n 's/^root //p'; }
 
 mode=${1:-}; target=${2:-}
 case $mode in
@@ -66,12 +106,12 @@ case $mode in
     fi
     ;;
   --list) ;;
-  --roots) trusted_roots; exit 0 ;;
+  --roots) trusted_roots_scan | sed -e 's/^root //' ; exit 0 ;;
   *) print_help "$0"; exit 0 ;;
 esac
 
 if [ "$mode" = --root-for ]; then
-  real=$(cd -P "$target" && pwd -P)
+  real=$(canon_path "$target") || exit 1
   while IFS= read -r r; do
     [ -n "$r" ] || continue
     case $real in "$r"|"${r%/}"/*) printf '%s\n' "$r"; exit 0 ;; esac
@@ -126,7 +166,7 @@ PY
     cp "$CFG" "$bak" || die "could not back up $CFG"
     # Written via a temp file and rename so an interrupted write cannot leave
     # the liege with a truncated claude configuration.
-    python3 - "$CFG" "$target" "$bak" <<'PY'
+    python3 - "$CFG" "$target" "$bak" <<'PY' || die "grant failed; $CFG unchanged, backup at $bak"
 import json,sys,os
 cfg,repo,bak=sys.argv[1],sys.argv[2],sys.argv[3]
 with open(cfg) as f: d=json.load(f)

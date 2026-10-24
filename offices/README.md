@@ -145,6 +145,11 @@ tool-shaped route the grant itself opens, and claims nothing more.
 ## Folder trust
 
 A directory claude has never seen raises a separate trust dialog, which no permission setting
-suppresses. In practice worktrees inherit trust from an already trusted parent, which is why
-a worktree of a repository you have already trusted never sees it. A holding somewhere untrusted
-will stall every hand on its first launch, so `bin/reeve-doctor` checks for this and says so.
+suppresses. Claude keys trust to the git repository (the main working tree), so every worktree of a
+trusted repository is covered, but a trusted ancestor directory is not honoured: the household
+grants per repository, not per parent. A holding somewhere untrusted will stall every hand on its
+first launch, so `bin/reeve-doctor` checks for this and says so. Roots the liege lists in
+`config/trusted-roots` (absolute paths, one per line, whole-line `#` comments) let dispatch make
+that per-repository grant itself for any repository under one, and refuse if the grant did not hold.
+`/`, the home directory and its ancestors are refused as too broad; `reeve-trust --roots` and
+`bin/reeve-doctor` name every skipped line and why.
