@@ -255,12 +255,24 @@ done
 # --- preflight: will this harness actually be able to start here -----------
 # claude keys folder trust to the git repository, so a worktree of an untrusted
 # repository raises a dialog no hand can answer. Refusing here costs a second;
-# discovering it later costs a hand that looks alive forever.
+# discovering it later costs a hand that looks alive forever. Under a root the
+# liege trusted in config/trusted-roots, the grant is already theirs, so it is
+# made here instead.
 if [ "$harness" = claude ] && [ "$writes" != home ]; then
   if ! "$BIN/reeve-trust" --check "$repo" >/dev/null 2>&1; then
-    printf 'reeve: refusing to dispatch into %s\n' "$repo" >&2
-    "$BIN/reeve-trust" --check "$repo" 2>&1 >/dev/null | sed 's/^/  /' >&2
-    exit 1
+    if ! trust_root=$("$BIN/reeve-trust" --root-for "$repo" 2>/dev/null); then
+      printf 'reeve: refusing to dispatch into %s\n' "$repo" >&2
+      "$BIN/reeve-trust" --check "$repo" 2>&1 >/dev/null | sed 's/^/  /' >&2
+      exit 1
+    elif [ "$dry" = yes ]; then
+      printf '  would grant trust: %s, under trusted root %s\n' "$repo" "$trust_root"
+    elif granted=$("$BIN/reeve-trust" --grant "$repo" 2>&1); then
+      info "trust granted: $repo, under trusted root $trust_root ($(printf '%s\n' "$granted" | sed -n 's/^  backup: /backup /p'))"
+    else
+      printf 'reeve: refusing to dispatch into %s: granting trust under %s failed\n' "$repo" "$trust_root" >&2
+      printf '%s\n' "$granted" | sed 's/^/  /' >&2
+      exit 1
+    fi
   fi
 fi
 

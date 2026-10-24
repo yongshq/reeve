@@ -5,6 +5,9 @@
 # Usage:
 #   reeve-trust --check <repo-path>     exit 0 if trusted, 1 if not, 2 if unknown
 #   reeve-trust --grant <repo-path>     record trust, after backing the file up
+#   reeve-trust --root-for <repo-path>  print the trusted root it sits under,
+#                                       exit 0 if one, 1 if none
+#   reeve-trust --roots                 the trusted roots, as resolved
 #   reeve-trust --list
 #
 # Why this exists. A directory claude has not been trusted for raises a full
@@ -14,16 +17,39 @@
 # git REPOSITORY, not the directory, so every worktree of a trusted repository
 # inherits it and every worktree of an untrusted one stalls.
 #
-# Granting is never automatic. This writes to the liege's own global claude
-# configuration, so it is a command they run knowingly, once per repository.
+# Granting is never automatic, save under a root the liege named. This writes
+# to the liege's own global claude configuration, so it is a command they run
+# knowingly, once per repository. Or once per root: config/trusted-roots in the
+# reeve home lists absolute paths, one per line, `#` comments and blank lines
+# ignored, and reeve-dispatch grants trust itself for a repository whose main
+# working tree is that path or under it. No file, no roots. Compared on real
+# paths, a whole path component at a time, so /a/b2 is not under /a/b.
+# Measured on claude 2.1.308: claude itself does not honour a trusted ancestor,
+# a repository under one still raises the dialog, so the grant is per repository
+# either way.
 
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/reeve-lib.sh"
 
 CFG="${CLAUDE_CONFIG:-$HOME/.claude.json}"
 
+# trusted_roots -> each root of config/trusted-roots that exists, resolved to
+# its real path, one per line. A relative line, or one naming nothing on disk,
+# is skipped: it cannot be compared honestly.
+trusted_roots() {
+  local f line r
+  f=$(config_file trusted-roots)
+  [ -f "$f" ] || return 0
+  while IFS= read -r line || [ -n "$line" ]; do
+    line=${line#"${line%%[![:space:]]*}"}; line=${line%"${line##*[![:space:]]}"}
+    case $line in ''|'#'*) continue ;; /*) ;; *) continue ;; esac
+    r=$(cd -P "$line" 2>/dev/null && pwd -P) || continue
+    printf '%s\n' "$r"
+  done < "$f"
+}
+
 mode=${1:-}; target=${2:-}
 case $mode in
-  --check|--grant)
+  --check|--grant|--root-for)
     [ -n "$target" ] || die "$mode needs a repository path"
     [ -d "$target" ] || die "no such directory: $target"
     # trust follows the repository, so resolve to its toplevel first. A linked
@@ -40,8 +66,20 @@ case $mode in
     fi
     ;;
   --list) ;;
+  --roots) trusted_roots; exit 0 ;;
   *) print_help "$0"; exit 0 ;;
 esac
+
+if [ "$mode" = --root-for ]; then
+  real=$(cd -P "$target" && pwd -P)
+  while IFS= read -r r; do
+    [ -n "$r" ] || continue
+    case $real in "$r"|"${r%/}"/*) printf '%s\n' "$r"; exit 0 ;; esac
+  done <<ROOTS_EOF
+$(trusted_roots)
+ROOTS_EOF
+  exit 1
+fi
 
 [ -f "$CFG" ] || { [ "$mode" = --check ] && exit 2; die "no claude config at $CFG"; }
 

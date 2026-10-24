@@ -51,6 +51,13 @@ else
   printf '  grants      proven-delete not recorded (%s absent)\n' "$(config_file proven-delete)"
   printf '              so a sweep keeps branches landed under other commit ids\n'
 fi
+roots=$("$BIN/reeve-trust" --roots)
+if [ -n "$roots" ]; then
+  printf '  grants      trusted roots (%s), claude trust granted at dispatch under:\n' "$(config_file trusted-roots)"
+  printf '%s\n' "$roots" | sed 's/^/                /'
+else
+  printf '  grants      no trusted roots (%s absent or empty)\n' "$(config_file trusted-roots)"
+fi
 
 # --- sessions ----------------------------------------------------------------
 # Several reeves share one home, and each watches only what it briefed. Running
@@ -197,7 +204,9 @@ if [ -f "$(manors_file)" ]; then
     p=$(holding_field "$h" path '')
     trust=''
     if command -v claude >/dev/null 2>&1 && [ -d "$p" ]; then
-      "$BIN/reeve-trust" --check "$p" >/dev/null 2>&1 || { trust='   NOT TRUSTED by claude'; WARN=$((WARN+1)); }
+      if "$BIN/reeve-trust" --check "$p" >/dev/null 2>&1; then :
+      elif r=$("$BIN/reeve-trust" --root-for "$p" 2>/dev/null); then trust="   not trusted yet, dispatch grants it (under $r)"
+      else trust='   NOT TRUSTED by claude'; WARN=$((WARN+1)); fi
     fi
     printf '    %-14s %-12s %s%s%s\n' "$h" "$(holding_field "$h" manor '?')" "$p" \
       "$([ -d "$p" ] || printf '   MISSING ON DISK')" "$trust"

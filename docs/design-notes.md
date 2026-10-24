@@ -83,6 +83,14 @@ and `bin/reeve-doctor` marks it. Granting is a separate deliberate command,
 backs the file up first and writes through a temporary file, so an interrupted write cannot leave a
 truncated config.
 
+A liege who trusts everything under a directory says so once, as a line in
+`$REEVE_HOME/config/trusted-roots` (absolute paths, `#` comments). Dispatch then runs that same
+grant itself for an untrusted repository whose main working tree is the root or under it, compared
+on real paths a whole component at a time, and prints one line naming the root. Outside every root,
+or with no file, it refuses exactly as before: trust there stays the liege's decision. Measured on
+claude 2.1.308: claude does not honour a trusted ancestor itself, a repository under one still
+raises the dialog, so the grant stays per repository.
+
 This is the one genuinely harness specific thing in the system, which is why it lives in a file
 named after the harness rather than inside dispatch.
 
