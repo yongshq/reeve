@@ -58,9 +58,13 @@ mcp_flag = "--strict-mcp-config --no-chrome"
 # Measured on 2.1.285 in a detached session, artificer settings, the machine
 # carrying a user level chrome-devtools server: the hand listed 30 tools, every
 # one mcp__reeve-browser__*, asked again a minute in still none other, and
-# new_page, take_screenshot and evaluate_script all ran with no dialog. The
-# Chrome it launched ran headless on --remote-debugging-pipe, no port, with a
-# temporary profile, and both were gone once the session closed.
+# new_page, take_screenshot and evaluate_script all ran with no dialog. That
+# measurement was the isolated form, config/browser-mode isolated: the Chrome it
+# launched ran headless on --remote-debugging-pipe, no port, with a temporary
+# profile, and both were gone once the session closed. The shared form, the
+# default on macOS, launches nothing: the server attaches with --browserUrl to
+# the household's one long-running headless Chrome (bin/reeve-browser), which
+# outlives the session (browser_mode in bin/reeve-lib.sh).
 browser_flag = "--mcp-config {browser}"
 
 # Grants tool access to the errand directory, where the brief, the status file

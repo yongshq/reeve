@@ -2864,21 +2864,44 @@ BROWSER_BIN=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # One recorded under BROWSER_GRACE seconds ago (browserSince=) that reads dead
 # still counts, as a hand starting; missing never does, since a freed session
 # reads missing however young it is.
+#
+# The records worth asking about are picked by one awk over every record, never
+# a read per record: the watch and the caretaker ask this on every poll while
+# the browser is down, which is the normal idle state, and a meta_get per record
+# over a home of hundreds cost seconds a poll. Each key's first line wins, as
+# meta_get reads it, and a thousand records per awk, as bin/reeve-listing does.
+BROWSER_USERS_AWK='
+  BEGIN {
+    for (a = 1; a < ARGC; a++) {
+      f = ARGV[a]; split("", v); split("", got)
+      while ((getline line < f) > 0) {
+        i = index(line, "="); if (i < 2) continue
+        k = substr(line, 1, i - 1); if (k in got) continue
+        got[k] = 1; v[k] = substr(line, i + 1)
+      }
+      close(f)
+      if (v["browserMode"] == "shared" && v["tornDown"] == "") print f
+    }
+    exit
+  }'
 browser_shared_users() {
-  local f i held tgt since now
+  local f i held tgt since now metas found n=0
   now=$(date +%s)
-  for f in "$REEVE_HOME_D"/state/*.meta; do
-    [ -f "$f" ] || continue
+  metas=("$REEVE_HOME_D"/state/*.meta)
+  [ -f "${metas[0]}" ] || return 0
+  found=$(while [ "$n" -lt ${#metas[@]} ]; do
+            awk "$BROWSER_USERS_AWK" "${metas[@]:$n:1000}"; n=$((n + 1000))
+          done)
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
     i=$(basename "$f" .meta)
-    [ "$(meta_get "$i" browserMode '')" = shared ] || continue
-    [ -z "$(meta_get "$i" tornDown '')" ] || continue
     held=$(meta_get "$i" browserHeld '')
     if { [ -n "$held" ] && kill -0 "$held" 2>/dev/null; } || [ -n "$(meta_get "$i" launching '')" ]; then
       printf '%s\n' "$i"; continue
     fi
     tgt=$(meta_get "$i" target '')
     [ -n "$tgt" ] || continue
-    case $("$BROWSER_BIN/reeve-backend" call agent_state "$tgt" --backend "$(meta_get "$i" backend herdr)" 2>/dev/null) in
+    case $("$BROWSER_BIN/reeve-backend" call agent_state "$tgt" --backend "$(meta_get "$i" backend herdr)" 2>/dev/null </dev/null) in
       missing) ;;
       dead)
         since=$(meta_get "$i" browserSince '')
@@ -2886,14 +2909,18 @@ browser_shared_users() {
         [ $((now - since)) -ge "$BROWSER_GRACE" ] || printf '%s\n' "$i" ;;
       *) printf '%s\n' "$i" ;;
     esac
-  done
+  done <<USERS
+$found
+USERS
 }
 
 # browser_shared_tend   restart the shared browser when it has died under
 # errands still using it, so a hand whose tools lost it gets it back within one
 # poll: its server reconnects by itself on the next call, and the office text
 # has it open fresh pages. Run by the watch and the caretaker on every poll.
-# Cheap while the browser lives, the one case it asks the backends nothing. It
+# Cheap while the browser lives, the one case it asks the backends nothing, and
+# while it is down with no errand recorded as using it, the normal idle state:
+# one awk over the records (browser_shared_users). It
 # restarts the Chrome the last start ran (state/browser/chrome), so it needs no
 # node on the caretaker's PATH. A restart that fails is not retried for
 # BROWSER_RETRY seconds (state/browser/tend-failed), so a Chrome that will not

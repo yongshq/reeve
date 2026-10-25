@@ -161,9 +161,11 @@ same "2 the home and the code root are untouched" "$before" "$after"
 
 # --- 3. a real dispatch still copies it --------------------------------------
 # Asserted on the file and the record, never by starting a session: the stub
-# backend's launch does nothing, so nothing is ever running.
+# backend's launch does nothing, so nothing is ever running. No caretaker either:
+# one left on this home restamps state/.sentry.lock every poll, and every later
+# manifest comparison would race it.
 brief_for real artificer || bad "3 reeve-brief refused"
-dispatch real stub
+REEVE_NO_CARETAKER=1 dispatch real stub
 settings="$REEVE_HOME/errands/real/settings.json"
 eq  "3 a real dispatch succeeds"              "$RC" 0
 eq  "3 the settings file is there"            "$([ -f "$settings" ] && echo present || echo absent)" present
@@ -178,6 +180,7 @@ case $(grep -m1 '^branchMade=' "$REEVE_HOME/state/real.meta") in
          "$(grep '^branchMade=' "$REEVE_HOME/state/real.meta")" ;;
 esac
 eq  "3 the copy was really created"           "$([ -d "$WORKTREES/artificer-real" ] && echo present || echo absent)" present
+eq  "3 and no caretaker holds this home"      "$([ -e "$REEVE_HOME/state/.sentry.lock" ] && echo present || echo absent)" absent
 
 # --- 4. and a dry run after a real one changes nothing either ----------------
 # The errand directory now holds a settings.json. An unguarded copy would

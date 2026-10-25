@@ -12,6 +12,9 @@
 #   5. the watch's tend restarts it when it died under a user, and only then
 #   6. every start begins with an empty default context, and keeps the rest
 #      of the profile, whose loss would cost a Dock restart
+#   7. a crashed last user lets it go at its cleanup, even one that refuses
+#   8. the tend's idle state, down with nobody using it, reads no record one
+#      at a time
 #
 # Chrome is a stand-in: a small python server that answers /json/version on the
 # port it is given, exec'd so it keeps the pid it was started with, as Chrome
@@ -281,6 +284,72 @@ lib browser_shared_ensure "$fake" >/dev/null
 eq  "6 a new start finds no page storage" \
     "$([ -e "$prof/Default" ] && echo present || echo absent)" absent
 eq  "6 and keeps the rest of the profile"        "$(cat "$prof/Local State" 2>/dev/null)" "browser state"
+
+# --- 7. a crashed last user lets go at its cleanup ----------------------------
+# Its session reads dead or missing, so nothing dismisses it, and its unlanded
+# branch makes the cleanup refuse: the browser is released before that refusal.
+rm -f "$REEVE_HOME"/state/*.meta
+repo="$SCRATCH/holding"; copy="$SCRATCH/holding.worktrees/crashed"
+git init -q "$repo"
+git -C "$repo" symbolic-ref HEAD refs/heads/main
+gitc() { git -C "$1" -c user.email=reeve@example.invalid -c user.name=reeve -c commit.gpgsign=false "${@:2}"; }
+gitc "$repo" commit -q --allow-empty -m init
+git -C "$repo" worktree add -q -b fix/crashed "$copy" main
+gitc "$copy" commit -q --allow-empty -m 'work that never landed'
+crashed() {
+  rec crashed browserMode=shared target=stub:1 "browserSince=$(( $(date +%s) - 600 ))" \
+      "repo=$repo" "worktree=$copy" branch=fix/crashed base=main
+}
+for st in dead missing; do
+  lib browser_shared_ensure "$fake" >/dev/null
+  echo "$st" > "$STATES/1"
+  crashed
+  "$ROOT/bin/reeve-teardown" crashed --dry-run >/dev/null 2>&1
+  has "7 a dry run leaves it up ($st)"            "$("$B" status)" "state     running"
+  "$ROOT/bin/reeve-teardown" crashed >/dev/null 2>&1; rc=$?
+  eq  "7 the cleanup refuses on the unlanded branch ($st)" "$rc" 3
+  has "7 and still stops the browser ($st)"       "$("$B" status)" "state     stopped"
+done
+lib browser_shared_ensure "$fake" >/dev/null
+rec busy browserMode=shared target=stub:2
+"$ROOT/bin/reeve-teardown" crashed >/dev/null 2>&1
+has "7 but not while another errand uses it"     "$("$B" status)" "state     running"
+eq  "7 and the copy is kept"                     "$([ -d "$copy" ] && echo present || echo absent)" present
+rm -f "$STATES/1"
+
+# --- 8. the idle tend reads no record one at a time --------------------------
+# Down with no errand using it is the normal idle state, asked on every poll.
+# Torn down shared records and isolated ones are passed over by one awk; only a
+# shared record still standing is read field by field.
+"$B" stop >/dev/null 2>&1
+rm -f "$REEVE_HOME/state/browser/stopped"
+rm -f "$REEVE_HOME"/state/*.meta
+n=0
+while [ "$n" -lt 50 ]; do
+  rec "old$n" browserMode=shared target= tornDown=2026-10-25T00:00:00
+  rec "iso$n" browserMode=isolated target=stub:1
+  n=$((n + 1))
+done
+counted() { # counted <fn>   run it with meta_get counted into $SCRATCH/reads
+  : > "$SCRATCH/reads"
+  "$BASH" -c '. "$1/bin/reeve-lib.sh"
+    eval "orig_$(declare -f meta_get)"
+    meta_get() { echo "$2" >> "$READS"; orig_meta_get "$@"; }
+    "$2"' _ "$ROOT" "$1" 2>&1
+  wc -l < "$SCRATCH/reads" | tr -d ' '
+}
+export READS="$SCRATCH/reads"
+out=$(counted browser_shared_tend)
+eq  "8 a hundred records not using it: no read per record" "$out" 0
+nas "8 and nothing is started"                   "$("$B" status)" "state     running"
+rec busy browserMode=shared target=stub:1
+out=$(counted browser_shared_tend)
+has "8 one still using it is still found"        "$out" "restarted the shared browser at http://127.0.0.1:$port for: busy"
+rec busy browserMode=shared tornDown= target=stub:1 tornDown=2026-10-25T00:00:00
+rec first browserMode=shared browserMode=isolated target=stub:1
+rec second browserMode=isolated browserMode=shared target=stub:1
+eq "8 each key's first line wins, as meta_get reads it" "$(lib browser_shared_users)" "busy
+first"
 
 echo
 echo "passed=$PASS failed=$FAIL"

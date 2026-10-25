@@ -590,7 +590,7 @@ ERRAND_LOCK=$(lock_acquire "errand-$id" 15) || exit 4
 trap 'lock_release "$ERRAND_LOCK"' EXIT
 
 run() { if [ "$dry" = yes ]; then printf '  would run: %s\n' "$*"; else "$@"; fi; }
-dismiss=no; dismissed=no
+dismiss=no; dismissed=no; gone=no
 # Set by require_base when base= did not resolve and the default branch was
 # asked alone, so every refusal after that point says the base was missing
 # rather than reading as though it had been asked.
@@ -670,6 +670,7 @@ endpoint_check() { # endpoint_check <endpoint>: refuse while a hand works there
       esac ;;
     unreadable)
       refuse "the state of the endpoint at $ep cannot be read." "Investigate before removing anything: this script cannot tell a working hand from a dead one right now." ;;
+    dead|missing) gone=yes ;;
   esac
 }
 [ -z "$target" ] || endpoint_check "$target"
@@ -699,9 +700,10 @@ if [ "$dismiss" = yes ] && [ -n "$launching" ]; then
 fi
 
 # A freed session no longer uses the shared browser, and it may have been the
-# last one that did. Here rather than below, because the refusals that follow
-# keep the copy, never the session.
-[ "$dismissed" = yes ] && [ "$dry" = no ] && browser_shared_release
+# last one that did. So is one that crashed or was closed: nothing else ever
+# lets go for it, so a crashed last user kept Chrome up for nobody. Here rather
+# than below, because the refusals that follow keep the copy, never the session.
+{ [ "$dismissed" = yes ] || [ "$gone" = yes ]; } && [ "$dry" = no ] && browser_shared_release
 
 if [ "$dismiss_only" = yes ]; then
   [ "$dismissed" = yes ] && info "session freed. The copy and branch are untouched." \
