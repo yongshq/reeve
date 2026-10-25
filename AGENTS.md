@@ -576,7 +576,7 @@ fact per line, because you are the one reading it.
 | `bin/reeve-format-guard` | the Stop hook: sends a reeve reply missing Done this session or Next action back once. Never by hand |
 | `bin/reeve-watch-guard` | the Stop hook: sends a reeve back once when it ends a turn with its own errand in flight and no watch running. Never by hand |
 | `bin/reeve-session-end` / `-start` | the section 10 hooks. `-start --resume` only on the liege's resume |
-| `bin/reeve-browser` | the household's shared headless browser: `status`, `start`, `stop`. Dispatch starts it and teardown stops it, so rarely by hand |
+| `bin/reeve-browser` | the household's shared headless browser: `status`, `start`, `stop`. Dispatch starts it, the watch and caretaker restart it if it dies under a hand, teardown stops it, so rarely by hand |
 | `bin/reeve-trust --check <repo>` | will claude actually be able to start in this repository. `--roots` lists the liege's trusted roots |
 | `bin/reeve-backend` / `bin/reeve-harness` | the two plug axes. Mostly used by dispatch, not by you |
 

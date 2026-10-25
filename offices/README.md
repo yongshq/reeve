@@ -90,13 +90,26 @@ browser comes back as the household's own, not the machine's:
   profile. A port that answers as anything else is refused, never attached to.
 - **Isolation between hands:** at the pinned version a server cannot be confined to one browser
   context, so hands sharing the browser can see each other's pages. The office text closes it by
-  conduct: every page opened with `new_page` in an `isolatedContext` named for the errand (its own
-  cookies and storage), addressed by `pageId` (the server's default page id routing), closed before
-  the hand reports, and never a page the hand did not open.
+  conduct, accepted by the liege because every hand is the household's own and its pages hold
+  invented data: every page created with `new_page` in an `isolatedContext` named for the errand
+  (its own cookies and storage), addressed by `pageId` (the server's default page id routing),
+  closed before the hand reports, never a page found with `list_pages` or created by another hand,
+  and after a browser restart the context and pages created again rather than picked up from the
+  list. It is a rule a warden checks: a breach is a high finding.
+- **Storage:** the shared profile's default context (`Default/`: cookies, storage, cache) is removed
+  each time the browser starts, so nothing a page stores outlives that Chrome, even outside an
+  `isolatedContext`. The rest of the profile is kept on purpose: a Chrome starting on an empty
+  profile restarts the Dock, one starting on a used profile does not, so only the first start on a
+  machine costs one.
 - **Lifecycle:** `bin/reeve-dispatch` starts the shared browser when a hand that wants it goes out,
-  or restarts it if it died. `bin/reeve-teardown` stops it once no errand recorded as using it
-  holds a session, so a land or a sweep, which tear down, stops it too. `bin/reeve-browser
-  status|start|stop` does the same by hand.
+  or restarts it if it died, and a dispatch that fails before its hand is recorded stops it again
+  when nobody else uses it. A `config/browser-mode` that is neither `shared` nor `isolated`
+  refuses the dispatch, never sends a hand out blind. `bin/reeve-teardown` stops it once no errand
+  recorded as using it holds a live session, so a land or a sweep, which tear down, stops it too; a
+  session that is dead or missing no longer counts, even while its errand's record stays. While an
+  errand still uses it, the watch and the caretaker restart it on their next poll if it died, and
+  each hand's tools reconnect by themselves. `bin/reeve-browser status|start|stop` does the same by
+  hand, and a stop by hand stays stopped until the next start or dispatch.
 - **Who:** an office whose settings allow `mcp__reeve-browser`. Today the artificer and the warden.
 - **How:** `bin/reeve-dispatch` writes the server config into the errand directory, beside
   settings.json, and the harness's `browser_flag` passes it next to `--strict-mcp-config

@@ -2767,16 +2767,30 @@ browser_shared_alive() {
 # Started the way the caretaker is, nohup with every stream redirected, so it
 # outlives the dispatch that started it. Flags: what puppeteer gives a Chrome it
 # launches for chrome-devtools-mcp, so a page behaves as it did under
-# --isolated, plus the port and the persistent profile. No automation infobar
-# flag, since headless shows none.
+# --isolated, plus the port and the profile. No automation infobar flag, since
+# headless shows none.
+#
+# The profile's default context, its Default/ directory (cookies, local and
+# session storage, IndexedDB, service workers, cache), is removed before every
+# start, so no page's storage outlives the Chrome that wrote it: a page opened
+# outside an isolatedContext starts as empty as one under --isolated did. The
+# rest of the profile is kept on purpose. A Chrome starting on an empty profile
+# restarts the Dock, as each --isolated launch did; one starting on a used
+# profile with Default/ removed does not (measured with Edge: empty profile,
+# 2 of 2 restarted it; used profile, 4 of 4 did not; Default/ removed, 1 of 1
+# did not). So only the very first start on a machine costs a Dock restart.
+# Only once the port is proven free, so nothing is pulled from under a Chrome
+# still serving there. Any start also lifts a stop by hand
+# (browser_shared_tend).
 browser_shared_ensure() {
   local chrome=$1 port url lock dir prof pid n rc=0
   command -v curl >/dev/null 2>&1 || { printf 'curl is not on PATH\n'; return 1; }
   port=$(browser_port) || { printf '%s\n' "$port"; return 1; }
   url="http://127.0.0.1:$port"
   dir=$(browser_dir); prof=$(browser_profile)
-  mkdir -p "$prof" || { printf 'cannot create %s\n' "$prof"; return 1; }
+  mkdir -p "$dir" || { printf 'cannot create %s\n' "$dir"; return 1; }
   lock=$(lock_acquire browser 30 30) || { printf 'the browser lock is held\n'; return 1; }
+  rm -f "$dir/stopped"
   if browser_shared_alive "$port"; then lock_release "$lock"; printf '%s\n' "$url"; return 0; fi
   # Ours, but not answering as it should: a hung Chrome is stopped, never reused.
   browser_shared_stop_locked
@@ -2785,6 +2799,9 @@ browser_shared_ensure() {
     lock_release "$lock"
     printf 'port %s already answers, and not as the household browser; set config/browser-port\n' "$port"
     return 1
+  fi
+  if ! { rm -rf "$prof/Default" && mkdir -p "$prof"; }; then
+    lock_release "$lock"; printf 'cannot empty the default context at %s/Default\n' "$prof"; return 1
   fi
   nohup "$chrome" --headless=new "--remote-debugging-port=$port" "--user-data-dir=$prof" \
       --no-first-run --no-default-browser-check --use-mock-keychain --password-store=basic \
@@ -2800,6 +2817,7 @@ browser_shared_ensure() {
   pid=$!
   { disown; } 2>/dev/null || :
   printf '%s\n' "$pid" > "$dir/pid"
+  printf '%s\n' "$chrome" > "$dir/chrome"
   # Bounded, 20 seconds, and cut short the moment the Chrome it started exits.
   n=0
   while [ "$n" -lt 40 ] && kill -0 "$pid" 2>/dev/null && ! browser_shared_alive "$port"; do
@@ -2829,22 +2847,84 @@ browser_shared_stop_locked() {
   rm -f "$(browser_dir)/pid"
 }
 
+# BROWSER_GRACE   seconds a freshly recorded session that reads dead still
+# counts as a user: hall reads a hand's pane as a shell with no agent until the
+# harness is up, which is dead to agent_state.
+BROWSER_GRACE=120
+BROWSER_RETRY=300
+BROWSER_BIN=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+
 # browser_shared_users   the errands still using the shared browser, one id a
-# line: recorded as shared, not torn down, and holding a session (target= or
-# launching=), or held by a dispatch still running (browserHeld=, its pid).
+# line: recorded as shared, not torn down, and either held by a dispatch still
+# running (browserHeld=, its pid), mid launch on hall (launching=), or holding a
+# session (target=) that is still there. Still there is the backend's word:
+# alive, or unreadable, since a read that failed proves nothing and the cost of
+# a wrong yes is one resident Chrome; dead or missing is a pane closed or
+# crashed, whose record may outlive it for as long as its branch is unlanded.
+# One recorded under BROWSER_GRACE seconds ago (browserSince=) that reads dead
+# still counts, as a hand starting; missing never does, since a freed session
+# reads missing however young it is.
 browser_shared_users() {
-  local f i held
+  local f i held tgt since now
+  now=$(date +%s)
   for f in "$REEVE_HOME_D"/state/*.meta; do
     [ -f "$f" ] || continue
     i=$(basename "$f" .meta)
     [ "$(meta_get "$i" browserMode '')" = shared ] || continue
     [ -z "$(meta_get "$i" tornDown '')" ] || continue
     held=$(meta_get "$i" browserHeld '')
-    if [ -n "$(meta_get "$i" target '')" ] || [ -n "$(meta_get "$i" launching '')" ] \
-       || { [ -n "$held" ] && kill -0 "$held" 2>/dev/null; }; then
-      printf '%s\n' "$i"
+    if { [ -n "$held" ] && kill -0 "$held" 2>/dev/null; } || [ -n "$(meta_get "$i" launching '')" ]; then
+      printf '%s\n' "$i"; continue
     fi
+    tgt=$(meta_get "$i" target '')
+    [ -n "$tgt" ] || continue
+    case $("$BROWSER_BIN/reeve-backend" call agent_state "$tgt" --backend "$(meta_get "$i" backend herdr)" 2>/dev/null) in
+      missing) ;;
+      dead)
+        since=$(meta_get "$i" browserSince '')
+        case $since in ''|*[!0-9]*) since=0 ;; esac
+        [ $((now - since)) -ge "$BROWSER_GRACE" ] || printf '%s\n' "$i" ;;
+      *) printf '%s\n' "$i" ;;
+    esac
   done
+}
+
+# browser_shared_tend   restart the shared browser when it has died under
+# errands still using it, so a hand whose tools lost it gets it back within one
+# poll: its server reconnects by itself on the next call, and the office text
+# has it open fresh pages. Run by the watch and the caretaker on every poll.
+# Cheap while the browser lives, the one case it asks the backends nothing. It
+# restarts the Chrome the last start ran (state/browser/chrome), so it needs no
+# node on the caretaker's PATH. A restart that fails is not retried for
+# BROWSER_RETRY seconds (state/browser/tend-failed), so a Chrome that will not
+# come up costs one bounded wait and one line, not one of each every poll.
+# Never after a stop by hand (state/browser/stopped, written by reeve-browser
+# stop and lifted by any start): the liege's stop stands. Quiet, and never a
+# failure of its caller.
+browser_shared_tend() {
+  local dir port users chrome url
+  dir=$(browser_dir)
+  [ -f "$dir/chrome" ] || return 0
+  [ -e "$dir/stopped" ] && return 0
+  port=$(browser_port) || return 0
+  browser_shared_alive "$port" && return 0
+  users=$(browser_shared_users | tr '\n' ' ')
+  [ -n "$users" ] || return 0
+  if [ -f "$dir/tend-failed" ] \
+     && [ $(( $(date +%s) - $(file_mtime "$dir/tend-failed") )) -lt "$BROWSER_RETRY" ]; then
+    return 0
+  fi
+  chrome=$(sed -n 1p "$dir/chrome")
+  if [ ! -x "$chrome" ]; then
+    url="$chrome is not executable"
+  elif url=$(browser_shared_ensure "$chrome"); then
+    rm -f "$dir/tend-failed"
+    warn "restarted the shared browser at $url for: ${users% }"
+    return 0
+  fi
+  touch "$dir/tend-failed"
+  warn "the shared browser is down and would not restart, next try in ${BROWSER_RETRY}s: $url"
+  return 0
 }
 
 # browser_shared_release   stop the shared browser once no errand uses it.

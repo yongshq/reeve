@@ -122,7 +122,8 @@ dispatch_exit() {
     meta_set "$id" dispatched "$(date +%Y-%m-%dT%H:%M:%S)"
     meta_set "$id" browser "$browser_say"
     meta_set "$id" browserMode "$browser_mode_got"
-    meta_set "$id" browserHeld ''
+    meta_set "$id" browserSince "$(date +%s)"
+    meta_set "$id" browserHeld ''; browser_open=''
     if [ -n "${REEVE_NO_CARETAKER:-}" ]; then meta_set "$id" keep REEVE_NO_CARETAKER
     else meta_set "$id" keep ''; fi
     touch "$(status_file "$id")"
@@ -130,7 +131,19 @@ dispatch_exit() {
     caretaker_live || watch_live \
       || warn "NOTHING IS WATCHING $id. It will finish, report into its status file, and tell nobody."
   fi
+  browser_exit
   lock_release "$dispatch_lock"
+}
+# browser_exit   the EXIT path of a dispatch that started the shared browser and
+# never recorded a session to use it: a launch line that would not render, a
+# launch that failed. Its hold is dropped and the browser stopped if no other
+# errand uses it. A no-op once the session is recorded (browser_open blanked).
+browser_open=''
+browser_exit() {
+  [ "$browser_open" = yes ] || return 0
+  browser_open=''
+  meta_set "$id" browserHeld ''
+  browser_shared_release
 }
 if [ "$dry" = no ] && { [ "$rec_backend" = hall ] \
      || [ "$("$BIN/reeve-backend" resolve ${backend:+--backend "$backend"} 2>/dev/null)" = hall ]; }; then
@@ -228,6 +241,14 @@ if ! out=$("$BIN/reeve-harness" check "$harness" 2>&1); then
     printf '%s\n' "$out" >&2
     exit 1
   fi
+fi
+
+# A config/browser-mode that is neither shared nor isolated refuses here, before
+# anything is made, rather than sending the hand out with no browser at all: a
+# typo in a setting is the operator's to fix, and a hand that quietly verifies
+# nothing visually is the wrong way to find out about it.
+if browser_wanted "$office" && ! bmode_why=$(browser_mode); then
+  die "$bmode_why. set it to shared or isolated, or remove it for the platform default: $(config_file browser-mode)"
 fi
 
 # --- the tier: flag, then office, then harness ------------------------------
@@ -594,18 +615,22 @@ fi
 # isolated, said here and in the record: the hand still looks at its page, at
 # the cost of one Dock restart on macOS.
 #
-# Never a reason to refuse. A machine with no Chrome, or a harness with no way
-# to pass the server, sends the hand out without it, says so here, and the hand
-# reports what it could not check rather than stalling over it.
+# A dispatch that dies after starting it, before its session is recorded, lets
+# go of it on the way out (browser_exit), so a failed dispatch leaves no Chrome
+# running for nobody.
+#
+# Never a reason to refuse, save a config/browser-mode typo, refused above. A
+# machine with no Chrome, or a harness with no way to pass the server, sends the
+# hand out without it, says so here, and the hand reports what it could not
+# check rather than stalling over it.
 browser_cfg='' browser_say='' browser_mode_got=''
 if browser_wanted "$office"; then
   if [ -z "$("$BIN/reeve-harness" get "$harness" browser_flag '')" ]; then
     browser_say="none: harness $harness declares no browser_flag"
   elif ! chrome=$(browser_check); then
     browser_say="none: $chrome"
-  elif ! browser_mode_got=$(browser_mode); then
-    browser_say="none: $browser_mode_got"; browser_mode_got=''
   else
+    browser_mode_got=$(browser_mode)
     browser_cfg="$(errand_dir "$id")/browser.json"
     shared_url='' shared_why=''
     if [ "$browser_mode_got" = shared ]; then
@@ -614,6 +639,8 @@ if browser_wanted "$office"; then
         [ -z "$shared_url" ] || printf '  would run: reeve-browser start\n'
       else
         meta_set "$id" browserMode shared; meta_set "$id" browserHeld "$$"
+        browser_open=yes
+        [ -n "$dispatch_lock" ] || trap browser_exit EXIT
         shared_url=$(browser_shared_ensure "$chrome") || { shared_why=$shared_url; shared_url=''; }
       fi
     fi
@@ -711,9 +738,12 @@ meta_set "$id" dispatched "$(date +%Y-%m-%dT%H:%M:%S)"
 # an office with no browser, and on a relaunch that no longer has one.
 meta_set "$id" browser "$browser_say"
 # Which browser it uses, read by browser_shared_users, and the dispatch's hold
-# on the shared one let go now that the session itself is recorded.
+# on the shared one let go now that the session itself is recorded, which counts
+# as a user from here: within BROWSER_GRACE by browserSince, after by its state.
 meta_set "$id" browserMode "$browser_mode_got"
+meta_set "$id" browserSince "$(date +%s)"
 meta_set "$id" browserHeld ''
+browser_open=''
 # The opt-out belongs to the errand, not to this process. Skipping the caretaker
 # alone kept nothing up: any other dispatch's caretaker on this home freed the
 # hand within one poll of it finishing. Recorded here, it is read by every

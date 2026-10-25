@@ -41,9 +41,15 @@ browser a person is using. Other hands may be using the same one at the same tim
 
 - Open every page with `new_page`, passing `isolatedContext` set to your errand id. That page gets
   its own cookies and storage, shared with no other hand.
-- Touch only pages you opened: pass their `pageId`, and never select, navigate, close or read a page
-  `list_pages` shows that you did not open.
+- Touch only pages you created: pass the `pageId` that `new_page` gave you. Never use `list_pages`
+  to find a page, and never select, navigate, read or close a page you did not create.
+- If a tool says the browser restarted or the page ids have changed, your context and pages are
+  gone: create them again with `new_page` in your `isolatedContext`. Never pick a page up from
+  `list_pages`, even one that looks like yours.
 - Close your pages with `close_page` before you report.
+
+Nothing in the tools enforces these: they are all that keeps hands apart in a shared browser, and a
+warden checks them.
 
 1. Start the project's own dev server from your own copy, in the background, on a free port of
    your own: pass the project's port option (`--port <n>` or its equivalent). Never the default and

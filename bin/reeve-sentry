@@ -990,6 +990,12 @@ while :; do
     exit 3
   fi
 
+  # The shared browser died under hands still using it: started again here, so
+  # each one's browser tools reconnect on their next call. Only by a watch or a
+  # caretaker that cleans, since --no-reap promises to change nothing. A no-op
+  # while it lives, or when no errand uses it.
+  [ "$reap" = yes ] && browser_shared_tend
+
   hit=no
   while IFS= read -r i || [ -n "$i" ]; do
     [ -n "$i" ] || continue

@@ -71,7 +71,7 @@ cat > "$STUB/backends/stub.sh" <<'ADAPTER'
 reeve_backend_stub_available()       { return 0; }
 reeve_backend_stub_describe()        { printf 'stub backend\n'; }
 reeve_backend_stub_create_endpoint() { printf 'stub:1\n'; }
-reeve_backend_stub_launch()          { return 0; }
+reeve_backend_stub_launch()          { [ -z "${STUB_LAUNCH_FAIL:-}" ]; }
 ADAPTER
 # Declares settings_flag, like claude does, so the rendered line carries the
 # errand settings path and this suite can check it survives the guarded copy.
@@ -326,10 +326,41 @@ PY
   has "10 the summary says so"                         "$OUT" "browser  reeve-browser, headless and shared"
   has "10 and it is running"                           "$("$ROOT/bin/reeve-browser" status)" "state     running"
   "$ROOT/bin/reeve-browser" stop >/dev/null 2>&1
+
+  # A dispatch that started it and then failed to launch its hand lets it go:
+  # no Chrome is left running for nobody. shared2 is made a non-user first, so
+  # this dispatch is the only one that could hold it.
+  sed -i.bak 's/^browserMode=shared$/browserMode=isolated/' "$REEVE_HOME/state/shared2.meta"
+  brief_for shared3 artificer || bad "10 reeve-brief refused"
+  STUB_LAUNCH_FAIL=1 PATH="$STUBS:$PATH" dispatch shared3 browsing
+  [ "$RC" != 0 ] && ok "10 a launch that fails fails the dispatch" \
+    || bad "10 a launch that fails fails the dispatch" "rc $RC"
+  has "10 it stops the browser it started"             "$("$ROOT/bin/reeve-browser" status)" "state     stopped"
+  eq  "10 and lets go of its hold"                     "$(meta_of shared3 browserHeld)" ""
 else
   ok "10 a shared browser that starts (skipped: needs python3, curl, and lsof or ss)"
 fi
 printf '%s\n' "$chrome" > "$REEVE_HOME/config/browser-chrome"
+
+# --- 11. a config/browser-mode typo refuses ---------------------------------
+# Never a hand sent out blind: the dispatch of an office that wants the browser
+# refuses before anything is made, and says what to fix. An office that does
+# not want it is not stopped by a setting it never reads.
+printf 'sharde\n' > "$REEVE_HOME/config/browser-mode"
+brief_for typo artificer || bad "11 reeve-brief refused"
+before=$(snapshot)
+PATH="$STUBS:$PATH" dispatch typo browsing --dry-run
+eq  "11 the dry run refuses"                           "$RC" 1
+has "11 naming the setting and the value"              "$ERR" "config/browser-mode says sharde"
+has "11 and the fix"                                   "$ERR" "set it to shared or isolated"
+PATH="$STUBS:$PATH" dispatch typo browsing
+after=$(snapshot)
+eq  "11 so does a real one"                            "$RC" 1
+same "11 with nothing made"                            "$before" "$after"
+brief_for typoscout scout || bad "11 reeve-brief refused"
+PATH="$STUBS:$PATH" dispatch typoscout browsing --dry-run
+eq  "11 a scout, which has no browser, still goes"     "$RC" 0
+rm -f "$REEVE_HOME/config/browser-mode"
 
 echo
 echo "passed=$PASS failed=$FAIL"

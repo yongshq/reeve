@@ -163,7 +163,7 @@ fi
 hdr "household browser (how a hand looks at a page it changed)"
 if chrome=$(browser_check); then
   if ! bmode=$(browser_mode); then
-    printf '  WRONG       %s\n' "$bmode"; WARN=$((WARN+1)); bmode=''
+    printf '  WRONG       %s; a dispatch that wants the browser refuses\n' "$bmode"; WARN=$((WARN+1)); bmode=''
   elif [ "$bmode" = shared ]; then
     if burl=$(browser_shared_url); then
       if browser_shared_alive "$(browser_port)"; then bstate="running, pid $(browser_shared_pid)"

@@ -40,9 +40,17 @@ person is using. Other hands may be using the same one at the same time, so:
 
 - Open every page with `new_page`, passing `isolatedContext` set to your errand id. That page gets
   its own cookies and storage, shared with no other hand.
-- Touch only pages you opened: pass their `pageId`, and never select, navigate, close or read a page
-  `list_pages` shows that you did not open.
+- Touch only pages you created: pass the `pageId` that `new_page` gave you. Never use `list_pages`
+  to find a page, and never select, navigate, read or close a page you did not create.
+- If a tool says the browser restarted or the page ids have changed, your context and pages are
+  gone: create them again with `new_page` in your `isolatedContext`. Never pick a page up from
+  `list_pages`, even one that looks like yours.
 - Close your pages with `close_page` before you report.
+
+Nothing in the tools enforces these, so you keep them and you check them: a hand whose report,
+status lines or done line show it listing, selecting, reading or closing a page it did not create,
+or taking a listed page after a restart, has breached the isolation between hands. That is a high
+finding.
 
 1. Start the project's own dev server from your own copy, in the background, on a free port of
    your own: pass the project's port option (`--port <n>` or its equivalent). Never the default and
