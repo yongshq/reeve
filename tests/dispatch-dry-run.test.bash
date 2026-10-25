@@ -35,7 +35,8 @@ real_home=$(cd "${HOME:-/nonexistent-home}" 2>/dev/null && pwd -P) || real_home=
 [ -n "$real_home" ] || { printf 'FAIL  refusing to run: the real home could not be resolved\n'; exit 1; }
 SCRATCH=$(mktemp -d) && SCRATCH=$(cd -P "$SCRATCH" && pwd) \
   || { printf 'FAIL  could not make a scratch directory\n'; exit 1; }
-trap 'rm -rf "$SCRATCH"' EXIT
+# A shared browser case 10 started is stopped however the suite ends.
+trap 'REEVE_HOME="$SCRATCH/home" "$ROOT/bin/reeve-browser" stop >/dev/null 2>&1; rm -rf "$SCRATCH"' EXIT
 inherited=${REEVE_HOME:-}
 REEVE_HOME="$SCRATCH/home"
 for guard in "$inherited" "$real_home/.reeve"; do
@@ -217,6 +218,8 @@ printf '#!/bin/sh\n' > "$chrome"
 chmod +x "$STUBS/node" "$STUBS/npx" "$chrome"
 mkdir -p "$REEVE_HOME/config"
 printf '%s\n' "$chrome" > "$REEVE_HOME/config/browser-chrome"
+# Cases 5 to 9 are the per-hand launch; case 10 is the shared browser.
+printf 'isolated\n' > "$REEVE_HOME/config/browser-mode"
 export REEVE_NO_CARETAKER=1
 meta_of() { grep -m1 "^$2=" "$REEVE_HOME/state/$1.meta" | cut -d= -f2-; }
 
@@ -271,6 +274,62 @@ eq  "9 a harness with no browser_flag still dispatches" "$RC" 0
 has "9 and says the harness is why"                    "$ERR" \
     "harness stub declares no browser_flag"
 nas "9 with no config written or passed"               "$OUT" "browser_config_write"
+
+# --- 10. the shared browser ----------------------------------------------------
+# The dry run starts nothing. A real one starts the shared browser and points
+# the hand at it; one that cannot start falls back to the hand's own launch,
+# out loud. Chrome is a stand-in serving /json/version, exec'd to keep its pid.
+printf 'shared\n' > "$REEVE_HOME/config/browser-mode"
+port=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])' 2>/dev/null)
+printf '%s\n' "${port:-9333}" > "$REEVE_HOME/config/browser-port"
+brief_for shared1 artificer || bad "10 reeve-brief refused"
+before=$(snapshot)
+PATH="$STUBS:$PATH" dispatch shared1 browsing --dry-run
+after=$(snapshot)
+eq  "10 the dry run succeeds"                          "$RC" 0
+has "10 it says it would start the shared browser"     "$OUT" "would run: reeve-browser start"
+has "10 and which"                                     "$OUT" "headless and shared at http://127.0.0.1:${port:-9333}"
+same "10 and starts nothing"                           "$before" "$after"
+
+PATH="$STUBS:$PATH" dispatch shared1 browsing
+eq  "10 a shared browser that will not start is no reason to refuse" "$RC" 0
+has "10 it falls back to the hand's own launch, out loud" "$ERR" \
+    "no shared browser, so this hand launches its own"
+has "10 the config launches"                           "$(cat "$REEVE_HOME/errands/shared1/browser.json")" '"--isolated"'
+eq  "10 the record says isolated"                      "$(meta_of shared1 browserMode)" isolated
+has "10 and why"                                       "$(meta_of shared1 browser)" "shared browser unavailable"
+eq  "10 the dispatch's hold is let go"                 "$(meta_of shared1 browserHeld)" ""
+
+if [ -n "$port" ] && command -v curl >/dev/null 2>&1 \
+   && { command -v lsof >/dev/null 2>&1 || command -v ss >/dev/null 2>&1; }; then
+  fake="$SCRATCH/fake/chrome"; mkdir -p "$SCRATCH/fake"
+  cat > "$SCRATCH/fake/devtools.py" <<'PY'
+import http.server, json, sys
+port = next(int(a.split("=", 1)[1]) for a in sys.argv if a.startswith("--remote-debugging-port="))
+class H(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        body = json.dumps({"webSocketDebuggerUrl": "ws://127.0.0.1:%d/devtools/browser/x" % port}).encode()
+        self.send_response(200); self.end_headers(); self.wfile.write(body)
+    def log_message(self, *a): pass
+http.server.HTTPServer(("127.0.0.1", port), H).serve_forever()
+PY
+  printf '#!/bin/sh\nexec python3 "%s" "$@"\n' "$SCRATCH/fake/devtools.py" > "$fake"; chmod +x "$fake"
+  printf '%s\n' "$fake" > "$REEVE_HOME/config/browser-chrome"
+  brief_for shared2 artificer || bad "10 reeve-brief refused"
+  PATH="$STUBS:$PATH" dispatch shared2 browsing
+  body=$(cat "$REEVE_HOME/errands/shared2/browser.json" 2>/dev/null)
+  eq  "10 with a Chrome that starts, the dispatch succeeds" "$RC" 0
+  has "10 the hand attaches to the shared browser"     "$body" "\"--browserUrl\", \"http://127.0.0.1:$port\""
+  nas "10 and launches none of its own"                "$body" '"--isolated"'
+  eq  "10 the record says shared"                      "$(meta_of shared2 browserMode)" shared
+  eq  "10 the dispatch's hold is let go"               "$(meta_of shared2 browserHeld)" ""
+  has "10 the summary says so"                         "$OUT" "browser  reeve-browser, headless and shared"
+  has "10 and it is running"                           "$("$ROOT/bin/reeve-browser" status)" "state     running"
+  "$ROOT/bin/reeve-browser" stop >/dev/null 2>&1
+else
+  ok "10 a shared browser that starts (skipped: needs python3, curl, and lsof or ss)"
+fi
+printf '%s\n' "$chrome" > "$REEVE_HOME/config/browser-chrome"
 
 echo
 echo "passed=$PASS failed=$FAIL"

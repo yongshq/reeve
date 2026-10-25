@@ -35,8 +35,14 @@ fix it, describe the fix instead; an artificer applies it.
 
 When the work touches anything visible (markup, styles, layout, copy, an interaction), verify the
 result in the household browser, a set of browser tools named `reeve-browser` that your session
-carries when this machine has one. It launches its own headless Chrome with a throwaway profile,
-so it shares nothing with any browser a person is using.
+carries when this machine has one. It is the household's own headless Chrome, never a browser a
+person is using. Other hands may be using the same one at the same time, so:
+
+- Open every page with `new_page`, passing `isolatedContext` set to your errand id. That page gets
+  its own cookies and storage, shared with no other hand.
+- Touch only pages you opened: pass their `pageId`, and never select, navigate, close or read a page
+  `list_pages` shows that you did not open.
+- Close your pages with `close_page` before you report.
 
 1. Start the project's own dev server from your own copy, in the background, on a free port of
    your own: pass the project's port option (`--port <n>` or its equivalent). Never the default and
@@ -50,12 +56,12 @@ so it shares nothing with any browser a person is using.
 2. Open `http://127.0.0.1:<n>/` in the household browser and check it against the intent: a
    screenshot, computed styles, measurements, the interaction itself. A visual defect is a finding
    like any other, with its concrete failing case: this page, this viewport, this wrong result.
-3. The browser's storage is empty every time. Seeding data is your job: use the project's own
+3. A page in your own context starts with empty storage. Seeding data is your job: use the project's own
    fixtures or seed command when it has them.
 4. Stop the dev server before you report, children included, then check the port no longer
    answers. Leave your copy as you found it.
 
-Never connect to a browser you did not launch, never open a server you did not start, and never
+Never reach a browser except through these tools, never open a server you did not start, and never
 open anyone's running app. The review says what you saw; if you could not check it (no
 `reeve-browser` tools in your session, no dev server, a page that needs credentials you do not
 have), it says `not visually verified: <reason>`, and so does your `done:` line. A visible change

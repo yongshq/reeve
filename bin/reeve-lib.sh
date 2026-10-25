@@ -2552,10 +2552,21 @@ PDA_EOF
 # --- the household browser --------------------------------------------------
 # A hand that changes or reviews something visible checks the result itself, in
 # a browser the household owns: one MCP server, chrome-devtools-mcp at a pinned
-# version, which launches its own Chrome headless with a throwaway profile
-# (--isolated). It never connects to a running browser, so it is never given
-# --browserUrl, --wsEndpoint or --autoConnect, and it never sees the liege's
-# profile, cookies or tabs. offices/README.md has the whole policy.
+# version. It never sees the liege's profile, cookies or tabs. Two modes, read
+# from config/browser-mode, offices/README.md has the whole policy:
+#
+#   shared    one headless Chrome the household starts and owns, on a fixed
+#             loopback port and a profile under state/browser/, and every hand's
+#             server attaches to it with --browserUrl. The default on macOS:
+#             each fresh Chrome launch there restarts the Dock (measured, 10
+#             launches, 10 restarts; 10 pages in one Chrome, 1), so launching one
+#             per hand made the Dock blink every few seconds while hands worked.
+#   isolated  each hand's server launches its own Chrome, headless, on a
+#             throwaway profile (--isolated). The default elsewhere, and the
+#             fallback when the shared browser cannot be started.
+#
+# Either way it attaches only to the household's own Chrome, proven by its
+# profile (browser_shared_alive), never to 9222 or any browser a person runs.
 #
 # An office opts in by allowing `mcp__<BROWSER_SERVER>` in its own settings
 # file, which is the single owner of what a hand may do, so reeve-dispatch reads
@@ -2575,8 +2586,8 @@ browser_wanted() {
 # and nowhere else, so that place is the default here too. config/browser-chrome
 # names any other Chrome or Chromium executable, one line, read whole rather
 # than through config_get, which strips the spaces a macOS app path is full of.
-# Any Chromium build works, a person's own browser included: the hand's instance
-# is --isolated, headless, on a temp profile, and never attaches to a running
+# Any Chromium build works, a person's own browser included: the household's
+# instance is headless, on a profile of its own, and never attaches to a running
 # one. Chrome for Testing stays a valid option, not the recommendation.
 browser_check() {
   local v major minor chrome f
@@ -2636,21 +2647,217 @@ browser_check() {
 #   --isolated               its own temporary profile, deleted when it closes
 #   --headless               no window on the liege's screen
 #   --executablePath         the Chrome browser_check found, never a guess
+#   --browserUrl             shared mode instead of the three above: attach to
+#                            the household's Chrome, which browser_shared_ensure
+#                            started and proved its own, and launch nothing
 #   --no-usage-statistics    nothing about the errand is reported to Google
 #   --no-performance-crux    nor the URLs of the pages it traces
+#
+# browser_config_write <dest> <chrome> [<browserUrl>]   with a url, the shared
+# form; without, the isolated one.
 browser_config_write() {
-  local dest=$1 chrome
+  local dest=$1 chrome how
   chrome=$(printf '%s' "$2" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g')
+  if [ -n "${3:-}" ]; then
+    how="\"--browserUrl\", \"$3\","
+  else
+    how="\"--isolated\", \"--headless\",
+               \"--executablePath\", \"$chrome\","
+  fi
   cat > "$dest" <<JSON
 {
   "mcpServers": {
     "$BROWSER_SERVER": {
       "command": "npx",
-      "args": ["--prefer-offline", "-y", "$BROWSER_PACKAGE", "--isolated", "--headless",
-               "--executablePath", "$chrome",
+      "args": ["--prefer-offline", "-y", "$BROWSER_PACKAGE", $how
                "--no-usage-statistics", "--no-performance-crux"]
     }
   }
 }
 JSON
+}
+
+# browser_mode   prints shared or isolated, from config/browser-mode, else
+# shared on macOS and isolated elsewhere. Any other value prints why and
+# returns 1, so a typo is named rather than read as one of the two.
+browser_mode() {
+  local m
+  m=$(config_get browser-mode '')
+  case $m in
+    shared|isolated) printf '%s\n' "$m" ;;
+    '') case $(uname -s) in Darwin) echo shared ;; *) echo isolated ;; esac ;;
+    *)  printf 'config/browser-mode says %s, which is neither shared nor isolated\n' "$m"
+        return 1 ;;
+  esac
+}
+
+# browser_port   the shared browser's loopback port: config/browser-port, else
+# 9333. Never 9222, the port a person's own debuggable browser listens on, so a
+# hand can never be pointed at one by a config line.
+browser_port() {
+  local p
+  p=$(config_get browser-port 9333)
+  case $p in
+    ''|*[!0-9]*) printf 'config/browser-port says %s, which is not a port number\n' "${p:-nothing}"
+                 return 1 ;;
+  esac
+  if [ "$p" -lt 1024 ] || [ "$p" -gt 65535 ]; then
+    printf 'config/browser-port says %s; use a port from 1024 to 65535\n' "$p"; return 1
+  fi
+  if [ "$p" -eq 9222 ]; then
+    printf 'config/browser-port says 9222, the port a person'"'"'s own browser debugs on; pick another\n'
+    return 1
+  fi
+  printf '%s\n' "$p"
+}
+
+browser_dir()     { printf '%s/state/browser\n' "$REEVE_HOME_D"; }
+browser_profile() { printf '%s/profile\n' "$(browser_dir)"; }
+
+# browser_shared_url   prints http://127.0.0.1:<port>, or why there is none
+browser_shared_url() {
+  local p
+  p=$(browser_port) || { printf '%s\n' "$p"; return 1; }
+  printf 'http://127.0.0.1:%s\n' "$p"
+}
+
+# browser_shared_pid   prints the recorded pid when that process is alive AND
+# runs on the household profile. A pid file outliving its Chrome, its number
+# since reused by something else, is never ours to signal.
+browser_shared_pid() {
+  local f pid cmd
+  f="$(browser_dir)/pid"
+  [ -f "$f" ] || return 1
+  pid=$(tr -dc '0-9' < "$f")
+  [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null || return 1
+  cmd=$(ps -ww -o command= -p "$pid" 2>/dev/null) || return 1
+  case $cmd in *"--user-data-dir=$(browser_profile)"*) printf '%s\n' "$pid" ;; *) return 1 ;; esac
+}
+
+# browser_port_listener <port>   the pid listening on loopback <port>, from
+# lsof, else ss. Nothing printed when neither can say.
+browser_port_listener() {
+  if command -v lsof >/dev/null 2>&1; then
+    lsof -nP -iTCP@127.0.0.1:"$1" -sTCP:LISTEN -t 2>/dev/null | head -n 1
+  elif command -v ss >/dev/null 2>&1; then
+    ss -Hltnp "sport = :$1" 2>/dev/null | sed -n 's/.*pid=\([0-9]*\).*/\1/p' | head -n 1
+  fi
+}
+
+# browser_shared_alive <port>   0 when the browser answering on <port> is the
+# household's own. The proof: the process listening there is the recorded pid,
+# whose command line runs on the household profile (browser_shared_pid), and it
+# answers as a DevTools endpoint. Chrome's DevToolsActivePort file would be a
+# neater proof, but Chrome writes it only for port 0, never for a fixed one.
+browser_shared_alive() {
+  local port=$1 pid
+  pid=$(browser_shared_pid) || return 1
+  [ "$(browser_port_listener "$port")" = "$pid" ] || return 1
+  case $(curl -s --max-time 3 "http://127.0.0.1:$port/json/version" 2>/dev/null) in
+    *'"webSocketDebuggerUrl"'*) return 0 ;;
+  esac
+  return 1
+}
+
+# browser_shared_ensure <chrome>   prints the shared browser's url once it is
+# running and proven the household's own, starting it if need be: lazily, at
+# the first dispatch that wants it, and again on any later one that finds it
+# dead. Prints why and returns 1 otherwise, starting nothing it cannot prove.
+#
+# Started the way the caretaker is, nohup with every stream redirected, so it
+# outlives the dispatch that started it. Flags: what puppeteer gives a Chrome it
+# launches for chrome-devtools-mcp, so a page behaves as it did under
+# --isolated, plus the port and the persistent profile. No automation infobar
+# flag, since headless shows none.
+browser_shared_ensure() {
+  local chrome=$1 port url lock dir prof pid n rc=0
+  command -v curl >/dev/null 2>&1 || { printf 'curl is not on PATH\n'; return 1; }
+  port=$(browser_port) || { printf '%s\n' "$port"; return 1; }
+  url="http://127.0.0.1:$port"
+  dir=$(browser_dir); prof=$(browser_profile)
+  mkdir -p "$prof" || { printf 'cannot create %s\n' "$prof"; return 1; }
+  lock=$(lock_acquire browser 30 30) || { printf 'the browser lock is held\n'; return 1; }
+  if browser_shared_alive "$port"; then lock_release "$lock"; printf '%s\n' "$url"; return 0; fi
+  # Ours, but not answering as it should: a hung Chrome is stopped, never reused.
+  browser_shared_stop_locked
+  if [ -n "$(browser_port_listener "$port")" ] \
+     || curl -s -o /dev/null --max-time 3 "$url/json/version" 2>/dev/null; then
+    lock_release "$lock"
+    printf 'port %s already answers, and not as the household browser; set config/browser-port\n' "$port"
+    return 1
+  fi
+  nohup "$chrome" --headless=new "--remote-debugging-port=$port" "--user-data-dir=$prof" \
+      --no-first-run --no-default-browser-check --use-mock-keychain --password-store=basic \
+      --disable-background-networking --disable-background-timer-throttling \
+      --disable-backgrounding-occluded-windows --disable-renderer-backgrounding \
+      --disable-breakpad --disable-crash-reporter --disable-client-side-phishing-detection \
+      --disable-component-extensions-with-background-pages --disable-default-apps \
+      --disable-extensions --disable-sync --disable-hang-monitor --disable-popup-blocking \
+      --disable-prompt-on-repost --metrics-recording-only --force-color-profile=srgb \
+      --disable-features=Translate,MediaRouter,OptimizationHints \
+      --hide-scrollbars --mute-audio --hide-crash-restore-bubble '--screen-info={3840x2160}' \
+      about:blank >>"$dir/browser.log" 2>&1 </dev/null &
+  pid=$!
+  { disown; } 2>/dev/null || :
+  printf '%s\n' "$pid" > "$dir/pid"
+  # Bounded, 20 seconds, and cut short the moment the Chrome it started exits.
+  n=0
+  while [ "$n" -lt 40 ] && kill -0 "$pid" 2>/dev/null && ! browser_shared_alive "$port"; do
+    sleep 0.5; n=$((n + 1))
+  done
+  if browser_shared_alive "$port"; then printf '%s\n' "$url"
+  else
+    browser_shared_stop_locked
+    printf 'the shared browser did not come up on port %s; see %s\n' "$port" "$dir/browser.log"
+    rc=1
+  fi
+  lock_release "$lock"
+  return "$rc"
+}
+
+# browser_shared_stop_locked   stop the household's Chrome, if one runs, and
+# forget its pid. Never signals a process it cannot prove is ours. The caller
+# holds the browser lock.
+browser_shared_stop_locked() {
+  local pid n
+  if pid=$(browser_shared_pid); then
+    kill "$pid" 2>/dev/null
+    n=0
+    while [ "$n" -lt 20 ] && kill -0 "$pid" 2>/dev/null; do sleep 0.25; n=$((n + 1)); done
+    kill -0 "$pid" 2>/dev/null && kill -9 "$pid" 2>/dev/null
+  fi
+  rm -f "$(browser_dir)/pid"
+}
+
+# browser_shared_users   the errands still using the shared browser, one id a
+# line: recorded as shared, not torn down, and holding a session (target= or
+# launching=), or held by a dispatch still running (browserHeld=, its pid).
+browser_shared_users() {
+  local f i held
+  for f in "$REEVE_HOME_D"/state/*.meta; do
+    [ -f "$f" ] || continue
+    i=$(basename "$f" .meta)
+    [ "$(meta_get "$i" browserMode '')" = shared ] || continue
+    [ -z "$(meta_get "$i" tornDown '')" ] || continue
+    held=$(meta_get "$i" browserHeld '')
+    if [ -n "$(meta_get "$i" target '')" ] || [ -n "$(meta_get "$i" launching '')" ] \
+       || { [ -n "$held" ] && kill -0 "$held" 2>/dev/null; }; then
+      printf '%s\n' "$i"
+    fi
+  done
+}
+
+# browser_shared_release   stop the shared browser once no errand uses it.
+# Called wherever a hand's session is freed. Quiet, and never a failure of its
+# caller: a browser left running costs a process, not work.
+browser_shared_release() {
+  local lock
+  browser_shared_pid >/dev/null || return 0
+  lock=$(lock_acquire browser 30 30 2>/dev/null) || return 0
+  if [ -z "$(browser_shared_users)" ]; then
+    browser_shared_stop_locked
+    info "stopped the shared browser: no errand uses it any more"
+  fi
+  lock_release "$lock"
+  return 0
 }

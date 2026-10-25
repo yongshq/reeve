@@ -74,10 +74,29 @@ browser comes back as the household's own, not the machine's:
 
 - **What:** one MCP server, `reeve-browser`: `chrome-devtools-mcp` at a pinned version, run
   through `npx`.
-- **Which Chrome:** its own instance, `--headless` and `--isolated`, with a temporary profile
-  deleted when it closes.
-- **Never:** `--browserUrl`, `--wsEndpoint`, `--autoConnect`, port 9222, or any browser a person
-  is using.
+- **Which Chrome:** the household's own, never a person's. `$REEVE_HOME/config/browser-mode`
+  picks how:
+  - `shared`, the default on macOS: one headless Chrome the household starts on demand, on
+    loopback port `config/browser-port` (default 9333) with its own profile under
+    `$REEVE_HOME/state/browser/`, and every hand's server attaches with `--browserUrl`. Each fresh
+    Chrome launch on macOS restarts the Dock, measured: 10 launches, 10 restarts; 10 pages in one
+    Chrome, 1. One per hand made the Dock blink every few seconds while hands worked.
+  - `isolated`, the default elsewhere: each hand's server launches its own, `--headless` and
+    `--isolated`, with a temporary profile deleted when it closes. Also the fallback when the shared
+    one cannot start, which the dispatch says out loud.
+- **Never:** `--wsEndpoint`, `--autoConnect`, port 9222, or any browser a person is using.
+  `--browserUrl` only ever names the shared browser, and only once it is proven the household's:
+  the process listening on the port is the one `bin/reeve-browser` started, on the household
+  profile. A port that answers as anything else is refused, never attached to.
+- **Isolation between hands:** at the pinned version a server cannot be confined to one browser
+  context, so hands sharing the browser can see each other's pages. The office text closes it by
+  conduct: every page opened with `new_page` in an `isolatedContext` named for the errand (its own
+  cookies and storage), addressed by `pageId` (the server's default page id routing), closed before
+  the hand reports, and never a page the hand did not open.
+- **Lifecycle:** `bin/reeve-dispatch` starts the shared browser when a hand that wants it goes out,
+  or restarts it if it died. `bin/reeve-teardown` stops it once no errand recorded as using it
+  holds a session, so a land or a sweep, which tear down, stops it too. `bin/reeve-browser
+  status|start|stop` does the same by hand.
 - **Who:** an office whose settings allow `mcp__reeve-browser`. Today the artificer and the warden.
 - **How:** `bin/reeve-dispatch` writes the server config into the errand directory, beside
   settings.json, and the harness's `browser_flag` passes it next to `--strict-mcp-config
@@ -100,8 +119,8 @@ The browser is optional. `bin/reeve-doctor` reports whether this machine has it:
 on PATH, and a Chrome the server can launch. That Chrome is the one place `chrome-devtools-mcp`
 looks for stable Chrome on this platform, or whatever `$REEVE_HOME/config/browser-chrome` names,
 one line holding an executable's absolute path. Any Chromium build works there, a person's own
-browser included, because the hand's instance is `--isolated`, headless, on a temporary profile, and
-never attaches to a running one. Chrome for Testing (`npx @puppeteer/browsers install chrome@stable
+browser included, because the household's instance is headless, on a profile of its own, and never
+attaches to a running one. Chrome for Testing (`npx @puppeteer/browsers install chrome@stable
 --path <dir>`) stays a valid option, not the recommendation. A dispatch never refuses for want of it: the hand goes out without the
 server, the dispatch says why, and the hand reports `not visually verified: <reason>`.
 

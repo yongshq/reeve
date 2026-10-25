@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+# The household's shared browser: one headless Chrome every hand's browser
+# tools attach to, instead of each hand launching its own.
+#
+# Usage:
+#   reeve-browser status   running or stopped, its port, its pid, who uses it
+#   reeve-browser start    start it if it is not running, print its url
+#   reeve-browser stop     stop it, even while errands use it (they are named)
+#
+# You rarely run this. bin/reeve-dispatch starts it on demand for a hand whose
+# office uses the browser, and bin/reeve-teardown stops it once no errand that
+# uses it holds a session. config/browser-mode chooses shared (the default on
+# macOS) or isolated, where each hand's server launches its own Chrome as it did
+# before. Why shared exists: every fresh Chrome launch on macOS restarts the
+# Dock, so one per hand made it blink every few seconds.
+#
+# It only ever starts, proves and stops its own Chrome: the one on the profile
+# under $REEVE_HOME/state/browser/, on config/browser-port (default 9333, never
+# 9222). A port already answering as anything else is refused, never attached.
+
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/reeve-lib.sh"
+
+case ${1:-} in -h|--help) print_help "$0"; exit 0 ;; esac
+
+cmd=${1:-status}
+[ $# -le 1 ] || die "usage: reeve-browser status|start|stop"
+
+case $cmd in
+  status)
+    mode=$(browser_mode) || mode="unset ($mode)"
+    printf 'mode      %s\n' "$mode"
+    if url=$(browser_shared_url); then printf 'url       %s\n' "$url"
+    else printf 'url       none: %s\n' "$url"; fi
+    if port=$(browser_port) && browser_shared_alive "$port"; then
+      printf 'state     running, pid %s\n' "$(browser_shared_pid)"
+    elif pid=$(browser_shared_pid); then
+      printf 'state     unhealthy, pid %s runs on the profile but does not answer\n' "$pid"
+    else
+      printf 'state     stopped\n'
+    fi
+    users=$(browser_shared_users | tr '\n' ' ')
+    printf 'users     %s\n' "${users:-none}"
+    printf 'profile   %s\n' "$(browser_profile)"
+    ;;
+  start)
+    chrome=$(browser_check) || die "no household browser: $chrome"
+    url=$(browser_shared_ensure "$chrome") || die "$url"
+    printf '%s\n' "$url"
+    ;;
+  stop)
+    users=$(browser_shared_users | tr '\n' ' ')
+    lock=$(lock_acquire browser 30 30) || die "the browser lock is held"
+    if browser_shared_pid >/dev/null; then
+      browser_shared_stop_locked
+      info "stopped the shared browser"
+      [ -z "$users" ] \
+        || warn "errands still using it lose their browser tools: ${users% }"
+    else
+      rm -f "$(browser_dir)/pid"
+      info "the shared browser is not running"
+    fi
+    lock_release "$lock"
+    ;;
+  *) die "unknown command '$cmd'. usage: reeve-browser status|start|stop" ;;
+esac

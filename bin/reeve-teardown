@@ -698,6 +698,11 @@ if [ "$dismiss" = yes ] && [ -n "$launching" ]; then
   launching=''
 fi
 
+# A freed session no longer uses the shared browser, and it may have been the
+# last one that did. Here rather than below, because the refusals that follow
+# keep the copy, never the session.
+[ "$dismissed" = yes ] && [ "$dry" = no ] && browser_shared_release
+
 if [ "$dismiss_only" = yes ]; then
   [ "$dismissed" = yes ] && info "session freed. The copy and branch are untouched." \
                          || info "nothing to dismiss"
@@ -1210,6 +1215,7 @@ if [ "$drop_proven" = yes ]; then
   meta_set "$id" tornDown "$(date +%Y-%m-%dT%H:%M:%S)"
   meta_set "$id" target ''
   [ -z "$launching" ] || meta_set "$id" launching ''
+  browser_shared_release
   info "torn down $id"
   [ -f "$(report_file "$id")" ] && info "  report kept: $(report_file "$id")"
   info "  record kept: $(meta_file "$id")"
@@ -1445,6 +1451,7 @@ if [ "$dry" = yes ]; then info "dry run, nothing changed"; exit 0; fi
 meta_set "$id" tornDown "$(date +%Y-%m-%dT%H:%M:%S)"
 meta_set "$id" target ''
 [ -z "$launching" ] || meta_set "$id" launching ''
+browser_shared_release
 info "torn down $id"
 [ -f "$(report_file "$id")" ] && info "  report kept: $(report_file "$id")"
 info "  record kept: $(meta_file "$id")"
