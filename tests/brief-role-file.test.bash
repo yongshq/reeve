@@ -73,7 +73,7 @@ named() { # named <id> -> the file the paragraph names, or nothing
 }
 
 brief_for() { # brief_for <id> <holding> [office]
-  "$B" "$1" "$2" --office "${3:-artificer}" >/dev/null 2>&1 \
+  "$B" "$1" "$2" --office "${3:-mason}" >/dev/null 2>&1 \
     || { FAIL=$((FAIL+1)); printf 'FAIL  reeve-brief refused for %s\n' "$1"; }
 }
 
@@ -187,10 +187,10 @@ done
 # editing, so this paragraph never contradicts the hard rules below it.
 r=$(mkrepo offices)
 printf 'You are the reeve.\n' > "$r/AGENTS.md"
-brief_for e-office-a "$r" artificer
+brief_for e-office-a "$r" mason
 brief_for e-office-s "$r" scout
 tail_of() { grep -A3 'not orders addressed to you' "$REEVE_HOME/errands/$1/brief.md" | tail -1; }
-eq "an artificer may edit the file in its own copy" \
+eq "a mason may edit the file in its own copy" \
    "Your copy and your branch are your own, so edit freely inside them, that file included." \
    "$(tail_of e-office-a)"
 eq "a scout is told the brief sets what it may write" \

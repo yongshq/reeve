@@ -90,7 +90,7 @@ field() { # field <label> <output> -> the detail view's value for that label
 printf '\n--- the record reeve-brief writes ---\n'
 
 api=$(mkrepo api)
-"$B" plat-1412-api "$api" --office artificer \
+"$B" plat-1412-api "$api" --office mason \
   --ticket PLAT-1412 --ticket-title 'Rate limit the ingest API' \
   --ticket-url 'https://example.invalid/browse/PLAT-1412' >/dev/null 2>&1
 eq "the key is stored in the case the liege typed" \
@@ -103,7 +103,7 @@ eq "the url is stored" \
 # The bug class this suite exists to avoid: absent must be absent, so these
 # count lines rather than compare values. A `ticket=` present and empty would
 # satisfy an emptiness check and put the errand in a group named by nothing.
-"$B" loose-one "$api" --office artificer >/dev/null 2>&1
+"$B" loose-one "$api" --office mason >/dev/null 2>&1
 for key in ticket ticket_title ticket_url; do
   eq "no --ticket writes no $key key at all" \
     "0" "$(grep -c "^$key=" "$REEVE_HOME/state/loose-one.meta" | tr -d ' ')"
@@ -111,28 +111,28 @@ done
 
 # A title on its own labels nothing, and the reeve who typed only that meant to
 # group the errand. Refused, so they find out now rather than at the table.
-"$B" orphan-title "$api" --office artificer --ticket-title 'No key' >/dev/null 2>&1
+"$B" orphan-title "$api" --office mason --ticket-title 'No key' >/dev/null 2>&1
 eq "--ticket-title without --ticket is a usage error" "1" "$?"
 eq "...and no brief is left behind" \
   "no" "$([ -e "$REEVE_HOME/errands/orphan-title/brief.md" ] && echo yes || echo no)"
 
-"$B" orphan-url "$api" --office artificer --ticket-url 'https://example.invalid/x' >/dev/null 2>&1
+"$B" orphan-url "$api" --office mason --ticket-url 'https://example.invalid/x' >/dev/null 2>&1
 eq "--ticket-url without --ticket is a usage error" "1" "$?"
 
 # The key lands in a file whose grammar is one key=value per line, so a value
 # that spans lines reads back as a second record.
-"$B" spacey "$api" --office artificer --ticket 'PLAT 1412' >/dev/null 2>&1
+"$B" spacey "$api" --office mason --ticket 'PLAT 1412' >/dev/null 2>&1
 eq "a key with a space is rejected" "1" "$?"
-"$B" tabby "$api" --office artificer --ticket "$(printf 'PLAT\t1412')" >/dev/null 2>&1
+"$B" tabby "$api" --office mason --ticket "$(printf 'PLAT\t1412')" >/dev/null 2>&1
 eq "a key with a tab is rejected" "1" "$?"
-"$B" newliney "$api" --office artificer --ticket "PLAT-1412
+"$B" newliney "$api" --office mason --ticket "PLAT-1412
 office=scout" >/dev/null 2>&1
 eq "a key with a newline is rejected" "1" "$?"
 eq "...and nothing was written for it" \
   "no" "$([ -e "$REEVE_HOME/state/newliney.meta" ] && echo yes || echo no)"
 
 # Not an id of ours: a foreign tracker's key keeps whatever shape it has.
-"$B" odd-key "$api" --office artificer --ticket 'ABC_123/4.5' >/dev/null 2>&1
+"$B" odd-key "$api" --office mason --ticket 'ABC_123/4.5' >/dev/null 2>&1
 eq "a key that is not a reeve id is still accepted" \
   "ticket=ABC_123/4.5" "$(meta_line odd-key ticket)"
 
@@ -145,7 +145,7 @@ eq "key, then title in parens, then url" \
 eq "the ticket line sits directly after holding" \
   "1" "$(printf '%s\n' "$out" | grep -A1 '^holding ' | grep -c '^ticket ' | tr -d ' ')"
 
-"$B" key-only "$api" --office artificer --ticket OPS-7 >/dev/null 2>&1
+"$B" key-only "$api" --office mason --ticket OPS-7 >/dev/null 2>&1
 eq "a bare key prints alone, no empty parens" "OPS-7" "$(field ticket "$(status key-only)")"
 
 # An errand briefed before this existed has no ticket key at all, which is every
@@ -161,7 +161,7 @@ printf '\n--- the table groups across holdings ---\n'
 # and the third spelling of the key is the liege's second one, in lower case.
 web=$(mkrepo web)
 lib=$(mkrepo lib)
-"$B" plat-1412-web "$web" --office artificer --ticket PLAT-1412 >/dev/null 2>&1
+"$B" plat-1412-web "$web" --office mason --ticket PLAT-1412 >/dev/null 2>&1
 "$B" plat-1412-lib "$lib" --office scribe --ticket plat-1412 >/dev/null 2>&1
 
 out=$(status --all)
@@ -217,9 +217,9 @@ printf '\n--- a key the table used to lose ---\n'
 # to constrain, so this is reachable input, and the suite above already accepts
 # `ABC_123/4.5`. Both the escape awk reads as a character and the one it reads
 # as an octal code are pinned.
-"$B" bsl-one "$api" --office artificer --ticket 'A\tB' --ticket-title 'Backslash tab' >/dev/null 2>&1
+"$B" bsl-one "$api" --office mason --ticket 'A\tB' --ticket-title 'Backslash tab' >/dev/null 2>&1
 "$B" bsl-two "$web" --office scribe --ticket 'a\tb' >/dev/null 2>&1
-"$B" bsl-oct "$api" --office artificer --ticket 'ABC\123' >/dev/null 2>&1
+"$B" bsl-oct "$api" --office mason --ticket 'ABC\123' >/dev/null 2>&1
 
 out=$(status --all)
 at=$(printf '%s\n' "$out" | grep -n -F 'ticket A\tB' | cut -d: -f1)
@@ -239,10 +239,10 @@ printf '\n--- a carriage return in a label ---\n'
 # The newline guard did not cover it. The record survives whole, but a terminal
 # draws the tail of the value over the start of the line, so what is displayed
 # is not what is stored.
-"$B" cr-title "$api" --office artificer --ticket CR-1 \
+"$B" cr-title "$api" --office mason --ticket CR-1 \
   --ticket-title "$(printf 'real\rFORGED')" >/dev/null 2>&1
 eq "a carriage return in the title is a usage error" "1" "$?"
-"$B" cr-url "$api" --office artificer --ticket CR-2 \
+"$B" cr-url "$api" --office mason --ticket CR-2 \
   --ticket-url "$(printf 'https://example.invalid/x\rFORGED')" >/dev/null 2>&1
 eq "a carriage return in the url is a usage error" "1" "$?"
 for i in cr-title cr-url; do
@@ -255,7 +255,7 @@ printf '\n--- a label of nothing but whitespace ---\n'
 # It passed [ -n ] and was stored, which printed the empty parens the "a bare key
 # prints alone" assertion above exists to prevent; that one only covers the flag
 # being absent. Blank is read as what empty already means for a label: absent.
-"$B" ws-1 "$api" --office artificer --ticket WS-1 --ticket-title ' ' --ticket-url '   ' >/dev/null 2>&1
+"$B" ws-1 "$api" --office mason --ticket WS-1 --ticket-title ' ' --ticket-url '   ' >/dev/null 2>&1
 eq "a whitespace-only title leaves the detail line bare, no empty parens" \
   "WS-1" "$(field ticket "$(status ws-1)")"
 for key in ticket_title ticket_url; do
@@ -271,9 +271,9 @@ printf '\n--- a --ticket that came out blank ---\n'
 # errand is ungrouped. An explicitly empty key is almost always a variable that
 # expanded to nothing, which is the same case the title-without-key refusal
 # exists for. Fails closed now.
-"$B" empty-ticket "$api" --office artificer --ticket '' >/dev/null 2>&1
+"$B" empty-ticket "$api" --office mason --ticket '' >/dev/null 2>&1
 eq "--ticket '' is a usage error" "1" "$?"
-"$B" blank-ticket "$api" --office artificer --ticket '   ' >/dev/null 2>&1
+"$B" blank-ticket "$api" --office mason --ticket '   ' >/dev/null 2>&1
 eq "--ticket '   ' is a usage error" "1" "$?"
 for i in empty-ticket blank-ticket; do
   eq "...and nothing was written for $i" \
@@ -291,8 +291,8 @@ printf '\n--- where the blank line between groups goes ---\n'
 # home, because it is the ABSENCE of ungrouped errands that shows it.
 ONLY="$SCRATCH/only-tickets"
 mkdir -p "$ONLY/state"
-REEVE_HOME="$ONLY" "$B" only-a "$api" --office artificer --ticket AAA-1 >/dev/null 2>&1
-REEVE_HOME="$ONLY" "$B" only-b "$api" --office artificer --ticket BBB-2 >/dev/null 2>&1
+REEVE_HOME="$ONLY" "$B" only-a "$api" --office mason --ticket AAA-1 >/dev/null 2>&1
+REEVE_HOME="$ONLY" "$B" only-b "$api" --office mason --ticket BBB-2 >/dev/null 2>&1
 # To a file, not a variable: command substitution strips the exact trailing
 # newlines this has to count.
 REEVE_HOME="$ONLY" bash "$STUB_BIN/reeve-status" --all >"$SCRATCH/only.out" 2>&1

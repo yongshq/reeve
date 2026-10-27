@@ -14,14 +14,14 @@ A full accounting of every errand in flight, on demand. Where `court` is a conve
 ```
 needs you
   find-cv-styles    scout       1 question open, asked 20 minutes ago
-  refresh-auth      artificer   blocked: no .env in the copy
+  refresh-auth      mason       blocked: no .env in the copy
 
 working
-  tidy-footer       artificer   committing, 2 commits so far
+  tidy-footer       mason       committing, 2 commits so far
   audit-a11y        scout       reading route components
 
 ready
-  print-styles      artificer   branch fix/print-styles, 3 commits, not pushed
+  print-styles      mason       branch fix/print-styles, 3 commits, not pushed
 
 nothing in flight for: <the other manors>
 ```

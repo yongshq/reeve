@@ -244,7 +244,7 @@ eq  "3 and only then is it gone"                        "$(count resetting)" 0
 echo "--- 4. one wake per errand, for the whole home and not per process ---"
 # `tended` is per process and nothing read a cursor, so the only thing that ever
 # stopped a caretaker re-announcing was tornDown=, which the landed-work guard
-# never writes for an artificer branch that has not landed. Every dispatch
+# never writes for a mason branch that has not landed. Every dispatch
 # starts a caretaker, so an unlanded branch produced one false wake per dispatch,
 # forever, and by then its text was false too: the session was cleaned up long
 # ago and the reeve was watching. This is the false alarm the errand that built
@@ -257,14 +257,14 @@ git init -q "$REPO"
 git -C "$REPO" symbolic-ref HEAD refs/heads/main
 git -C "$REPO" -c user.email=r@example.invalid -c user.name=r \
     -c commit.gpgsign=false commit -q --allow-empty -m init
-WT="$SCRATCH/holding.worktrees/artificer-unlanded"
+WT="$SCRATCH/holding.worktrees/mason-unlanded"
 git -C "$REPO" worktree add -q "$WT" -b feat/unlanded main
 date > "$WT/built.txt"
 git -C "$WT" add built.txt
 git -C "$WT" -c user.email=h@example.invalid -c user.name=h \
     -c commit.gpgsign=false commit -q -m 'feat: build the thing'
 mkdir -p "$REEVE_HOME/errands/unlanded"
-printf 'target=stub:1\nbackend=stub\noffice=artificer\nrepo=%s\nworktree=%s\nbranch=feat/unlanded\nbase=main\nwrites=yes\ndispatched=2026-09-28T20:25:26\nsession=briefer\n' \
+printf 'target=stub:1\nbackend=stub\noffice=mason\nrepo=%s\nworktree=%s\nbranch=feat/unlanded\nbase=main\nwrites=yes\ndispatched=2026-09-28T20:25:26\nsession=briefer\n' \
   "$REPO" "$WT" > "$REEVE_HOME/state/unlanded.meta"
 printf 'working: building\ndone: branch ready, 1 commit\n' > "$REEVE_HOME/errands/unlanded/status"
 

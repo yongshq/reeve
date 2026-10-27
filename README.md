@@ -49,7 +49,7 @@ claude
 | liege | you |
 | reeve | the one agent you talk to |
 | hand | a worker the reeve dispatched. Never speaks to you |
-| office | a hand's role: artificer, scout, warden, scribe, steward |
+| office | a hand's role: mason, scout, warden, scribe, steward |
 | errand | one unit of work: an id, a brief, a worktree, a status file |
 | sentry | the supervising process |
 | manor | one project, possibly several repositories |
@@ -59,7 +59,7 @@ claude
 
 | Office | For | Can write |
 |---|---|---|
-| artificer | building and fixing code | its worktree |
+| mason | building and fixing code | its worktree |
 | scout | investigating, root-causing, mapping | its report only, `Edit` denied; may search the web and fetch pages |
 | warden | reviewing finished work in a fresh context | its review only, `Edit` denied |
 | scribe | docs and prose | its worktree |
@@ -92,8 +92,8 @@ An agent never exits itself, so a finished hand would otherwise idle forever hol
 the sentry reports a finished errand it also cleans up, splitting the job by what it can cost:
 
 - **the session is always freed**, since the status file and any report are already on disk
-- **the copy is removed only when nothing would be lost**, so a scout vanishes entirely while an
-  artificer keeps its branch and copy until you decide
+- **the copy is removed only when nothing would be lost**, so a scout vanishes entirely while a
+  mason keeps its branch and copy until you decide
 
 A blocked hand is never reaped, because it can still be steered. Neither is an errand that claimed
 `done` with a question still open, because that is not finished whatever it says.

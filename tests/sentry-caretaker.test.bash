@@ -137,7 +137,7 @@ ERRAND_OWNER=''
 errand() { # errand <id> <writes> <status line>...
   local id=$1 writes=$2; shift 2
   mkdir -p "$REEVE_HOME/state" "$REEVE_HOME/errands/$id"
-  printf 'target=stub:1\nbackend=stub\noffice=artificer\nrepo=\nworktree=\nbranch=\nbase=main\nsession=%s\nwrites=%s\n' \
+  printf 'target=stub:1\nbackend=stub\noffice=mason\nrepo=\nworktree=\nbranch=\nbase=main\nsession=%s\nwrites=%s\n' \
     "$ERRAND_OWNER" "$writes" > "$REEVE_HOME/state/$id.meta"
   : > "$REEVE_HOME/errands/$id/status"
   local line
@@ -351,7 +351,7 @@ git -C "$REPO" -c user.email=reeve@example.invalid -c user.name=reeve \
     -c commit.gpgsign=false commit -q --allow-empty -m init
 
 brief_for() { # brief_for <id>
-  REEVE_ROOT="$ROOT" "$ROOT/bin/reeve-brief" "$1" "$REPO" --office artificer >/dev/null || return 1
+  REEVE_ROOT="$ROOT" "$ROOT/bin/reeve-brief" "$1" "$REPO" --office mason >/dev/null || return 1
   local b="$REEVE_HOME/errands/$1/brief.md"
   sed -e 's/{INTENT}/the liege said so/' -e 's/{SPEC}/build the thing/' "$b" > "$b.filled" \
     && mv "$b.filled" "$b"
@@ -416,7 +416,7 @@ if waitfor 10 '[ -f "$LOCK" ]'; then
   if waitfor 15 '[ -n "$(meta_of live tornDown)" ]'; then
     ok "3 the finished hand is cleaned up with no reeve anywhere"
     eq "3 its session was freed"    "$(killed stub:1)" yes
-    eq "3 and its copy removed"     "$([ -d "$SCRATCH/holding.worktrees/artificer-live" ] && echo present || echo absent)" absent
+    eq "3 and its copy removed"     "$([ -d "$SCRATCH/holding.worktrees/mason-live" ] && echo present || echo absent)" absent
   else
     bad "3 the finished hand is cleaned up with no reeve anywhere" \
         "the caretaker never tore it down: $(cat "$REEVE_HOME/state/live.meta")"
@@ -431,7 +431,7 @@ if waitfor 10 '[ -f "$LOCK" ]'; then
   eq  "3 the kept hand beside it was left running" \
       "$(meta_of optout tornDown)|$(meta_of optout target)" "|stub:1"
   eq  "3 with its copy" \
-      "$([ -d "$SCRATCH/holding.worktrees/artificer-optout" ] && echo present || echo absent)" present
+      "$([ -d "$SCRATCH/holding.worktrees/mason-optout" ] && echo present || echo absent)" present
   eq  "3 the lock is gone with it" "$([ -e "$LOCK" ] && echo present || echo absent)" absent
   eq  "3 it wrote nothing to its log, having nothing to report" \
       "$([ -s "$LOG" ] && cat "$LOG" || echo '')" ""

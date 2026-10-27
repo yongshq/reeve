@@ -15,7 +15,7 @@ eq() { # eq <name> <want> <got>
 # --- the declarations themselves -------------------------------------------
 eq "scribe is cheap"            "low" "$(office_tier scribe effort)"
 eq "steward is cheap"           "low" "$(office_tier steward effort)"
-eq "artificer is unset"         ""    "$(office_tier artificer effort)"
+eq "mason is unset"         ""    "$(office_tier mason effort)"
 eq "scout is unset"             ""    "$(office_tier scout effort)"
 # The one office where a cheap default would cost the household a real review.
 eq "warden effort never cheap"  ""    "$(office_tier warden effort)"
@@ -39,8 +39,8 @@ eq "unknown office reads unset" ""    "$(office_tier nosuchoffice effort)"
 # --- precedence -------------------------------------------------------------
 eq "flag beats office"      "high|flag"   "$(tier_resolve scribe effort high)"
 eq "office beats nothing"   "low|office"  "$(tier_resolve scribe effort '')"
-eq "harness when unset"     "|harness"    "$(tier_resolve artificer effort '')"
-eq "flag on an unset office" "opus|flag"  "$(tier_resolve artificer model opus)"
+eq "harness when unset"     "|harness"    "$(tier_resolve mason effort '')"
+eq "flag on an unset office" "opus|flag"  "$(tier_resolve mason model opus)"
 
 # The two axes resolve alone: the scribe defaults effort and pins no model, so
 # one comes from the office and the other from the harness in the same dispatch.
@@ -51,7 +51,7 @@ eq "model flag, effort still office" "low|office" "$(tier_resolve scribe effort 
 
 # --- an office with no default behaves exactly as today ---------------------
 for axis in model effort; do
-  eq "artificer $axis unchanged" "|harness" "$(tier_resolve artificer "$axis" '')"
+  eq "mason $axis unchanged" "|harness" "$(tier_resolve mason "$axis" '')"
 done
 
 # --- what a reeve is told ---------------------------------------------------

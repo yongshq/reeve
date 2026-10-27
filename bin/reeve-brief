@@ -52,6 +52,9 @@ done
 require_id "$id"
 [ -n "$holding" ] || die "no holding given. a holding is a repo: a registered name, or a path"
 [ -n "$office" ]  || die "no --office given. one of: $(office_names | tr '\n' ' ')"
+canon=$(office_canon "$office")
+[ "$canon" = "$office" ] || warn "office '$office' is the old name of the $canon, briefing a $canon"
+office=$canon
 
 # --- the ticket -------------------------------------------------------------
 # A key belonging to a foreign tracker, so its shape is not ours to constrain:
@@ -199,11 +202,11 @@ done
 # only read get a detached worktree, so an investigation never litters the
 # branch list with something nobody will ever merge.
 case $office in
-  artificer) writes=yes; [ -n "$type" ] || type=feat ;;
-  scribe)    writes=yes; [ -n "$type" ] || type=docs ;;
-  steward)   writes=home; type='' ;;
+  mason)   writes=yes; [ -n "$type" ] || type=feat ;;
+  scribe)  writes=yes; [ -n "$type" ] || type=docs ;;
+  steward) writes=home; type='' ;;
   scout|warden) writes=no; type='' ;;
-  *)         writes=yes; [ -n "$type" ] || type=chore ;;
+  *)       writes=yes; [ -n "$type" ] || type=chore ;;
 esac
 
 branch=''

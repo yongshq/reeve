@@ -256,7 +256,7 @@ one() {
 
   printf 'errand    %s\n' "$i"
   printf 'reeve     %s\n' "$(reeve_of "$i")"
-  printf 'office    %s on %s via %s\n' "$(meta_show "$i" office)" "$(meta_show "$i" harness)" "$(meta_show "$i" backend)"
+  printf 'office    %s on %s via %s\n' "$(office_canon "$(meta_show "$i" office)")" "$(meta_show "$i" harness)" "$(meta_show "$i" backend)"
   printf 'tier      %s\n' "$(tier_line "$i")"
   printf 'holding   %s\n' "$(meta_show "$i" repo)"
   # No line at all when there is no ticket: an errand that belongs to nothing
@@ -327,11 +327,11 @@ table_row() {
   w=$([ "$o" -gt 0 ] && printf '%s waiting' "$o" || printf -- '-')
   if [ "$all" = yes ]; then
     printf '%-24s %-11s %-16s %-16s %-10s %s\n' \
-      "$i" "$(meta_show "$i" office)" "$(status_field "$i" state)" "$(live_state "$i")" "$w" \
+      "$i" "$(office_canon "$(meta_show "$i" office)")" "$(status_field "$i" state)" "$(live_state "$i")" "$w" \
       "$(reeve_of "$i")"
   else
     printf '%-24s %-11s %-16s %-16s %s\n' \
-      "$i" "$(meta_show "$i" office)" "$(status_field "$i" state)" "$(live_state "$i")" "$w"
+      "$i" "$(office_canon "$(meta_show "$i" office)")" "$(status_field "$i" state)" "$(live_state "$i")" "$w"
   fi
 }
 

@@ -110,7 +110,7 @@ meta_set "$id" reeve "$rname"
 relabeled=no
 tgt=$(meta_get "$id" target '')
 if [ -n "$tgt" ]; then
-  label=$(hand_label "$(meta_get "$id" office '')" "$id" "$rname")
+  label=$(hand_label "$(office_canon "$(meta_get "$id" office '')")" "$id" "$rname")
   # A backend whose target names its label hands back the target to keep.
   if newt=$("$BIN/reeve-backend" call relabel "$tgt" "$label" \
       --backend "$(meta_get "$id" backend herdr)" 2>/dev/null); then

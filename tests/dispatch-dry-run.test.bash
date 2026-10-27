@@ -124,7 +124,7 @@ dispatch() { # dispatch <id> <harness> [args...]  -> sets OUT, ERR, RC
 }
 
 # --- 1. the office WITH a settings file --------------------------------------
-brief_for guarded artificer || bad "1 reeve-brief refused"
+brief_for guarded mason || bad "1 reeve-brief refused"
 before=$(snapshot)
 dispatch guarded stub --dry-run
 after=$(snapshot)
@@ -133,7 +133,7 @@ eq  "1 the dry run succeeds"                  "$RC" 0
 has "1 it still claims nothing was changed"   "$OUT" "nothing was changed."
 same "1 the home and the code root are untouched" "$before" "$after"
 has "1 the copy is printed as a command it would run" "$OUT" \
-    "would run: cp $STUB/offices/artificer.settings.json $REEVE_HOME/errands/guarded/settings.json"
+    "would run: cp $STUB/offices/mason.settings.json $REEVE_HOME/errands/guarded/settings.json"
 
 # The subtlety that decides whether this is one line or more: the settings path
 # is consumed to render the launch line the dry run prints. Skipping the copy
@@ -164,12 +164,12 @@ same "2 the home and the code root are untouched" "$before" "$after"
 # backend's launch does nothing, so nothing is ever running. No caretaker either:
 # one left on this home restamps state/.sentry.lock every poll, and every later
 # manifest comparison would race it.
-brief_for real artificer || bad "3 reeve-brief refused"
+brief_for real mason || bad "3 reeve-brief refused"
 REEVE_NO_CARETAKER=1 dispatch real stub
 settings="$REEVE_HOME/errands/real/settings.json"
 eq  "3 a real dispatch succeeds"              "$RC" 0
 eq  "3 the settings file is there"            "$([ -f "$settings" ] && echo present || echo absent)" present
-if cmp -s "$STUB/offices/artificer.settings.json" "$settings"
+if cmp -s "$STUB/offices/mason.settings.json" "$settings"
 then ok "3 and is a copy of the office's own"
 else bad "3 and is a copy of the office's own" "the two files differ"; fi
 eq  "3 the endpoint is recorded"              "$(grep -m1 '^target=' "$REEVE_HOME/state/real.meta")" "target=stub:1"
@@ -179,7 +179,7 @@ case $(grep -m1 '^branchMade=' "$REEVE_HOME/state/real.meta") in
   *) bad "3 the record says the household made the branch, by its birth" \
          "$(grep '^branchMade=' "$REEVE_HOME/state/real.meta")" ;;
 esac
-eq  "3 the copy was really created"           "$([ -d "$WORKTREES/artificer-real" ] && echo present || echo absent)" present
+eq  "3 the copy was really created"           "$([ -d "$WORKTREES/mason-real" ] && echo present || echo absent)" present
 eq  "3 and no caretaker holds this home"      "$([ -e "$REEVE_HOME/state/.sentry.lock" ] && echo present || echo absent)" absent
 
 # --- 4. and a dry run after a real one changes nothing either ----------------
@@ -190,7 +190,7 @@ eq  "3 and no caretaker holds this home"      "$([ -e "$REEVE_HOME/state/.sentry
 # differ from what the errand already has.
 printf '{"permissions":{"allow":["Bash(true)"]}}\n' > "$STUB/offices/warden.settings.json"
 brief_for second warden || bad "4 reeve-brief refused"
-cp "$STUB/offices/artificer.settings.json" "$REEVE_HOME/errands/second/settings.json"
+cp "$STUB/offices/mason.settings.json" "$REEVE_HOME/errands/second/settings.json"
 before=$(snapshot)
 dispatch second stub --dry-run
 after=$(snapshot)
@@ -226,7 +226,7 @@ printf 'isolated\n' > "$REEVE_HOME/config/browser-mode"
 export REEVE_NO_CARETAKER=1
 meta_of() { grep -m1 "^$2=" "$REEVE_HOME/state/$1.meta" | cut -d= -f2-; }
 
-brief_for look artificer || bad "5 reeve-brief refused"
+brief_for look mason || bad "5 reeve-brief refused"
 before=$(snapshot)
 PATH="$STUBS:$PATH" dispatch look browsing --dry-run
 after=$(snapshot)
@@ -250,7 +250,7 @@ has "6 the record says what it went out with"          "$(meta_of look browser)"
 has "6 and so does the summary"                        "$OUT" "browser  reeve-browser"
 
 printf '%s\n' "$SCRATCH/no-chrome-here" > "$REEVE_HOME/config/browser-chrome"
-brief_for blind artificer || bad "7 reeve-brief refused"
+brief_for blind mason || bad "7 reeve-brief refused"
 PATH="$STUBS:$PATH" dispatch blind browsing --dry-run
 nas "7 no mcp config reaches the launch line"          "$OUT" "--mcp-config"
 has "7 the dry run names the reason"                   "$OUT" "browser: none: config/browser-chrome"
@@ -271,7 +271,7 @@ eq  "8 an office without the allow rule dispatches"    "$RC" 0
 nas "8 and gets no browser"                            "$OUT" "--mcp-config"
 nas "8 nor any word about one"                         "$OUT$ERR" "browser"
 
-brief_for plain artificer || bad "9 reeve-brief refused"
+brief_for plain mason || bad "9 reeve-brief refused"
 PATH="$STUBS:$PATH" dispatch plain stub --dry-run
 eq  "9 a harness with no browser_flag still dispatches" "$RC" 0
 has "9 and says the harness is why"                    "$ERR" \
@@ -285,7 +285,7 @@ nas "9 with no config written or passed"               "$OUT" "browser_config_wr
 printf 'shared\n' > "$REEVE_HOME/config/browser-mode"
 port=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])' 2>/dev/null)
 printf '%s\n' "${port:-9333}" > "$REEVE_HOME/config/browser-port"
-brief_for shared1 artificer || bad "10 reeve-brief refused"
+brief_for shared1 mason || bad "10 reeve-brief refused"
 before=$(snapshot)
 PATH="$STUBS:$PATH" dispatch shared1 browsing --dry-run
 after=$(snapshot)
@@ -318,7 +318,7 @@ http.server.HTTPServer(("127.0.0.1", port), H).serve_forever()
 PY
   printf '#!/bin/sh\nexec python3 "%s" "$@"\n' "$SCRATCH/fake/devtools.py" > "$fake"; chmod +x "$fake"
   printf '%s\n' "$fake" > "$REEVE_HOME/config/browser-chrome"
-  brief_for shared2 artificer || bad "10 reeve-brief refused"
+  brief_for shared2 mason || bad "10 reeve-brief refused"
   PATH="$STUBS:$PATH" dispatch shared2 browsing
   body=$(cat "$REEVE_HOME/errands/shared2/browser.json" 2>/dev/null)
   eq  "10 with a Chrome that starts, the dispatch succeeds" "$RC" 0
@@ -334,7 +334,7 @@ PY
   # no Chrome is left running for nobody. shared2 is made a non-user first, so
   # this dispatch is the only one that could hold it.
   sed -i.bak 's/^browserMode=shared$/browserMode=isolated/' "$REEVE_HOME/state/shared2.meta"
-  brief_for shared3 artificer || bad "10 reeve-brief refused"
+  brief_for shared3 mason || bad "10 reeve-brief refused"
   STUB_LAUNCH_FAIL=1 PATH="$STUBS:$PATH" dispatch shared3 browsing
   [ "$RC" != 0 ] && ok "10 a launch that fails fails the dispatch" \
     || bad "10 a launch that fails fails the dispatch" "rc $RC"
@@ -350,7 +350,7 @@ printf '%s\n' "$chrome" > "$REEVE_HOME/config/browser-chrome"
 # refuses before anything is made, and says what to fix. An office that does
 # not want it is not stopped by a setting it never reads.
 printf 'sharde\n' > "$REEVE_HOME/config/browser-mode"
-brief_for typo artificer || bad "11 reeve-brief refused"
+brief_for typo mason || bad "11 reeve-brief refused"
 before=$(snapshot)
 PATH="$STUBS:$PATH" dispatch typo browsing --dry-run
 eq  "11 the dry run refuses"                           "$RC" 1

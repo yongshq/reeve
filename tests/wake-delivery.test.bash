@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# An artificer ran for seventy minutes, wrote `done:` to its status file, and
+# A mason ran for seventy minutes, wrote `done:` to its status file, and
 # its session was closed. The reeve that briefed it was never told and sat
 # believing the work was still in flight until the liege said otherwise.
 #
@@ -131,7 +131,7 @@ git -C "$REPO" -c user.email=reeve@example.invalid -c user.name=reeve \
     -c commit.gpgsign=false commit -q --allow-empty -m init
 
 brief_for() { # brief_for <id>
-  REEVE_ROOT="$ROOT" "$ROOT/bin/reeve-brief" "$1" "$REPO" --office artificer >/dev/null || return 1
+  REEVE_ROOT="$ROOT" "$ROOT/bin/reeve-brief" "$1" "$REPO" --office mason >/dev/null || return 1
   local b="$REEVE_HOME/errands/$1/brief.md"
   sed -e 's/{INTENT}/the liege said so/' -e 's/{SPEC}/build the thing/' "$b" > "$b.filled" \
     && mv "$b.filled" "$b"
@@ -150,7 +150,7 @@ fi
 # The hand does its work and finishes. A commit on its own branch is what makes
 # the teardown refuse to remove the copy, which is what left the real errand
 # with an empty target and no tornDown stamp: dismissed, not torn down.
-WT="$SCRATCH/holding.worktrees/artificer-slow"
+WT="$SCRATCH/holding.worktrees/mason-slow"
 date > "$WT/built.txt"
 git -C "$WT" add built.txt
 git -C "$WT" -c user.email=hand@example.invalid -c user.name=hand \
@@ -191,7 +191,7 @@ echo "--- 2. a dismissed errand is still in flight until it is torn down ---"
 export REEVE_HOME="$SCRATCH/home2"
 export REEVE_SESSION=owner
 mkdir -p "$REEVE_HOME/state" "$REEVE_HOME/errands/freed"
-printf 'target=\nbackend=stub\noffice=artificer\nsession=owner\nrepo=\nworktree=\nbranch=feat/x\nbase=main\nwrites=no\ndispatched=2026-09-28T20:25:26\n' \
+printf 'target=\nbackend=stub\noffice=mason\nsession=owner\nrepo=\nworktree=\nbranch=feat/x\nbase=main\nwrites=no\ndispatched=2026-09-28T20:25:26\n' \
   > "$REEVE_HOME/state/freed.meta"
 printf 'working: building\ndone: branch ready, 2 commits\n' > "$REEVE_HOME/errands/freed/status"
 
@@ -212,7 +212,7 @@ has "2 and the watch says so"                                       "$OUT" "noth
 # An errand that was briefed and never sent out is not in flight either, which
 # is the one thing the `target=` rule got right and must not be lost with it.
 mkdir -p "$REEVE_HOME/errands/unsent"
-printf 'target=\nbackend=stub\noffice=artificer\nsession=owner\nrepo=\nworktree=\nbranch=feat/y\nbase=main\nwrites=no\n' \
+printf 'target=\nbackend=stub\noffice=mason\nsession=owner\nrepo=\nworktree=\nbranch=feat/y\nbase=main\nwrites=no\n' \
   > "$REEVE_HOME/state/unsent.meta"
 : > "$REEVE_HOME/errands/unsent/status"
 OUT=$("$ROOT/bin/reeve-sentry" --once --no-reap 2>&1); RC=$?

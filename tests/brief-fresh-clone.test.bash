@@ -62,7 +62,7 @@ brief_for() { # brief_for <id> <holding> <office> -> prints the brief's path
 
 # --- an ordinary holding: no run, but room for one ---------------------------
 r=$(mkrepo plain)
-f=$(brief_for e-plain "$r" artificer)
+f=$(brief_for e-plain "$r" mason)
 lacks "ordinary holding: no fresh-clone section" "$f" "$SECTION"
 has   "ordinary holding: hard rule 1 still leaves room for a spec that asks" "$f" "$CARVE"
 
@@ -80,7 +80,7 @@ r=$(mkrepo harbor)
   || bad "reeve-survey --register --fresh-clone refused"
 has "--fresh-clone lands on the manor line" "$REEVE_HOME/manors.md" \
   "| test: make check | fresh-clone: yes"
-f=$(brief_for e-harbor harbor artificer)
+f=$(brief_for e-harbor harbor mason)
 has "opted-in holding: section present" "$f" "$SECTION"
 has "opted-in holding: the run uses the holding's test command" "$f" \
   'REEVE_HOME="$tmp/home" make check'
@@ -94,7 +94,7 @@ r=$(mkrepo lantern)
 if grep 'holding: lantern ' "$REEVE_HOME/manors.md" | grep -qF 'fresh-clone'; then
   bad "no flag, no field on the manor line"
 else ok "no flag, no field on the manor line"; fi
-f=$(brief_for e-lantern lantern artificer)
+f=$(brief_for e-lantern lantern mason)
 lacks "registered without the flag: no section" "$f" "$SECTION"
 
 # --- the household's own repository: always, no flag -------------------------
@@ -103,7 +103,7 @@ lacks "registered without the flag: no section" "$f" "$SECTION"
 # recognises it.
 f=$(brief_for e-own "$ROOT" scribe)
 has "own repository: section present with no registry entry" "$f" "$SECTION"
-has "own repository: scribe gets it too, not only the artificer" "$f" \
+has "own repository: scribe gets it too, not only the mason" "$f" \
   "git clone -q --branch docs/e-own"
 has "own repository: no test command known, the spec names it" "$f" \
   '<the test command your spec names>'
@@ -113,7 +113,7 @@ has "own repository: no test command known, the spec names it" "$f" \
 r=$(mkrepo own-clone)
 mkdir -p "$r/.claude-plugin"
 cp "$ROOT/.claude-plugin/plugin.json" "$r/.claude-plugin/plugin.json"
-f=$(brief_for e-own-clone "$r" artificer)
+f=$(brief_for e-own-clone "$r" mason)
 has "separate clone of the own repository: section present" "$f" "$SECTION"
 
 # A repository with some other plugin's manifest is not the household's.
@@ -121,16 +121,16 @@ r=$(mkrepo other-plugin)
 mkdir -p "$r/.claude-plugin"
 printf '{\n  "name": "not-reeve",\n  "author": { "name": "reeve" }\n}\n' \
   > "$r/.claude-plugin/plugin.json"
-f=$(brief_for e-other "$r" artificer)
+f=$(brief_for e-other "$r" mason)
 lacks "unrelated plugin repository: no section" "$f" "$SECTION"
 
 # --- the office's own write rule, reconciled once ----------------------------
 # "What you may write" is fixed office text: "Nothing outside it" for the
-# artificer, "Exactly one file" for a reader. A brief that asks for the run
+# mason, "Exactly one file" for a reader. A brief that asks for the run
 # says, right after it, that the throwaway clone is allowed; one that does not
 # ask leaves the office text alone.
 PLUS='Plus a throwaway clone under a temporary directory when this brief asks for a'
-for o in artificer scribe scout warden; do
+for o in mason scribe scout warden; do
   f=$(brief_for "e-plus-$o" "$ROOT" "$o")
   has "own repository, $o: write rule names the clone" "$f" "$PLUS"
   if awk -v p="$PLUS" '/^### What you may write/ { w = 1; next }
@@ -143,9 +143,9 @@ f=$(brief_for e-plus-steward "$ROOT" steward)
 lacks "own repository, steward: no copy, no clone sentence" "$f" "$PLUS"
 
 r=$(mkrepo unchanged)
-f=$(brief_for e-unchanged "$r" artificer)
+f=$(brief_for e-unchanged "$r" mason)
 lacks "ordinary holding: office write rule unchanged" "$f" "$PLUS"
-want=$(sed 's/^#/##/' "$ROOT/offices/artificer.md")
+want=$(sed 's/^#/##/' "$ROOT/offices/mason.md")
 got=$(sed -n '/^### What you may write/,/^### Your rules/p' "$f")
 exp=$(printf '%s\n' "$want" | sed -n '/^### What you may write/,/^### Your rules/p')
 if [ "$got" = "$exp" ]; then ok "ordinary holding: What you may write is the office text verbatim"

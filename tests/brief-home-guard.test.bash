@@ -57,10 +57,10 @@ git init -q "$REPO"
 B="$ROOT/bin/reeve-brief"
 brief_of() { printf '%s/errands/%s/brief.md\n' "$REEVE_HOME" "$1"; }
 
-# The steward is the branch under repair; the artificer is the branch it is
+# The steward is the branch under repair; the mason is the branch it is
 # being held to. Both are rendered from the same holding.
 "$B" e-steward   "$REPO" --office steward   >/dev/null || { printf 'FAIL  brief refused\n'; exit 1; }
-"$B" e-artificer "$REPO" --office artificer >/dev/null || { printf 'FAIL  brief refused\n'; exit 1; }
+"$B" e-mason "$REPO" --office mason >/dev/null || { printf 'FAIL  brief refused\n'; exit 1; }
 
 # The one command block under "Before you touch anything", verbatim. Extracting
 # it rather than restating it is the point: what is exercised below is what the
@@ -78,7 +78,7 @@ expected_of() { # expected_of <brief file> -> the path the brief says pwd -P pri
   sed -n 's/^The first must print `\(.*\)`\. The second.*/\1/p' "$1"
 }
 
-for id in e-steward e-artificer; do
+for id in e-steward e-mason; do
   cmds=$(guard_cmds "$(brief_of "$id")")
   [ -n "$cmds" ] && ok "$id states commands to run" || bad "$id states commands to run" 'no ```sh block'
   # A response with a failing case: the word blocked, appended to the status
@@ -159,9 +159,9 @@ home_case trailing-slash "$SCRATCH/slashhome/" "$SCRATCH/slashhome"
 # --- the repository branch is unchanged --------------------------------------
 # The same three properties, on the branch that already had them, so a later
 # edit cannot quietly hollow out one and leave the other.
-eq "the artificer is still told to print two paths" \
+eq "the mason is still told to print two paths" \
    "pwd -P
-git rev-parse --show-toplevel" "$(guard_cmds "$(brief_of e-artificer)")"
+git rev-parse --show-toplevel" "$(guard_cmds "$(brief_of e-mason)")"
 
 echo "passed=$PASS failed=$FAIL"
 [ "$FAIL" -eq 0 ]

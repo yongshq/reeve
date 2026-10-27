@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# One errand whose session is gone, left in flight (an artificer's pane died
+# One errand whose session is gone, left in flight (a mason's pane died
 # after it committed, so its unlanded branch keeps it there), and a sibling still
 # working. The watch stops at the first errand with something to say, and
 # `stale:` used to be said on every poll of every watch, so the sibling's `done:`
@@ -59,7 +59,7 @@ reeve_backend_stub_wait_change() {
 STUB
 
 # hand <id> <office>: one errand out, owned by this reeve, its last word
-# `working:`. aaa an artificer, as in the case that stays in flight; bbb a scout,
+# `working:`. aaa a mason, as in the case that stays in flight; bbb a scout,
 # so a reaped one leaves nothing behind for cleanup to refuse over.
 hand() {
   mkdir -p "$REEVE_HOME/errands/$1"
@@ -70,7 +70,7 @@ hand() {
 fresh() {
   export REEVE_HOME="$SCRATCH/$1"
   mkdir -p "$REEVE_HOME/state"
-  hand aaa artificer; hand bbb scout
+  hand aaa mason; hand bbb scout
   printf 'missing\n' > "$STUB_GONE"
   printf 'working\n' > "$STUB_ATTN"
 }
@@ -119,7 +119,7 @@ ck_not "2c and does not repeat it"                        "$OUT" "stale: aaa"
 
 # 2d. another reeve's --all watch says it but leaves the one wake to the owner.
 fresh h2d
-REEVE_SESSION=reeve-b hand aaa artificer
+REEVE_SESSION=reeve-b hand aaa mason
 sentry --all --once
 ck_has "2d an --all watch says the owner's gone session"  "$OUT" "stale: aaa"
 ck_eq  "2d without marking it said"                       "$([ -f "$(LATCH)" ] && echo kept || echo gone)" gone
@@ -134,7 +134,7 @@ ck_not "2d and an --all watch does not repeat what the owner was told" "$OUT" "s
 # 2e. the owner is gone too, so never watches again: an --all watch says it
 #     once for itself, then reaches the sibling, then is quiet.
 fresh h2e
-REEVE_SESSION=reeve-dead hand aaa artificer
+REEVE_SESSION=reeve-dead hand aaa mason
 report bbb 'done: report.md written'
 printf 'settled\n' > "$STUB_ATTN"
 sentry --all --once
@@ -160,7 +160,7 @@ ck_has "2e gone again, the --all watch says it again"     "$OUT" "stale: aaa lef
 
 # 2f. the same for a watch that cannot name its session.
 fresh h2f
-REEVE_SESSION=reeve-dead hand aaa artificer
+REEVE_SESSION=reeve-dead hand aaa mason
 report bbb 'done: report.md written'
 printf 'settled\n' > "$STUB_ATTN"
 OUT=$(REEVE_SESSION='' CLAUDE_CODE_SESSION_ID='' REEVE_ATTN_DWELL=0 "$ROOT/bin/reeve-sentry" --all --once 2>&1); RC=$?
@@ -252,7 +252,7 @@ ck_eq  "6 and the latch is gone"                          "$([ -f "$(LATCH)" ] &
 
 # 6b. and every --all watch's latch with it.
 fresh h6b
-REEVE_SESSION=reeve-dead hand aaa artificer
+REEVE_SESSION=reeve-dead hand aaa mason
 sentry --all --once
 ck_eq  "6b the --all latch stands before the line"        "$([ -f "$(LATCH)@reeve-a" ] && echo kept || echo gone)" kept
 report aaa 'failed: pane died'

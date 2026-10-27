@@ -56,7 +56,7 @@ G() { git -C "$repo" "$@" >/dev/null 2>&1; }
 record() { # record <id> <repo> <branch>: the errand record the scope check reads
   local made
   made=$(. "$ROOT/bin/reeve-lib.sh"; branch_birth "$2" "$3")
-  printf 'office=artificer\nrepo=%s\nbranch=%s\nbranchMade=%s\n' "$2" "$3" \
+  printf 'office=mason\nrepo=%s\nbranch=%s\nbranchMade=%s\n' "$2" "$3" \
     "${made:-0000000000000000000000000000000000000000 0}" > "$REEVE_HOME/state/$1.meta"
 }
 scene() { # scene <name> [trunk] [ref format]
@@ -189,7 +189,7 @@ ck_eq  "13 a record for another branch does not prove"  "$RC" 1
 # 14 a record only a brief wrote: dispatch never made the branch, and refuses one
 # that already exists, so br may be the liege's own. Reproduces the review's scene.
 scene briefonly; G cherry-pick br
-printf 'office=artificer\nrepo=%s\nbranch=br\n' "$repo" > "$REEVE_HOME/state/briefonly.meta"
+printf 'office=mason\nrepo=%s\nbranch=br\n' "$repo" > "$REEVE_HOME/state/briefonly.meta"
 prove "$repo" br
 ck_eq  "14 a brief-only record does not prove"         "$RC" 1
 ck_has "14 says no record shows it made"               "$OUT" "no errand record names br"
@@ -348,7 +348,7 @@ prove "$repo" br
 ck_eq  "22 also: a branch that is not there is ignored" "$RC" 1
 ck_has "22 and never asked"                            "$OUT" "equivalent on main; bring it to the liege"
 also dev
-printf 'office=artificer\nrepo=%s\nbranch=dev\n' "$repo" > "$REEVE_HOME/state/alsodev-dev.meta"
+printf 'office=mason\nrepo=%s\nbranch=dev\n' "$repo" > "$REEVE_HOME/state/alsodev-dev.meta"
 prove "$repo" br
 ck_eq  "22 also: an errand's branch is ignored"        "$RC" 1
 rm -f "$REEVE_HOME/state/alsodev-dev.meta"

@@ -1,7 +1,7 @@
 
  ▐▛███▛█   Claude Code v2.1.285
 ▝▜██████▀  Opus 5.5 · Claude Max
- ▝▝   ▝▝   ~/src/lantern.worktrees/artificer-upload
+ ▝▝   ▝▝   ~/src/lantern.worktrees/mason-upload
 
 
 ❯ Read the file /home/liege/.reeve/errands/upload-retry/brief.md and follow it exactly. It is your complete instructions for this task.
@@ -49,5 +49,5 @@
 ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
    upload.ts ·  2h 4m
    Opus 5.5 medium · ctx ██████████ 41% · 5h 12% ↻ in 4h 44m (6:40pm) · 7d 53% ↻ in 1d 21h (11:00am)
-   ~/src/lantern.worktrees/artificer-upload ·  fix/upload-retry
+   ~/src/lantern.worktrees/mason-upload ·  fix/upload-retry
   ⏵⏵ accept edits on (shift+tab to cycle) 

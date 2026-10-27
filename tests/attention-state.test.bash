@@ -83,7 +83,7 @@ reeve_backend_stub_wait_change()     { return 2; }
 STUB
 export STUB_ATTN="$ATTN"
 
-printf 'target=s|s:p1\nbackend=stub\noffice=artificer\nrepo=\nworktree=\nbranch=\nbase=main\nwrites=yes\n' \
+printf 'target=s|s:p1\nbackend=stub\noffice=mason\nrepo=\nworktree=\nbranch=\nbase=main\nwrites=yes\n' \
   > "$REEVE_HOME/state/stalled.meta"
 printf 'working: reading the auth module\n' > "$REEVE_HOME/errands/stalled/status"
 
@@ -222,7 +222,7 @@ ck_eq "4 and the sleep is the whole poll, not a token" "$(sort -u "$STUB_SLEEPS"
 #     remove. One real two second wait, because `spent` is measured on a one
 #     second clock and the threshold is two. Load can only lengthen that wait, so
 #     this direction cannot flake the way the timing above did.
-printf 'target=s|s:p1\nbackend=stub\noffice=artificer\nrepo=\nworktree=\nbranch=\nbase=main\nwrites=yes\n' \
+printf 'target=s|s:p1\nbackend=stub\noffice=mason\nrepo=\nworktree=\nbranch=\nbase=main\nwrites=yes\n' \
   > "$STUB_META"
 : > "$STUB_WAITS"; rm -f "$STUB_SLEEPS"
 cat >> "$REEVE_ROOT/backends/stub.sh" <<'STUB'

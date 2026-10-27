@@ -27,7 +27,7 @@ expect() { # expect <office> <tool> <allow|deny>
 }
 for t in WebSearch WebFetch; do
   expect scout "$t" allow
-  for o in artificer warden scribe steward; do expect "$o" "$t" deny; done
+  for o in mason warden scribe steward; do expect "$o" "$t" deny; done
 done
 echo "passed=$PASS failed=$FAIL"
 [ "$FAIL" -eq 0 ]

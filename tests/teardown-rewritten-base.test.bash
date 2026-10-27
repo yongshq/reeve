@@ -66,7 +66,7 @@ order() { # order <text> <first> <second> -> before|after|missing
 # repositories is something the script under test put there. That keeps
 # `unreachable` a real assertion rather than a scene artefact.
 #
-# shape: branch    the copy sits on fix/<id>, as an artificer's does
+# shape: branch    the copy sits on fix/<id>, as a mason's does
 #        detached  no branch at all, as a scout's or a warden's does
 #        clean     detached and committed nothing, as a scout leaves it
 mk() { # mk <id> <shape>
@@ -160,7 +160,7 @@ kept() { # kept <label> <id> <repo> <wt> <sha> [rc, default 1]
 MOVED='has held a position that does contain that work'
 DATED='after this errand went out'          # what it must no longer assert
 
-# 1. THE DEFECT. An artificer's branch that landed, and then main was reset back
+# 1. THE DEFECT. A mason's branch that landed, and then main was reset back
 #    under it. Before this fix the refusal said the branch had commits main does
 #    not have and told the reader to rebase or merge it, which is advice about a
 #    branch that already landed.
@@ -415,7 +415,7 @@ ck_eq  "5d the commit is not lost"           "$(survives "$real_repo" "$sha")" s
 # consulted anywhere else, which is what keeps a rewritten base from turning
 # into a new way to refuse a cleanup that was always fine.
 
-# 6. the ordinary artificer: landed, and main moved on afterwards, which it
+# 6. the ordinary mason: landed, and main moved on afterwards, which it
 #    always does. The base moving FORWARD is not a rewrite and must not read as
 #    one.
 mk landed-advanced branch

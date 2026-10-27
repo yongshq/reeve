@@ -88,8 +88,8 @@
 #   copy's own reflog, after a commit and then a `reset --hard`, is lost. Left
 #   open because the false-refusal rate is close to total: one `commit
 #   --amend`, one `rebase -i`, one `reset --hard` leaves a non-ancestor in the
-#   reflog, and every artificer does at least one. Requiring every reflog entry
-#   to be landed would refuse nearly every copy forever, over work the hand
+#   reflog, and every mason does at least one. Requiring every reflog entry to
+#   be landed would refuse nearly every copy forever, over work the hand
 #   deliberately threw away, and a guard that noisy gets worked around. This
 #   script has no --force, so that workaround would be worse than the hole.
 #
@@ -596,7 +596,7 @@ dismiss=no; dismissed=no; gone=no
 # rather than reading as though it had been asked.
 base_missing_note=''
 # Exit 1 for every refusal but one. A branch that simply has not landed yet, the
-# routine end of every artificer errand, exits 3 (refuse_rc=3 on that call), so a
+# routine end of every mason errand, exits 3 (refuse_rc=3 on that call), so a
 # caller can tell the ordinary keep from a refusal worth investigating without
 # reading the English. Still a refusal, and still non-zero.
 refuse_rc=1
@@ -680,8 +680,8 @@ endpoint_check() { # endpoint_check <endpoint>: refuse while a hand works there
 # A hand that has reported a terminal state with nothing open is done working;
 # its agent is just idling at a prompt holding a pane. Freeing it loses nothing,
 # because the status file and any report are already on disk. Doing this after
-# the landed-work checks meant an artificer with an unlanded branch kept its
-# session alive forever, which is the opposite of cleaning up.
+# the landed-work checks meant a mason with an unlanded branch kept its session
+# alive forever, which is the opposite of cleaning up.
 if [ "$dismiss" = yes ] && [ -n "$target" ]; then
   info "dismissing the hand's session, it reported $reported"
   run "$BIN/reeve-backend" call kill "$target" --backend "$backend" \

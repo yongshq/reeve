@@ -8,7 +8,7 @@
 # A scout is the case that cannot survive that, and case 2 is it: a scout
 # commits nothing, so the landed-work guard in bin/reeve-teardown has nothing to
 # refuse over, the copy is removed, and the owning reeve is never told. The
-# guard that protects an artificer is structurally incapable of protecting a
+# guard that protects a mason is structurally incapable of protecting a
 # scout, which is why this is enforced by ownership rather than left to it.
 #
 # Scratch homes only, never the real one.
@@ -455,7 +455,7 @@ OUT=$(STUB_STATE=missing td_watch cgo early)
 has "11 a kept copy beside a closed session says gone" \
   "$OUT" "[session gone, copy kept, cleanup refused: stub says no to early.]"
 
-# The routine artificer finish: teardown keeps the branch only because it has
+# The routine mason finish: teardown keeps the branch only because it has
 # not landed yet (exit 3). That reads as the ordinary keep, never as a refusal,
 # copy on disk or not. Any other refusal on a kept branch still says why, above.
 errand cun sess-R "working: x" "done: finished"; oncopy cun feat/z

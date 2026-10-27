@@ -317,9 +317,9 @@ blind=''
 #
 # reeve-teardown owns the safety rules and is the single owner of them: it
 # always frees the session first, then removes the copy only when nothing would
-# be lost. So a scout is cleaned up completely, while an artificer keeps its
-# branch and copy and only loses its idle session. Output is suppressed because
-# the sentry's contract is exactly one line.
+# be lost. So a scout is cleaned up completely, while a mason keeps its branch
+# and copy and only loses its idle session. Output is suppressed because the
+# sentry's contract is exactly one line.
 # Set by reap_one: whether the teardown reached a decision at all. A refusal is
 # a decision and is final until the liege acts, so the errand is done with here.
 # Failing to take the lock is not a decision, and treating it as one strands the
@@ -742,12 +742,12 @@ check_one() {
   #
   # One gone session, one wake, in the gone latch. Without it this line came
   # back on every poll of every watch, and the loop below stops at the first
-  # errand with something to say, so one dead hand that stays in flight (an
-  # artificer's unlanded branch) hid every sibling's `done:` and `waiting` for
-  # as long as it stood. Keyed on the status file as the idle latch is, so a
-  # line reported since is a new episode, and an errand dispatched again under
-  # the same id after a cleanup never matches the old file. The session coming
-  # back, or a terminal line above, ends the episode. `unreadable` ends nothing, as
+  # errand with something to say, so one dead hand that stays in flight (a
+  # mason's unlanded branch) hid every sibling's `done:` and `waiting` for as
+  # long as it stood. Keyed on the status file as the idle latch is, so a line
+  # reported since is a new episode, and an errand dispatched again under the
+  # same id after a cleanup never matches the old file. The session coming back,
+  # or a terminal line above, ends the episode. `unreadable` ends nothing, as
   # `unknown` re-arms nothing for the idle latch. Never reaped either way, and
   # the listing reads the session itself, so it still shows the hand gone.
   #

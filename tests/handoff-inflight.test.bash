@@ -55,11 +55,11 @@ ck "the empty case keeps the way back to the record" 1 "$(printf '%s\n' "$sec" |
 ck "the heading survives" 1 "$(printf '%s\n' "$sec" | grep -c '^## In flight')"
 
 echo "--- mixed errands ---"
-seed done-torn      artificer 2026-09-14T01:00:00 'working: building' 'done: landed'
-seed failed-torn    artificer 2026-09-14T02:00:00 'working: building' 'failed: gave up'
-seed done-kept      artificer -                   'working: building' 'done: branch ready'
+seed done-torn      mason 2026-09-14T01:00:00 'working: building' 'done: landed'
+seed failed-torn    mason 2026-09-14T02:00:00 'working: building' 'failed: gave up'
+seed done-kept      mason -                   'working: building' 'done: branch ready'
 seed still-working  scout     -                   'working: still reading'
-seed asking         artificer -                   'needs-decision [key=q1]: which one'
+seed asking         mason -                   'needs-decision [key=q1]: which one'
 seed not-dispatched warden    -
 # A different manor, because the filename carries only minutes: a second handoff
 # for the same manor in the same minute is refused, by design.
@@ -72,7 +72,7 @@ for i in done-kept still-working asking not-dispatched; do
   ck "$i is listed" 1 "$(printf '%s\n' "$sec" | grep -c "^$i ")"
 done
 # Both halves of the test matter: terminal alone is not enough to drop a row,
-# because a done artificer still holding a branch is the liege's next decision.
+# because a done mason still holding a branch is the liege's next decision.
 for i in done-torn failed-torn; do
   ck "$i is left out, it is finished and cleaned up" 0 "$(printf '%s\n' "$sec" | grep -c "^$i ")"
 done

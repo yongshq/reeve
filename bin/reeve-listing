@@ -21,7 +21,7 @@
 #    "reeves":[{"name":"Aldric",
 #               "session":{"backend":"hall","name":"default","pane_id":"w1:p1"},
 #               "live":true}],
-#    "errands":[{"id":"fix-auth","office":"artificer","owner_reeve":"Aldric",
+#    "errands":[{"id":"fix-auth","office":"mason","owner_reeve":"Aldric",
 #                "hand_state":"needs-decision","question":"Which base?","open":1,
 #                "waiting":false,"idle":false,"wedged":false,
 #                "since":{"waiting":null,"idle":null,"wedged":null},
@@ -211,6 +211,7 @@ for rec in "$@"; do
   id=${1##*/}; id=${id%.meta}
   office=${2:-}; reeve=${3:-}; own=${4:-}; backend=${5:-}; place=${6:-}; target=${7:-}
   valid_id "$id" || continue
+  office_canon "$office" office
   # A record without the key predates hall, as every reader takes it.
   [ -n "$backend" ] || backend=herdr
 

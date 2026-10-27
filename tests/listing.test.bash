@@ -94,7 +94,7 @@ session s-gone Cedric $((NOW - 5000)) 'w2:p1@/run/hall.sock' 'hall default'
 session s-idle Osric $((NOW - 5000))
 session s-anon - $NOW
 
-meta fix-auth office=artificer reeve=Aldric session=s-ald backend=hall place=default \
+meta fix-auth office=mason reeve=Aldric session=s-ald backend=hall place=default \
   'target=w1|w1:p3|w1:t2#c123l456' dispatched=2026-10-01T10:00:00
 log fix-auth 'working: 2026-10-01T10:00:00Z reading' 'needs-decision [key=base]: 2026-10-01T10:05:00Z Which base?'
 meta scout-x office=scout session=s-bran 'target=w4|w4:p7' dispatched=2026-10-01T10:00:00
@@ -111,7 +111,7 @@ echo "--- 1. the golden document ---"
 out=$(L 2>"$SCRATCH/err"); rc=$?
 eq  "1 exit 0"                                              "$rc" 0
 eq  "1 nothing on stderr"                                   "$(cat "$SCRATCH/err")" ''
-GOLD='{"version":1,"reeves":[{"name":"Aldric","session":{"backend":"hall","name":"default","pane_id":"w1:p1"},"live":true},{"name":"Bran","session":{"backend":"herdr","name":null,"pane_id":"w4:p2"},"live":true},{"name":"Cedric","session":{"backend":"hall","name":"default","pane_id":"w2:p1"},"live":false}],"errands":[{"id":"fix-auth","office":"artificer","owner_reeve":"Aldric","hand_state":"needs-decision","question":"Which base?","open":1,"waiting":false,"idle":false,"wedged":false,"since":{"waiting":null,"idle":null,"wedged":null},"session":{"backend":"hall","name":"default","pane_id":"w1:p3"}},{"id":"orphan","office":"scribe","owner_reeve":"Cedric","hand_state":"working","question":null,"open":0,"waiting":false,"idle":false,"wedged":false,"since":{"waiting":null,"idle":null,"wedged":null},"session":{"backend":"hall","name":"default","pane_id":"w2:p5"}},{"id":"scout-x","office":"scout","owner_reeve":"Bran","hand_state":"done","question":null,"open":0,"waiting":false,"idle":false,"wedged":false,"since":{"waiting":null,"idle":null,"wedged":null},"session":{"backend":"herdr","name":null,"pane_id":"w4:p7"}},{"id":"silent","office":"warden","owner_reeve":"Aldric","hand_state":"absent","question":null,"open":0,"waiting":false,"idle":false,"wedged":false,"since":{"waiting":null,"idle":null,"wedged":null},"session":{"backend":"herdr","name":null,"pane_id":null}}]}'
+GOLD='{"version":1,"reeves":[{"name":"Aldric","session":{"backend":"hall","name":"default","pane_id":"w1:p1"},"live":true},{"name":"Bran","session":{"backend":"herdr","name":null,"pane_id":"w4:p2"},"live":true},{"name":"Cedric","session":{"backend":"hall","name":"default","pane_id":"w2:p1"},"live":false}],"errands":[{"id":"fix-auth","office":"mason","owner_reeve":"Aldric","hand_state":"needs-decision","question":"Which base?","open":1,"waiting":false,"idle":false,"wedged":false,"since":{"waiting":null,"idle":null,"wedged":null},"session":{"backend":"hall","name":"default","pane_id":"w1:p3"}},{"id":"orphan","office":"scribe","owner_reeve":"Cedric","hand_state":"working","question":null,"open":0,"waiting":false,"idle":false,"wedged":false,"since":{"waiting":null,"idle":null,"wedged":null},"session":{"backend":"hall","name":"default","pane_id":"w2:p5"}},{"id":"scout-x","office":"scout","owner_reeve":"Bran","hand_state":"done","question":null,"open":0,"waiting":false,"idle":false,"wedged":false,"since":{"waiting":null,"idle":null,"wedged":null},"session":{"backend":"herdr","name":null,"pane_id":"w4:p7"}},{"id":"silent","office":"warden","owner_reeve":"Aldric","hand_state":"absent","question":null,"open":0,"waiting":false,"idle":false,"wedged":false,"since":{"waiting":null,"idle":null,"wedged":null},"session":{"backend":"herdr","name":null,"pane_id":null}}]}'
 eq  "1 exactly the document"                                "$out" "$GOLD"
 if command -v python3 >/dev/null 2>&1; then
   printf '%s' "$out" | python3 -c 'import json,sys; json.load(sys.stdin)' 2>/dev/null; rc=$?
@@ -180,7 +180,7 @@ flags() { L | grep -o '"id":"w-1"[^}]*' | grep -o '"waiting":[a-z]*,"idle":[a-z]
 # since <id>   that errand's since object, its three values as `w i d`
 since() { L | grep -o "\"id\":\"$1\"[^}]*}" | sed -n 's/.*"since":{"waiting":\([^,]*\),"idle":\([^,]*\),"wedged":\([^}]*\)}.*/\1 \2 \3/p'; }
 lib() { bash -c '. "$1/bin/reeve-lib.sh"; shift; "$@"' _ "$ROOT" "$@"; }
-meta w-1 office=artificer reeve=Aldric session=s-ald backend=hall place=default 'target=w1|w1:p8|w1:t8' dispatched=x
+meta w-1 office=mason reeve=Aldric session=s-ald backend=hall place=default 'target=w1|w1:p8|w1:t8' dispatched=x
 log w-1 'working: one' 'working: two'
 backdate "$H/errands/w-1/status" 20000
 watch_on
@@ -295,7 +295,7 @@ if [ "$(id -u)" != 0 ]; then
   chmod 000 "$H/errands/fix-auth/status"
   out=$(L 2>"$SCRATCH/err"); rc=$?
   chmod 644 "$H/errands/fix-auth/status"
-  has "7 a status it cannot read: that errand unknown"      "$rc:$out" '"id":"fix-auth","office":"artificer","owner_reeve":"Aldric","hand_state":"unknown"'
+  has "7 a status it cannot read: that errand unknown"      "$rc:$out" '"id":"fix-auth","office":"mason","owner_reeve":"Aldric","hand_state":"unknown"'
 fi
 help=$(L --help | tr -s ' \n' '  ')
 has "7 the help says a status it cannot read shows unknown" "$help" 'whose status cannot be read shows hand_state "unknown"'
@@ -308,7 +308,7 @@ echo "--- 8. owner_reeve: the owning session's name now ---"
 # name the brief recorded goes stale while the reeve row shows the new one.
 printf 'Bertram\n' > "$H/state/sessions/s-ald/name"
 out=$(L)
-has "8 renamed after dispatch: the hand's owner is the new name" "$out" '"id":"fix-auth","office":"artificer","owner_reeve":"Bertram"'
+has "8 renamed after dispatch: the hand's owner is the new name" "$out" '"id":"fix-auth","office":"mason","owner_reeve":"Bertram"'
 has "8 and so is the reeve row it nests under"              "$out" '{"name":"Bertram","session":{"backend":"hall","name":"default","pane_id":"w1:p1"}'
 nas "8 the old name nowhere"                                "$out" '"Aldric"'
 printf 'Aldric\n' > "$H/state/sessions/s-ald/name"
@@ -349,7 +349,7 @@ echo "--- 10. since across a watch that stops and starts again ---"
 H3="$SCRATCH/watched"
 mkdir -p "$H3/state/sessions/s-w" "$H3/errands/r-1" "$H3/config"
 printf 'Wynn\n' > "$H3/state/sessions/s-w/name"; printf '%s\n' "$NOW" > "$H3/state/sessions/s-w/seen"
-printf '%s\n' office=artificer reeve=Wynn session=s-w backend=stub 'target=s|s:p1' dispatched=x > "$H3/state/r-1.meta"
+printf '%s\n' office=mason reeve=Wynn session=s-w backend=stub 'target=s|s:p1' dispatched=x > "$H3/state/r-1.meta"
 export STUB_ATTN="$SCRATCH/stub-attn" STUB_PANE="$SCRATCH/stub-pane"
 cat > "$REEVE_ROOT/backends/stub.sh" <<'STUB'
 reeve_backend_stub_available()        { return 0; }

@@ -127,7 +127,7 @@ HARNESS
 n=0
 go() { # go <repo> [args...] -> OUT/ERR/RC, a fresh errand each time
   local repo=$1; shift; n=$((n+1))
-  "$ROOT/bin/reeve-brief" "e$n" "$repo" --office artificer >/dev/null 2>&1 || { OUT=''; ERR='brief refused'; RC=99; return; }
+  "$ROOT/bin/reeve-brief" "e$n" "$repo" --office mason >/dev/null 2>&1 || { OUT=''; ERR='brief refused'; RC=99; return; }
   local b="$REEVE_HOME/errands/e$n/brief.md"
   sed -e 's/{INTENT}/the liege said so/' -e 's/{SPEC}/build it/' "$b" > "$b.f" && mv "$b.f" "$b"
   OUT=$(REEVE_ROOT="$STUB" "$ROOT/bin/reeve-dispatch" "e$n" --backend stub --harness claude "$@" 2>"$SCRATCH/err"); RC=$?

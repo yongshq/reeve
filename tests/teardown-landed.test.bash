@@ -450,7 +450,7 @@ ck_eq  "14 its copy is removed"                             "$(gone "$wt")" remo
 ck_eq  "14 nothing is orphaned"                             "$(unreachable "$repo")" none
 ck_eq  "14 the base commit is untouched"                    "$(survives "$repo" "$sha")" survived
 
-# 14b. the same shape with a landed branch recorded, which is what an artificer
+# 14b. the same shape with a landed branch recorded, which is what a mason
 #      leaves behind once its work is in. The base moving on afterwards must not
 #      turn that into a refusal either.
 cell over-refusal-branch landed at-base yes

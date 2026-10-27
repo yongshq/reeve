@@ -239,24 +239,24 @@ dry_label() { # dry_label <sid> <id>
 }
 
 REEVE_SESSION=lead "$N" claim Escanor >/dev/null 2>&1
-brief lead fix-auth artificer
+brief lead fix-auth mason
 eq "10 the brief names the reeve that sent it" "| reeve | Escanor |" \
    "$(grep '^| reeve |' "$REEVE_HOME/errands/fix-auth/brief.md")"
 eq "10 and the record keeps it" "reeve=Escanor" "$(grep '^reeve=' "$REEVE_HOME/state/fix-auth.meta")"
-eq "10 a dry run labels the hand <Office> of <Name>" "Artificer of Escanor" \
+eq "10 a dry run labels the hand <Office> of <Name>" "Mason of Escanor" \
    "$(dry_label lead fix-auth)"
 eq "10 the dry run wrote no name for a session that had none" "" \
    "$(dry_label nameless fix-auth >/dev/null; cat "$SESS/nameless/name" 2>/dev/null)"
 
 printf '%s\n' '{office} {id} for {reeve}' > "$REEVE_HOME/config/hand-label"
-eq "11 config/hand-label reshapes it, spaces and all" "artificer fix-auth for Escanor" \
+eq "11 config/hand-label reshapes it, spaces and all" "mason fix-auth for Escanor" \
    "$(dry_label lead fix-auth)"
 printf '%s\n' '"{reeve}" \{office}' > "$REEVE_HOME/config/hand-label"
-eq "11 quotes and backslashes are kept out, so the dry run still parses" "Escanor artificer" \
+eq "11 quotes and backslashes are kept out, so the dry run still parses" "Escanor mason" \
    "$(dry_label lead fix-auth)"
 printf '%s\n' '{Office}/{office} {reeve}: {id}' > "$REEVE_HOME/config/hand-label"
 eq "11 {Office} is capitalised, {office} as written, {id} still offered" \
-   "Artificer/artificer Escanor: fix-auth" "$(dry_label lead fix-auth)"
+   "Mason/mason Escanor: fix-auth" "$(dry_label lead fix-auth)"
 rm -f "$REEVE_HOME/config/hand-label"
 
 # Briefed with no session id: no name to give, so the label says what it can.
@@ -281,14 +281,14 @@ eq "14 a handoff records the reeve's name for the next session to claim" "- **Re
 printf '\n--- adoption renames ---\n'
 # The errand's owner is gone, so a new reeve may take it, and the hand's label
 # follows: the record, then the backend, by the target it returned.
-brief lead other artificer
+brief lead other mason
 record lead Escanor dead
 REEVE_SESSION=heir "$N" claim Percy >/dev/null 2>&1
 printf 'target=stub:1\nbackend=stub\n' >> "$REEVE_HOME/state/fix-auth.meta"
 out=$(REEVE_SESSION=heir REEVE_ROOT="$STUB" "$ROOT/bin/reeve-adopt" fix-auth 2>&1); rc=$?
 eq "15 adopted" "0" "$rc"
 eq "15 the record names the new reeve" "reeve=Percy" "$(grep '^reeve=' "$REEVE_HOME/state/fix-auth.meta")"
-eq "15 and the hand is relabelled by its target" "stub:1|Artificer of Percy" \
+eq "15 and the hand is relabelled by its target" "stub:1|Mason of Percy" \
    "$(cat "$REEVE_HOME/relabels" 2>/dev/null)"
 has "15 which it says" "$out" "relabelled"
 

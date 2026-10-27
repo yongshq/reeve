@@ -6,7 +6,7 @@
 # is every errand whose session has been freed: 46 of the 49 on the day this was
 # written, so the column said no errands had ever gone out.
 #
-# The office line read `artificer on  via ?` because reeve-brief writes
+# The office line read `mason on  via ?` because reeve-brief writes
 # `harness=` present and empty before dispatch fills it, and meta_get's fallback
 # only covers an absent key. meta_get itself is left alone: other callers need
 # that distinction, so the guard belongs at the point of printing.
@@ -57,28 +57,28 @@ field() { # field <label> <output>
 
 printf '\n--- PROCESS, one case per state ---\n'
 
-seed never office=artificer repo=/nowhere
+seed never office=mason repo=/nowhere
 ck "no dispatched key stays never-dispatched" \
   "never-dispatched" "$(field process "$(run never)")"
 
-seed gone office=artificer repo=/nowhere \
+seed gone office=mason repo=/nowhere \
   dispatched=2026-09-13T03:24:37 target=
 ck "dispatched with an emptied target is session-gone" \
   "session-gone" "$(field process "$(run gone)")"
 
-seed cleared office=artificer repo=/nowhere \
+seed cleared office=mason repo=/nowhere \
   dispatched=2026-09-13T03:24:37 tornDown=2026-09-14T18:31:10 target=
 ck "a torn down errand says so, not never-dispatched" \
   "torn-down" "$(field process "$(run cleared)")"
 
-seed live office=artificer repo=/nowhere backend=herdr harness=claude \
+seed live office=mason repo=/nowhere backend=herdr harness=claude \
   dispatched=2026-09-14T09:00:00 target=%7
 ck "a live target is still asked of the backend" \
   "alive/working" "$(field process "$(run live)")"
 
 # tornDown without a dispatch is a record that cannot happen, but the reading is
 # ordered so the dispatch question is answered first and it cannot mislead.
-seed odd office=artificer repo=/nowhere tornDown=2026-09-14T18:31:10
+seed odd office=mason repo=/nowhere tornDown=2026-09-14T18:31:10
 ck "tornDown alone does not imply a dispatch" \
   "never-dispatched" "$(field process "$(run odd)")"
 
@@ -121,13 +121,13 @@ ck "every seeded errand is in the table" "9" "$rows"
 printf '\n--- copy falls through an empty cwd ---\n'
 
 # After the table, so its row count stays the nine seeded above.
-seed emptycwd office=artificer repo=/nowhere cwd= worktree=/x
+seed emptycwd office=mason repo=/nowhere cwd= worktree=/x
 ck "an empty cwd falls through to worktree" "/x" "$(field copy "$(run emptycwd)")"
-seed nocopy office=artificer repo=/nowhere
+seed nocopy office=mason repo=/nowhere
 ck "no cwd and no worktree prints a mark" "?" "$(field copy "$(run nocopy)")"
-seed bothempty office=artificer repo=/nowhere cwd= worktree=
+seed bothempty office=mason repo=/nowhere cwd= worktree=
 ck "an empty cwd and worktree print a mark" "?" "$(field copy "$(run bothempty)")"
-seed hascwd office=artificer repo=/nowhere cwd=/c worktree=/x
+seed hascwd office=mason repo=/nowhere cwd=/c worktree=/x
 ck "a set cwd still wins over worktree" "/c" "$(field copy "$(run hascwd)")"
 
 printf '\npassed=%s failed=%s\n' "$PASS" "$FAIL"

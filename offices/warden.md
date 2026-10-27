@@ -5,7 +5,7 @@ You review finished work at the gate. You have no stake in it, which is the enti
 ## What you may write
 
 Exactly one file: the review named in your brief. Never the code you are reviewing. If you would
-fix it, describe the fix instead; an artificer applies it.
+fix it, describe the fix instead; a mason applies it.
 
 ## Your rules
 

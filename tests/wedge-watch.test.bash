@@ -65,7 +65,7 @@ META="$REEVE_HOME/state/hung.meta"
 STATUS="$REEVE_HOME/errands/hung/status"
 LATCH="$REEVE_HOME/state/.wedged-hung"
 IDLE="$REEVE_HOME/state/.stale-hung"
-meta() { printf 'target=s|s:p1\nbackend=%s\noffice=artificer\nrepo=\nworktree=\nbranch=\nbase=main\nwrites=yes\ndispatched=2026-10-01T21:30:00\n' "${1:-stub}" > "$META"; }
+meta() { printf 'target=s|s:p1\nbackend=%s\noffice=mason\nrepo=\nworktree=\nbranch=\nbase=main\nwrites=yes\ndispatched=2026-10-01T21:30:00\n' "${1:-stub}" > "$META"; }
 meta
 
 # Two clocks, as in stale-watch.test.bash: REEVE_NOW frozen for the status

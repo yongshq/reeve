@@ -484,10 +484,9 @@ delivered_set() { # delivered_set <errand> <count>
 # session's errand.
 #
 # A terminal errand whose whole log has already been reported is no longer work
-# in flight for a WATCH, whatever is still on disk: an artificer keeps its copy
-# and branch until the liege lands them, and that wait is the liege's, not
-# something to keep polling over.
-#
+# in flight for a WATCH, whatever is still on disk: a mason keeps its copy and
+# branch until the liege lands them, and that wait is the liege's, not something
+# to keep polling over.
 # Two records answer that, and they are two different facts:
 #
 #   its cursor covers the log      a watch read it and said so, in
@@ -2281,6 +2280,17 @@ office_names() {
     [ "$n" = README ] && continue
     printf '%s\n' "$n"
   done
+}
+
+# office_canon <office> [<var>]   the office's current name, printed, or into
+# <var> with no subshell (the listing calls it for every errand). The mason was
+# the artificer until 2026-10, and errands sent out before then still record
+# office=artificer, so every reader of a record or of --office goes through
+# here. Only the name moved: their copies keep their artificer-<id> paths.
+office_canon() {
+  local o=$1
+  [ "$o" = artificer ] && o=mason
+  if [ -n "${2:-}" ]; then printf -v "$2" '%s' "$o"; else printf '%s\n' "$o"; fi
 }
 
 # --- the office default tier ------------------------------------------------

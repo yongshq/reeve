@@ -20,7 +20,7 @@ shape deserves which, are in `skills/errand/errand.md`.
 
 | Office | Model | Effort | Why |
 |---|---|---|---|
-| artificer | (none) | (none) | the skill's table splits this office: a rename or a migration a test proves is cheap, building something new or hunting a bug is default. Nothing the office alone settles, so the reeve still names it |
+| mason | (none) | (none) | the skill's table splits this office: a rename or a migration a test proves is cheap, building something new or hunting a bug is default. Nothing the office alone settles, so the reeve still names it |
 | scout | (none) | (none) | default tier, which is what naming nothing already gives |
 | warden | (none) | (none) | default, never cheap. Unset is what guarantees it: the harness default is the richest thing available, so the only thing a declaration here could do is make a review cheaper |
 | scribe | (none) | low | cheap: a pass over files the brief already names |
@@ -110,7 +110,7 @@ browser comes back as the household's own, not the machine's:
   errand still uses it, the watch and the caretaker restart it on their next poll if it died, and
   each hand's tools reconnect by themselves. `bin/reeve-browser status|start|stop` does the same by
   hand, and a stop by hand stays stopped until the next start or dispatch.
-- **Who:** an office whose settings allow `mcp__reeve-browser`. Today the artificer and the warden.
+- **Who:** an office whose settings allow `mcp__reeve-browser`. Today the mason and the warden.
 - **How:** `bin/reeve-dispatch` writes the server config into the errand directory, beside
   settings.json, and the harness's `browser_flag` passes it next to `--strict-mcp-config
   --no-chrome`.

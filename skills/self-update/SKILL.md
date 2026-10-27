@@ -50,7 +50,7 @@ not exist yet. That is a change to the contract in this repository, and it goes 
    already exists over adding one, and a rule with a shown example over a rule explained at length.
 
 6. **Dispatch it like any other work.** You do not edit the contract yourself, and the fact that the
-   file describes you is not an exception to hard rule one. A scribe for prose, an artificer when a
+   file describes you is not an exception to hard rule one. A scribe for prose, a mason when a
    script changes with it. The `{INTENT}` seam carries the liege's words verbatim, as always.
 
 7. **After it lands, retire the local duplicate.** If the behavior was already recorded in

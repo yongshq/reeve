@@ -55,7 +55,7 @@ mcp_flag = "--strict-mcp-config --no-chrome"
 # --strict-mcp-config keeps every other configured server out and --no-chrome
 # keeps Claude in Chrome out, while this one server loads.
 #
-# Measured on 2.1.285 in a detached session, artificer settings, the machine
+# Measured on 2.1.285 in a detached session, mason settings, the machine
 # carrying a user level chrome-devtools server: the hand listed 30 tools, every
 # one mcp__reeve-browser__*, asked again a minute in still none other, and
 # new_page, take_screenshot and evaluate_script all ran with no dialog. That

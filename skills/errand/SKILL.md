@@ -17,8 +17,8 @@ Send work out. Load this before dispatching anything, every time.
    dispatch into a repository the household has not been introduced to: the whole point of the
    registry is that a hand never edits the wrong project.
 2. **Which office.** Decide by what the hand is allowed to touch, not by how the request was
-   phrased. "Have a look at the auth bug" is a scout if the liege wants to understand it and an
-   artificer if they want it fixed. If that is genuinely unclear, that is worth one question.
+   phrased. "Have a look at the auth bug" is a scout if the liege wants to understand it and a
+   mason if they want it fixed. If that is genuinely unclear, that is worth one question.
 3. **Is this one errand or several.** Split when the work spans holdings, or when two parts would
    edit the same files. Two hands in one repository are fine; two hands in one file are a merge
    conflict you chose to create.
@@ -61,10 +61,10 @@ Spend where being wrong is expensive. Save where the work is mechanical and the 
 | Errand shape | Tier |
 |---|---|
 | scribe pass over files you already named | cheap |
-| artificer edit across known files: rename, formatting sweep, mechanical fix | cheap |
-| artificer migration a script performs and a test proves | cheap |
+| mason edit across known files: rename, formatting sweep, mechanical fix | cheap |
+| mason migration a script performs and a test proves | cheap |
 | steward pass over entries you already identified | cheap |
-| artificer building something new, or fixing a bug it must find first | default |
+| mason building something new, or fixing a bug it must find first | default |
 | scout root-causing from symptoms, or mapping an unfamiliar holding | default |
 | warden reviewing finished work | default, never cheap |
 | anything where the wrong answer reaches the liege as fact | default or richer |
@@ -80,8 +80,8 @@ seam. The tier sets the price per token, not the count.
 
 The office predicts most of that table, so each office declares its own default in
 `offices/README.md` and a dispatch that names no flag gets the office's tier rather than the richest
-thing going. Your flags still win. The artificer is the row that splits both ways, so that is the
-one office where the tier is still yours to name.
+thing going. Your flags still win. The mason is the row that splits both ways, so that is the one
+office where the tier is still yours to name.
 
 ### What actually reaches the hand
 

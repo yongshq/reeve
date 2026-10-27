@@ -65,7 +65,7 @@ for seam in '{INTENT}' '{SPEC}'; do
   fi
 done
 
-office=$(meta_get "$id" office)
+office=$(office_canon "$(meta_get "$id" office)")
 holding=$(meta_get "$id" holding)
 repo=$(meta_get "$id" repo)
 worktree=$(meta_get "$id" worktree)

@@ -72,7 +72,7 @@ STUB
 
 META="$REEVE_HOME/state/hung.meta"
 STATUS="$REEVE_HOME/errands/hung/status"
-printf 'target=s|s:p1\nbackend=stub\noffice=artificer\nrepo=\nworktree=\nbranch=\nbase=main\nwrites=yes\ndispatched=2026-10-01T21:30:00\n' > "$META"
+printf 'target=s|s:p1\nbackend=stub\noffice=mason\nrepo=\nworktree=\nbranch=\nbase=main\nwrites=yes\ndispatched=2026-10-01T21:30:00\n' > "$META"
 
 # One frozen clock for every process, so a backdated mtime is exactly as old as
 # the case says and never a second older.

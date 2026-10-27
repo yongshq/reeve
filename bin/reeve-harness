@@ -67,6 +67,7 @@ shq() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
 
 harness_resolve() {
   local want=${1:-} office=${2:-}
+  office=$(office_canon "$office")
   [ -n "$want" ] || want=${REEVE_HARNESS:-}
   [ -n "$want" ] || { [ -n "$office" ] && want=$(config_get "harness-$office" ''); }
   [ -n "$want" ] || want=$(config_get harness '')

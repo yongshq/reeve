@@ -47,7 +47,7 @@ STATUS="$REEVE_HOME/errands/hung/status"
 LATCH="$REEVE_HOME/state/.stale-hung"
 STEERED="$REEVE_HOME/state/.steered-hung"
 fresh() { # fresh [status lines...]   a live idle hand, a reported silence, an empty log of sends
-  printf 'target=s|s:p1\nbackend=stub\noffice=artificer\nrepo=\nworktree=\nbranch=\nbase=main\nwrites=yes\ndispatched=2026-10-01T21:30:00\n' > "$META"
+  printf 'target=s|s:p1\nbackend=stub\noffice=mason\nrepo=\nworktree=\nbranch=\nbase=main\nwrites=yes\ndispatched=2026-10-01T21:30:00\n' > "$META"
   if [ $# -gt 0 ]; then printf '%s\n' "$@" > "$STATUS"; else printf 'working: rewriting the parser\n' > "$STATUS"; fi
   printf '1 1 1 yes\n' > "$LATCH"
   rm -f "$STEERED"

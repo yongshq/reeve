@@ -122,12 +122,12 @@ fi
 # browser_wanted reads the allow rule, so the offices that get the server and
 # the offices pre-approved for its tools cannot drift apart. These pin which
 # offices that is today.
-wanted=$(for o in artificer warden scout scribe steward; do
+wanted=$(for o in mason warden scout scribe steward; do
   "$BASH" -c '. "$1/bin/reeve-lib.sh"; browser_wanted "$2"' _ "$ROOT" "$o" && printf '%s ' "$o"
 done)
-eq  "4 the builder and the reviewer, and nobody else" "$wanted" "artificer warden "
+eq  "4 the builder and the reviewer, and nobody else" "$wanted" "mason warden "
 server=$("$BASH" -c '. "$1/bin/reeve-lib.sh"; printf %s "$BROWSER_SERVER"' _ "$ROOT")
-for o in artificer warden; do
+for o in mason warden; do
   has "4 $o pre-approves the server's tools" "$(cat "$ROOT/offices/$o.settings.json")" \
       "\"mcp__$server\""
   if command -v python3 >/dev/null 2>&1; then

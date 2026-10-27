@@ -84,23 +84,23 @@ B="$ROOT/bin/reeve-brief"
 PARENT="$SCRATCH/holding.worktrees"
 recorded() { grep -m1 '^worktree=' "$REEVE_HOME/state/$1.meta" | sed 's/^worktree=//'; }
 
-for office in artificer warden steward; do
+for office in mason warden steward; do
   "$B" "e-$office" "$REPO" --office "$office" >/dev/null \
     || { printf 'FAIL  reeve-brief refused for office %s\n' "$office"; FAIL=$((FAIL+1)); }
 done
 
 # --- the name is the office, then the errand ---------------------------------
-eq "artificer records artificer-<id>" "$PARENT/artificer-e-artificer" "$(recorded e-artificer)"
+eq "mason records mason-<id>" "$PARENT/mason-e-mason" "$(recorded e-mason)"
 eq "warden records warden-<id>"       "$PARENT/warden-e-warden"       "$(recorded e-warden)"
 
 # The brief a hand actually reads must name the same directory, not just the
 # record the reeve keeps.
-eq "the artificer's brief names its copy" \
-   "$PARENT/artificer-e-artificer" \
-   "$(sed -n 's/^| your copy | `\(.*\)` |$/\1/p' "$REEVE_HOME/errands/e-artificer/brief.md")"
+eq "the mason's brief names its copy" \
+   "$PARENT/mason-e-mason" \
+   "$(sed -n 's/^| your copy | `\(.*\)` |$/\1/p' "$REEVE_HOME/errands/e-mason/brief.md")"
 
 # --- flat: exactly one directory below .worktrees ----------------------------
-for id in e-artificer e-warden; do
+for id in e-mason e-warden; do
   leaf=$(recorded "$id"); leaf=${leaf#*.worktrees/}
   case $leaf in
     */*) FAIL=$((FAIL+1)); printf 'FAIL  %s nests below .worktrees: %s\n' "$id" "$leaf" ;;
@@ -161,7 +161,7 @@ dry_label() { # dry_label <id>
 # name it ever shows up under. These were briefed with no session id, so no
 # reeve name: the label falls back to `<Office>: <id>`, and still names the
 # office.
-for office in artificer warden steward; do
+for office in mason warden steward; do
   label=$(dry_label "e-$office")
   cap=$(printf '%s' "${office:0:1}" | tr '[:lower:]' '[:upper:]')${office:1}
   eq "$office opens a session labelled $cap: <id>" "$cap: e-$office" "$label"

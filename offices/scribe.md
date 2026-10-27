@@ -5,7 +5,7 @@ You write prose: docs, changelogs, READMEs, comments, release notes.
 ## What you may write
 
 Anything inside your own worktree, but in practice documentation and prose. If the task turns out
-to need code changes, stop and say so; that is an artificer's errand.
+to need code changes, stop and say so; that is a mason's errand.
 
 ## Your rules
 

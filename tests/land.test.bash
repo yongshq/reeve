@@ -88,15 +88,15 @@ holding() {
   printf -- '- holding: %s | manor: m | path: %s | base: main\n' "$1" "$repo" \
     >> "$REEVE_HOME/manors.md"
 }
-# errand <id> <base> [status line]: what bin/reeve-dispatch leaves for an
-# artificer, a copy on a new branch off <base> and the record naming it as
+# errand <id> <base> [status line]: what bin/reeve-dispatch leaves for a
+# mason, a copy on a new branch off <base> and the record naming it as
 # born, then one commit in the copy. The status line defaults to done.
 errand() {
   local id=$1 base=$2 line=${3:-done: built}
   local wt="$SCRATCH/$(basename "$repo").worktrees/$id" br="feat/$id"
   git -C "$repo" worktree add -q "$wt" -b "$br" "$base"
   mkdir -p "$REEVE_HOME/errands/$id"
-  printf 'office=artificer\nholding=%s\nrepo=%s\nworktree=%s\nbranch=%s\nbase=%s\n' \
+  printf 'office=mason\nholding=%s\nrepo=%s\nworktree=%s\nbranch=%s\nbase=%s\n' \
     "$(basename "$repo")" "$repo" "$wt" "$br" "$base" > "$REEVE_HOME/state/$id.meta"
   printf 'writes=yes\ndispatched=2026-10-14T10:00:00\nsession=%s\nbranchMade=%s\n' \
     "${OWNER:-}" "$(. "$ROOT/bin/reeve-lib.sh"; branch_birth "$repo" "$br")" \
@@ -196,7 +196,7 @@ ck_eq  "3 and changed nothing"                "$(snapshot)" "$before"
 git -C "$repo" worktree remove "$SCRATCH/elsewhere"; git -C "$repo" checkout -q main
 
 git -C "$repo" branch liege/x main
-printf 'office=artificer\nholding=three\nrepo=%s\nbranch=liege/x\nbranchMade=%s\n' "$repo" \
+printf 'office=mason\nholding=three\nrepo=%s\nbranch=liege/x\nbranchMade=%s\n' "$repo" \
   "0000000000000000000000000000000000000000 0" > "$REEVE_HOME/state/forged.meta"
 mkdir -p "$REEVE_HOME/errands/forged"; printf 'done: x\n' > "$REEVE_HOME/errands/forged/status"
 before=$(snapshot); land forged
@@ -522,7 +522,7 @@ ck_eq  "12 feat/d2 stays"                      "$(has_br feat/d2)" yes
 OUT=$("$ROOT/bin/reeve-teardown" c2 2>&1); RC=$?
 ck_eq  "12 teardown refuses work only on a liege branch" "$RC" 3
 # A dev an errand record names as its branch= is an errand's, never a landing place.
-printf 'office=artificer\nholding=thirteen-sweep\nrepo=%s\nbranch=dev\n' "$repo" \
+printf 'office=mason\nholding=thirteen-sweep\nrepo=%s\nbranch=dev\n' "$repo" \
   > "$REEVE_HOME/state/odd.meta"
 errand f2 main
 git -C "$repo" fetch -q . feat/f2:dev
@@ -665,7 +665,7 @@ ck_eq  "17 feat/y stays"                       "$(has_br feat/y)" yes
 # is no landing place, cached or not.
 errand w main
 git -C "$repo" branch dev feat/w
-printf 'office=artificer\nholding=seventeen\nrepo=%s\nbranch=dev\nbase=main\n' "$repo" \
+printf 'office=mason\nholding=seventeen\nrepo=%s\nbranch=dev\nbase=main\n' "$repo" \
   > "$REEVE_HOME/state/devs.meta"
 OUT=$(REEVE_LONG_LIVED="$repo_p	main	main dev" "$ROOT/bin/reeve-teardown" w 2>&1); RC=$?
 ck_eq  "17 a dev some record names, cached: refused" "$RC" 3

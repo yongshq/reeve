@@ -96,7 +96,7 @@ nas "2 no grant is announced"                 "$OUT" "other holding(s) in manor"
 eq  "2 exactly one directory is granted"      "$(printf '%s' "$OUT" | grep -o -- '--add-dir' | wc -l | tr -d ' ')" 1
 
 echo "--- 3. the write half is taken back, in the errand's own settings ---"
-"$ROOT/bin/reeve-brief" build web --office artificer >/dev/null 2>&1
+"$ROOT/bin/reeve-brief" build web --office mason >/dev/null 2>&1
 b="$REEVE_HOME/errands/build/brief.md"; sed -e 's/{INTENT}/x/' -e 's/{SPEC}/y/' "$b" > "$b.f" && mv "$b.f" "$b"
 OUT=$(REEVE_ROOT="$STUB" "$ROOT/bin/reeve-dispatch" build --backend stub --harness stub 2>&1)
 S="$REEVE_HOME/errands/build/settings.json"
@@ -114,7 +114,7 @@ nas "3 never the settings-relative form"      "$deny" "Edit(/$(cd "$SCRATCH/api"
 # none.
 nas "3 no rule the harness would ignore"      "$deny" "Write("
 nas "3 nor a Glob one"                        "$deny" "Glob("
-eq  "3 the office's own file is untouched"    "$(grep -c 'deny' "$STUB/offices/artificer.settings.json")" 0
+eq  "3 the office's own file is untouched"    "$(grep -c 'deny' "$STUB/offices/mason.settings.json")" 0
 
 echo "--- 4. a dry run still writes nothing ---"
 "$ROOT/bin/reeve-brief" peek web --office scout >/dev/null 2>&1
