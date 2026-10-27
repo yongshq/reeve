@@ -487,6 +487,7 @@ delivered_set() { # delivered_set <errand> <count>
 # in flight for a WATCH, whatever is still on disk: a mason keeps its copy and
 # branch until the liege lands them, and that wait is the liege's, not something
 # to keep polling over.
+#
 # Two records answer that, and they are two different facts:
 #
 #   its cursor covers the log      a watch read it and said so, in

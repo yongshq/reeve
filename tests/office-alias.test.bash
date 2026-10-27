@@ -10,6 +10,8 @@
 #   2. `reeve-brief --office artificer` briefs a mason, with one stderr line
 #      naming the old name: the record, the brief and the copy all say mason
 #   3. reeve-listing and reeve-status show mason for an office=artificer record
+#   4. a mason's harness still reads config/harness-artificer when no
+#      config/harness-mason is set, and config/harness-mason wins over it
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 PASS=0; FAIL=0
 ok()  { PASS=$((PASS+1)); printf 'ok    %s\n' "$1"; }
@@ -72,6 +74,17 @@ eq  "3 the status table shows mason"     "$(printf '%s\n' "$out" | awk '$1 == "o
 out=$("$ROOT/bin/reeve-status" old-rec --no-wake 2>/dev/null)
 has "3 and so does one errand's status"  "$out" 'office    mason on'
 eq  "3 the record is left as it was"     "$(sed -n 's/^office=//p' "$REEVE_HOME/state/old-rec.meta")" artificer
+
+echo "--- 4. the old config name still picks a mason's harness ---"
+unset REEVE_HARNESS
+mkdir -p "$REEVE_HOME/config"
+printf 'codex\n' > "$REEVE_HOME/config/harness-artificer"
+eq  "4 harness-artificer alone picks it" "$("$ROOT/bin/reeve-harness" resolve --office mason)" codex
+eq  "4 and for an old-name record too"   "$("$ROOT/bin/reeve-harness" resolve --office artificer)" codex
+eq  "4 never for another office"         "$("$ROOT/bin/reeve-harness" resolve --office scout)" claude
+printf 'pi\n' > "$REEVE_HOME/config/harness-mason"
+eq  "4 harness-mason wins over it"       "$("$ROOT/bin/reeve-harness" resolve --office mason)" pi
+rm -f "$REEVE_HOME/config/harness-artificer" "$REEVE_HOME/config/harness-mason"
 
 echo "passed=$PASS failed=$FAIL"
 [ "$FAIL" -eq 0 ]

@@ -70,6 +70,9 @@ harness_resolve() {
   office=$(office_canon "$office")
   [ -n "$want" ] || want=${REEVE_HARNESS:-}
   [ -n "$want" ] || { [ -n "$office" ] && want=$(config_get "harness-$office" ''); }
+  # The mason was the artificer until 2026-10 (see office_canon), so a machine
+  # configured before then still names it config/harness-artificer.
+  [ -n "$want" ] || { [ "$office" = mason ] && want=$(config_get harness-artificer ''); }
   [ -n "$want" ] || want=$(config_get harness '')
   [ -n "$want" ] || want=claude
   lines_has "$want" "$(harness_known)" \
